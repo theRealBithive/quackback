@@ -2,7 +2,7 @@
  * GitLab OAuth utilities.
  */
 
-import { GITLAB_COM_ORIGIN, normalizeGitLabInstanceUrl } from '@/integrations/gitlab/server/url'
+import { normalizeGitLabInstanceUrl } from '@/integrations/gitlab/server/url'
 import { gitlabFetch } from '@/integrations/gitlab/server/fetch'
 
 function instanceOrigin(credentials?: Record<string, string>): string {
@@ -96,9 +96,12 @@ export async function exchangeGitLabCode(
     config: {
       workspaceName: user?.name || user?.username || 'GitLab',
       // Persist the origin so hook / archive / project listing talk to the
-      // same instance without a credentials lookup. Omit when defaulting
-      // to gitlab.com so existing connections stay unchanged.
-      ...(origin !== GITLAB_COM_ORIGIN ? { instanceUrl: origin } : {}),
+      // same instance without a credentials lookup. Always stated, including
+      // for gitlab.com: mergeIntegrationConfig overlays and never deletes, so
+      // omitting the key on the default would leave a previously stored
+      // self-hosted origin in force — OAuth against gitlab.com, issues still
+      // created on the old instance, with no way back short of disconnecting.
+      instanceUrl: origin,
     },
   }
 }

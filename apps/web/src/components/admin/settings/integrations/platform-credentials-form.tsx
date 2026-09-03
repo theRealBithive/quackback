@@ -33,7 +33,19 @@ export function PlatformCredentialsForm({
   const deleteMutation = useDeletePlatformCredentials()
 
   const handleStartEdit = () => {
-    setValues({})
+    // Seed the form with what is already stored, so a value the admin does not
+    // touch survives the save — the server drops blank optional fields, which
+    // is how rotating a secret used to silently discard a self-hosted instance
+    // URL. Secrets are left empty: they come back masked and have to be
+    // retyped deliberately, while non-secret values are shown in full in the
+    // read view a moment earlier anyway.
+    const prefill: Record<string, string> = {}
+    for (const field of fields) {
+      if (field.sensitive) continue
+      const stored = maskedFields?.[field.key]
+      if (stored) prefill[field.key] = stored
+    }
+    setValues(prefill)
     setIsEditing(true)
   }
 

@@ -68,7 +68,17 @@ describe('getGitLabOAuthUrl', () => {
 })
 
 describe('exchangeGitLabCode', () => {
-  it('exchanges against gitlab.com and omits instanceUrl from config', async () => {
+  /**
+   * Contract: V2 — remove the instance URL, reconnect, and the integration
+   * talks to gitlab.com again.
+   *
+   * This assertion used to pin the opposite ("omits instanceUrl on
+   * gitlab.com"). That described the code, not the contract, and it froze a
+   * bug: mergeIntegrationConfig only overlays, so an omitted key left the
+   * previous self-hosted origin in place and every issue kept going to the
+   * old instance while OAuth ran against gitlab.com.
+   */
+  it('exchanges against gitlab.com and records gitlab.com as the instance (V2)', async () => {
     vi.stubGlobal(
       'fetch',
       mockFetch([
@@ -93,8 +103,10 @@ describe('exchangeGitLabCode', () => {
     )
 
     expect(result.accessToken).toBe('tok')
-    expect(result.config).toEqual({ workspaceName: 'Ada' })
-    expect(result.config).not.toHaveProperty('instanceUrl')
+    expect(result.config).toEqual({
+      workspaceName: 'Ada',
+      instanceUrl: 'https://gitlab.com',
+    })
   })
 
   it('exchanges against a custom instance and persists the origin', async () => {
