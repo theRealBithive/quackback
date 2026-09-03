@@ -127,10 +127,27 @@ export interface EventDispatchDeps {
   enqueue?: typeof enqueueHookJobsWithIds
 }
 
+/**
+ * Fill the sink registry before the first resolve.
+ *
+ * `resolveTargets` reads a module-level array that only `registerAllResolvers()`
+ * populates. Its former caller — `getHookTargets()` in targets.ts — lost its
+ * last production call site in the WO-18 cutover, so nothing filled the registry
+ * any more and every event resolved to zero targets: published, no hook jobs, no
+ * error. Dynamic import for the same reason targets.ts used one — the
+ * notification resolver imports targets.ts, so a static import here would pull
+ * the resolver graph into every module that emits an event.
+ */
+async function ensureResolversRegistered(): Promise<void> {
+  const { registerAllResolvers } = await import('./resolvers')
+  registerAllResolvers()
+}
+
 export async function runEventDispatch(
   job: ClaimedJob,
   deps: EventDispatchDeps = {}
 ): Promise<void> {
+  if (!deps.resolve) await ensureResolversRegistered()
   const resolve = deps.resolve ?? resolveTargets
   const enqueue = deps.enqueue ?? enqueueHookJobsWithIds
 
