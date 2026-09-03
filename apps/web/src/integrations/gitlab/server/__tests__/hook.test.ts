@@ -39,6 +39,35 @@ function makePostCreatedEvent(): PostCreatedEvent {
 
 const target = { channelId: '42' }
 
+/**
+ * Contract: V10 — a comment that arrived from GitLab never causes anything to
+ * be written back to GitLab.
+ *
+ * Comment sync imports GitLab notes as post comments, and creating a comment
+ * emits `comment.created`, which fans out to this hook like any other event.
+ * Today the hook writes only for `post.created`, so the loop cannot close —
+ * this pins that, so adding an outbound comment push has to confront the echo
+ * deliberately rather than shipping an infinite ping-pong.
+ */
+describe('gitlabHook.run leaves everything but post.created alone (V10)', () => {
+  it.each(['comment.created', 'post.status_changed', 'post.updated'])(
+    'writes nothing to GitLab for %s',
+    async (type) => {
+      const fetchMock = mockFetch(201, { iid: 1, web_url: 'https://gitlab.example.com/i/1' })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const event = { ...makePostCreatedEvent(), type } as unknown as EventData
+      const result = await gitlabHook.run(event, target, {
+        accessToken: 'token',
+        rootUrl: 'https://app.example.com',
+      })
+
+      expect(result.success).toBe(true)
+      expect(fetchMock).not.toHaveBeenCalled()
+    }
+  )
+})
+
 beforeEach(() => {
   vi.restoreAllMocks()
 })

@@ -290,6 +290,13 @@ export const postComments = pgTable(
     })
       .notNull()
       .default('published'),
+    // Provenance for a comment imported from a linked external issue (a
+    // GitLab note, say). NULL on everything written inside Quackback. The
+    // pair is unique so a redelivered provider webhook cannot post the same
+    // remote comment twice — the constraint, not a check-then-insert, is what
+    // makes the import idempotent.
+    externalIntegrationType: varchar('external_integration_type', { length: 50 }),
+    externalId: text('external_id'),
   },
   (table) => [
     foreignKey({
@@ -313,6 +320,11 @@ export const postComments = pgTable(
     index('post_comments_deleted_by_principal_idx')
       .on(table.deletedByPrincipalId)
       .where(sql`"deleted_by_principal_id" IS NOT NULL`),
+    // Idempotency for imported comments; partial so ordinary comments (both
+    // columns NULL) are not covered by it.
+    uniqueIndex('post_comments_external_unique')
+      .on(table.externalIntegrationType, table.externalId)
+      .where(sql`"external_id" IS NOT NULL`),
   ]
 )
 

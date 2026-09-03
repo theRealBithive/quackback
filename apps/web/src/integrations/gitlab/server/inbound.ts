@@ -1,13 +1,30 @@
 /**
  * GitLab inbound webhook handler.
- * Receives issue state change events for two-way status sync.
+ * Receives issue state change events for two-way status sync, and issue notes
+ * for comment sync.
  */
 
 import { timingSafeEqual } from 'crypto'
 import type {
+  InboundCommentResult,
   InboundWebhookHandler,
   InboundWebhookResult,
 } from '@/lib/server/integrations/inbound-types'
+
+/** The slice of a GitLab "Note Hook" body this handler reads. */
+interface GitLabNotePayload {
+  object_kind?: string
+  user?: { name?: string }
+  object_attributes?: {
+    id?: number
+    note?: string
+    noteable_type?: string
+    system?: boolean
+    internal?: boolean
+    action?: string
+  }
+  issue?: { iid?: number; confidential?: boolean }
+}
 
 export const gitlabInboundHandler: InboundWebhookHandler = {
   async verifySignature(request: Request, _body: string, secret: string): Promise<true | Response> {
@@ -57,6 +74,49 @@ export const gitlabInboundHandler: InboundWebhookHandler = {
       externalId: String(iid),
       externalStatus,
       eventType: 'issue.state_changed',
+    }
+  },
+
+  async parseComment(body: string): Promise<InboundCommentResult | null> {
+    let payload: GitLabNotePayload
+    try {
+      payload = JSON.parse(body) as GitLabNotePayload
+    } catch {
+      return null
+    }
+
+    if (payload.object_kind !== 'note') return null
+
+    const note = payload.object_attributes
+    if (!note) return null
+
+    // Only what a person typed on an issue, and only when they typed it.
+    if (note.noteable_type !== 'Issue') return null
+    if (note.system === true) return null
+    if (note.internal === true) return null
+    if (note.action !== 'create') return null
+
+    // A confidential issue is readable by fewer people in GitLab than a team
+    // member in Quackback; importing its discussion would widen the audience.
+    if (payload.issue?.confidential === true) return null
+
+    const issueIid = payload.issue?.iid
+    if (typeof issueIid !== 'number') return null
+
+    const text = typeof note.note === 'string' ? note.note.trim() : ''
+    if (!text) return null
+
+    if (typeof note.id !== 'number') return null
+
+    // Name only. The payload also carries the author's email address, which
+    // has no business crossing into Quackback.
+    const authorName = payload.user?.name?.trim() || 'GitLab user'
+
+    return {
+      externalId: String(issueIid),
+      externalCommentId: String(note.id),
+      authorName,
+      body: text,
     }
   },
 }

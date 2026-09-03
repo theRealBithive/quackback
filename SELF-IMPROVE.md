@@ -17,8 +17,8 @@ Die Diagnose kostete rund fünfzehn Turns und mehrere DB-Runden über `events`,
 richtige Richtung zeigte. Was gefehlt hat:
 
 - Eine Warnung in `resolveTargets`, wenn die Registry leer ist. Ein leeres Register ist
-  in einem laufenden Tier immer ein Bug, nie ein gültiger Zustand. *(In diesem Lauf
-  nachgezogen — die beiden folgenden Punkte fehlen weiterhin.)*
+  in einem laufenden Tier immer ein Bug, nie ein gültiger Zustand. _(In diesem Lauf
+  nachgezogen — die beiden folgenden Punkte fehlen weiterhin.)_
 - Eine Boot-Log-Zeile, die die registrierten Sinks auflistet — analog zu
   `job.worker_started`.
 - Ein Admin-Surface für `listResolvers()`. Der Kommentar in `registry.ts:71` nennt es
@@ -38,3 +38,49 @@ Zustellversuch, Grund des Verwerfens — würde diesen Ablauf auf einen Blick re
 Die Spalten dafür existieren teilweise schon (`last_outbound_at`, `last_error`), werden
 aber nur beim tatsächlichen HTTP-Call geschrieben, also genau dann nicht, wenn das
 Problem davor liegt.
+
+## 1x — `db:generate` ist kaputt, Migrationen müssen von Hand geschrieben werden
+
+`bun run db:generate` bricht ab mit `[drizzle/meta/0050_snapshot.json, 0051, 0052] are
+pointing to a parent snapshot: ... which is a collision.` Die Snapshots enden bei 0052,
+die Migrationen laufen bis 0273 — der generierte Pfad wurde vor langer Zeit verlassen.
+Tatsächlich üblich ist: SQL-Datei von Hand in `packages/db/drizzle/` anlegen (mit
+`IF NOT EXISTS`, wie 0272) und in `drizzle/meta/_journal.json` einen Eintrag anhängen
+(`idx` +1, `when` +1, `tag` = Dateiname ohne `.sql`).
+
+Nichts im Repo sagt das. Entweder die Snapshot-Kollision reparieren oder den
+`db:generate`-Skripteintrag entfernen und das Handverfahren in `packages/db/README`
+festhalten — sonst probiert es jeder neu und verliert dieselbe Runde.
+
+## 1x — Lokaler `typecheck` meldet 815 vorbestehende Fehler
+
+`bun run typecheck` liefert auf einem **sauberen** Tree 815 `error TS`, fast alle in
+`apps/web/src/routes/**`, weil die generierten Route-Typen lokal nicht gebaut sind. Ob
+die eigene Änderung einen Fehler hinzugefügt hat, lässt sich nur feststellen, indem man
+stasht, die Fehler zählt, zurückholt und wieder zählt.
+
+Entweder den Codegen-Schritt in das `typecheck`-Skript ziehen oder dokumentieren, welcher
+Befehl vorher laufen muss.
+
+## 1x — Kein dokumentierter Weg zur lokalen Test-Datenbank
+
+Die DB-gestützten Suites brauchen Postgres auf `localhost:5432`, Datenbank
+`quackback_test`, migriert. Das steht nirgends zusammenhängend, und der naheliegende
+Versuch scheitert: `postgres:16` bricht mitten in der Migration mit
+`extension "vector" is not available` ab. Richtig ist `pgvector/pgvector:pg17` (steht nur
+in `.github/workflows/ci.yml`), danach
+`DATABASE_URL=postgresql://postgres:password@localhost:5432/quackback_test bun run db:migrate`.
+
+Verschärfend: fehlt die DB oder ist das Schema veraltet, **überspringt** das Fixture die
+Suite lautlos (`describe.skipIf(!fixture.available)`). Der Lauf sieht grün aus und hat
+nichts geprüft — in diesem Lauf zeigte er `12 skipped`, was man leicht als Erfolg liest.
+Ein `docker compose -f compose.test.yml up -d` plus ein Hinweis in der Ausgabe, wenn eine
+Suite mangels DB übersprungen wurde, würde beides erledigen.
+
+## 1x — Keine Property-Test- und Mutation-Infrastruktur
+
+Für nicht-triviale Logik (hier: das Parsen fremder Webhook-Payloads) fehlen die Werkzeuge.
+`fast-check` wurde in diesem Lauf als devDependency ergänzt; ein Mutation-Runner
+(Stryker) fehlt weiterhin, die Mutanten mussten mit einem Wegwerf-Skript von Hand gesetzt
+werden. Solange das so bleibt, ist die Mutation-Zahl in jedem Bericht handgemacht und
+nicht reproduzierbar.

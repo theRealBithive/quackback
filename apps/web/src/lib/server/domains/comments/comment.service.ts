@@ -183,6 +183,8 @@ export async function createComment(
           moderationState: initialModerationState,
           statusChangeFromId: prevStatus?.id ?? null,
           statusChangeToId: newStatus.id,
+          externalIntegrationType: input.external?.integrationType ?? null,
+          externalId: input.external?.externalId ?? null,
           ...(input.createdAt && { createdAt: input.createdAt }),
         })
         .returning()
@@ -245,6 +247,8 @@ export async function createComment(
           isTeamMember: authorIsTeamMember,
           isPrivate,
           moderationState: initialModerationState,
+          externalIntegrationType: input.external?.integrationType ?? null,
+          externalId: input.external?.externalId ?? null,
           ...(input.createdAt && { createdAt: input.createdAt }),
         })
         .returning()

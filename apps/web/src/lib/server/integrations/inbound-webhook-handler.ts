@@ -34,7 +34,7 @@ import type { Actor } from '@/lib/server/policy/types'
 import { PERMISSIONS } from '@/lib/shared/permissions'
 import { readTextBodyOr413, MAX_WEBHOOK_BODY_BYTES } from '@/lib/server/utils/read-body'
 import type { PostId, PostStatusId, PrincipalId, TicketId } from '@quackback/ids'
-import type { InboundWebhookResult } from './inbound-types'
+import type { InboundCommentResult, InboundWebhookResult } from './inbound-types'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'inbound-webhook' })
@@ -129,6 +129,19 @@ export async function handleInboundWebhook(
     }
   }
 
+  // Comment sync is a second, independent consumer of the same webhook. It
+  // must run even when parseStatusChange returns null (a note is not a status
+  // change) and must never turn a delivery into an error the provider retries
+  // (V11).
+  if (definition.inbound.parseComment) {
+    try {
+      const comment = await definition.inbound.parseComment(body, config, secrets)
+      if (comment) await applyInboundComment(integration, integrationType, comment)
+    } catch (error) {
+      log.error({ err: error, integration_type: integrationType }, 'inbound comment branch failed')
+    }
+  }
+
   // Parse the webhook payload for a status change
   const result = await definition.inbound.parseStatusChange(body, config, secrets)
   if (!result) {
@@ -170,6 +183,101 @@ export async function handleInboundWebhook(
     .catch(() => {})
 
   return new Response('OK', { status: 200 })
+}
+
+/** Postgres unique-violation — the remote comment is already imported. */
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === '23505'
+}
+
+/**
+ * Comment branch: reverse-look-up post_external_links by external issue ID and
+ * write the remote comment onto the post as a team-only comment.
+ *
+ * Team-only by design: the portal is public, and a note on the linked issue is
+ * developer discussion that nobody chose to publish.
+ */
+async function applyInboundComment(
+  integration: IntegrationRow,
+  integrationType: string,
+  result: InboundCommentResult
+): Promise<void> {
+  const link = await db.query.postExternalLinks.findFirst({
+    where: and(
+      eq(postExternalLinks.integrationType, integrationType),
+      eq(postExternalLinks.externalId, result.externalId)
+    ),
+  })
+  if (!link) {
+    log.debug(
+      { integration_type: integrationType, external_id: result.externalId },
+      'no linked post for external id, ignoring comment'
+    )
+    return
+  }
+
+  if (!integration.principalId) {
+    log.error(
+      { integration_type: integrationType },
+      'integration has no service principal, skipping comment import'
+    )
+    return
+  }
+
+  const { createComment } = await import('@/lib/server/domains/comments/comment.service')
+  const actor: Actor = {
+    principalId: integration.principalId as PrincipalId,
+    // A team role, so the comment may be private and skips moderation. The
+    // service principal owns the comment either way (V8).
+    role: 'member',
+    principalType: 'service',
+    segmentIds: new Set(),
+  }
+
+  try {
+    await createComment(
+      {
+        postId: link.postId as PostId,
+        content: composeImportedComment(integrationType, result),
+        isPrivate: true,
+        external: { integrationType, externalId: result.externalCommentId },
+      },
+      { principalId: integration.principalId as PrincipalId, role: 'member' },
+      actor
+    )
+    log.info(
+      {
+        post_id: link.postId,
+        integration_type: integrationType,
+        external_comment_id: result.externalCommentId,
+      },
+      'inbound comment imported'
+    )
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      log.debug(
+        { integration_type: integrationType, external_comment_id: result.externalCommentId },
+        'comment already imported, redelivery ignored'
+      )
+      return
+    }
+    throw error
+  }
+}
+
+/**
+ * The stored comment body: who wrote it on the provider side, then their text
+ * verbatim. The author's name only — the provider payload also carries their
+ * email address, which has no business crossing into Quackback (V7).
+ *
+ * createComment rejects anything over 5,000 characters, so an unusually long
+ * remote comment is cut rather than dropped.
+ */
+function composeImportedComment(integrationType: string, result: InboundCommentResult): string {
+  const header = `**${result.authorName}** commented on ${providerName(integrationType)}:`
+  const budget = 5000 - header.length - '\n\n'.length - ' […]'.length
+  const body = result.body.length > budget ? `${result.body.slice(0, budget)} […]` : result.body
+  return `${header}\n\n${body}`
 }
 
 /**

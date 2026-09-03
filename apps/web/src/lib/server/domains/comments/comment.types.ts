@@ -23,6 +23,14 @@ export interface CreateCommentInput {
   isPrivate?: boolean
   /** Override creation timestamp (admin-only, for imports) */
   createdAt?: Date
+  /**
+   * Set when the comment was imported from a linked external issue. The
+   * partial unique index on (integration type, external id) is what makes a
+   * redelivered provider webhook a no-op instead of a duplicate, so this has
+   * to reach the INSERT itself — stamping it afterwards would leave the race
+   * open.
+   */
+  external?: { integrationType: string; externalId: string }
 }
 
 /**
