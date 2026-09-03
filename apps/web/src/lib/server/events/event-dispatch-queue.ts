@@ -17,6 +17,7 @@ import { SINGLE_WORKSPACE_KEY } from '@/lib/server/workspaces/after-commit'
 import { getCurrentWorkspace } from '@/lib/server/workspaces/workspace-context'
 import { enqueueHookJobsWithIds } from './process'
 import { hydrateEvent, MAX_DEPTH, MAX_STRICT_RESOLVE_ATTEMPTS } from './outbox'
+import { registerAllResolvers } from './resolvers'
 import { resolveTargets } from './resolvers/registry'
 import { toLegacyEvent } from './to-legacy-event'
 import crypto from 'crypto'
@@ -127,27 +128,19 @@ export interface EventDispatchDeps {
   enqueue?: typeof enqueueHookJobsWithIds
 }
 
-/**
- * Fill the sink registry before the first resolve.
- *
- * `resolveTargets` reads a module-level array that only `registerAllResolvers()`
- * populates. Its former caller — `getHookTargets()` in targets.ts — lost its
- * last production call site in the WO-18 cutover, so nothing filled the registry
- * any more and every event resolved to zero targets: published, no hook jobs, no
- * error. Dynamic import for the same reason targets.ts used one — the
- * notification resolver imports targets.ts, so a static import here would pull
- * the resolver graph into every module that emits an event.
- */
-async function ensureResolversRegistered(): Promise<void> {
-  const { registerAllResolvers } = await import('./resolvers')
-  registerAllResolvers()
-}
-
 export async function runEventDispatch(
   job: ClaimedJob,
   deps: EventDispatchDeps = {}
 ): Promise<void> {
-  if (!deps.resolve) await ensureResolversRegistered()
+  // Fill the sink registry before the first resolve. `resolveTargets` reads a
+  // module-level array that only `registerAllResolvers()` populates, and its
+  // former caller — `getHookTargets()` in targets.ts — lost its last production
+  // call site in the WO-18 cutover. Nothing filled the registry any more, so
+  // every event resolved to zero targets: published, no hook jobs, no error.
+  // Idempotent, and the import above is static on purpose: a call-time
+  // `import()` here would load the resolver graph inside a per-pass workspace
+  // scope (see jobs/__tests__/handler-imports.test.ts).
+  if (!deps.resolve) registerAllResolvers()
   const resolve = deps.resolve ?? resolveTargets
   const enqueue = deps.enqueue ?? enqueueHookJobsWithIds
 
