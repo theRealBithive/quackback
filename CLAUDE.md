@@ -113,9 +113,15 @@ REQUIRE_TEST_DB=1 DATABASE_URL=postgresql://postgres:password@localhost:5432/qua
 
 Leave it unset on a laptop and the old behaviour is back: suites without a
 database skip and the run stays green. The guarantees are numbered in
-`apps/web/src/lib/server/__tests__/db-fixture-infra-gate.test.ts`; the ~19
-suites that carry their own `pickWorkingDb` copy instead of the fixture are
-still outside the gate and still skip silently.
+`apps/web/src/lib/server/__tests__/db-fixture-infra-gate.test.ts`.
+
+The check runs in `apps/web/vitest.global-setup.ts`, once, before any test file
+loads — so it covers the suites that use the fixture, the 25 that open their own
+connection, and anything added later. It verifies two things: that a database
+answers, and that its applied-migration count is not behind
+`packages/db/drizzle/meta/_journal.json`. A database that merely lags the
+migrations connects fine and turns every per-file schema probe into a skip,
+which is the failure it exists for.
 
 ## Migrations
 

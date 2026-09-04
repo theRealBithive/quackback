@@ -19,6 +19,38 @@ runner would have listed those in one command instead of one bespoke script per
 change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
 transiently and `package.json`/`bun.lock` restored afterwards, every time.
 
+## 2x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
+
+Three wasted turns diagnosing an env-leakage question, all of them spent on the
+test runner rather than the question:
+
+- `--reporter=basic` is gone in vitest 4 and fails as
+  `Failed to load custom Reporter from basic`, which reads like a missing file.
+- `--poolOptions.forks.singleFork` is gone too — `Unknown option --poolOptions`.
+  Sequential-in-one-worker is now `--maxWorkers=1 --fileParallelism=false`.
+- `console.log` inside a test never reaches the terminal, even with
+  `--silent=false`. A throwaway probe has to _assert_ what it wants to report
+  and read the value out of the assertion diff.
+
+Worth knowing while writing such a probe: the `forks` pool leaves `isolate` at
+its default, so every test file gets a fresh process and **no** `process.env`
+write crosses files — not even a raw one. Measured, not assumed: a control file
+that stubbed the env and never restored it left the next file untouched, and the
+two files reported different pids. Env hygiene between files is therefore not a
+real hazard here, and `vi.stubEnv` is worth using for the day someone sets
+`isolate: false`, not for today.
+
+Second run, a different corner of the same tool. A `globalSetup` file resolves
+its own imports **from its own location**, not from the config that registers
+it — and bun workspaces do not hoist third-party dependencies to the repo root,
+so a setup file at the root cannot import `drizzle-orm` at all
+(`ERR_MODULE_NOT_FOUND`, raised before the setup body runs, which breaks every
+suite in the repo at once). The workspace packages are worse: `node_modules/@quackback/`
+does not exist, and `@quackback/db/client` resolves **only** through the `alias`
+block in `vitest.config.ts`, which applies to test modules and not to
+globalSetup. A file shared by both configs therefore has to live inside
+`apps/web` and import `../../packages/db/src/client` by path. Three turns.
+
 ## 1x — The event fan-out can be completely dead without anything saying so
 
 `resolveTargets` (`events/resolvers/registry.ts`) resolves against a module-level
@@ -87,32 +119,33 @@ Making it worse: if the DB is missing or the schema is stale, the fixture **skip
 silently (`describe.skipIf(!fixture.available)`). The run looks green and checked nothing — in
 that run it showed `12 skipped`, which reads easily as success.
 
-_Half closed:_ `REQUIRE_TEST_DB=1` (set on the CI unit job) now turns an unreachable
-or stale database into a failure that names the database, the reason and the remedy,
-for the ~120 suites that use the fixture. Still open: the ~19 suites carrying their
-own `pickWorkingDb()` copy skip silently regardless, and there is still no
-`docker compose -f compose.test.yml up -d` to bring the DB up in one command.
+_Closed:_ `REQUIRE_TEST_DB=1` (set on the CI unit job) turns an unreachable or
+stale database into a failure naming the database, the reason and the remedy.
+`apps/web/vitest.global-setup.ts` checks once before any file loads, so it covers
+the 123 fixture suites, the 25 that open their own connection — 12 of them in
+`packages/db`, which cannot import the fixture — and every suite written later.
+Staleness is a journal-count comparison, because a database that merely lags the
+migrations connects fine and turns every per-file probe into a skip.
 
-## 1x — vitest 4 dropped flags and swallows `console.log`
+Still open: there is no `docker compose -f compose.test.yml up -d` to bring the
+database up in one command.
 
-Three wasted turns diagnosing an env-leakage question, all of them spent on the
-test runner rather than the question:
+## 1x — Stryker runs the whole suite before the first mutant
 
-- `--reporter=basic` is gone in vitest 4 and fails as
-  `Failed to load custom Reporter from basic`, which reads like a missing file.
-- `--poolOptions.forks.singleFork` is gone too — `Unknown option --poolOptions`.
-  Sequential-in-one-worker is now `--maxWorkers=1 --fileParallelism=false`.
-- `console.log` inside a test never reaches the terminal, even with
-  `--silent=false`. A throwaway probe has to _assert_ what it wants to report
-  and read the value out of the assertion diff.
+Measured while checking whether the hand-rolled mutation script can be replaced.
+`@stryker-mutator/core@10` and `@stryker-mutator/vitest-runner@10` do install and
+work under bun, with two conditions that cost a run each:
 
-Worth knowing while writing such a probe: the `forks` pool leaves `isolate` at
-its default, so every test file gets a fresh process and **no** `process.env`
-write crosses files — not even a raw one. Measured, not assumed: a control file
-that stubbed the env and never restored it left the next file untouched, and the
-two files reported different pids. Env hygiene between files is therefore not a
-real hazard here, and `vi.stubEnv` is worth using for the day someone sets
-`isolate: false`, not for today.
+- the runner has to be named explicitly in `plugins: ["@stryker-mutator/vitest-runner"]`,
+  or Stryker reports `Cannot find TestRunner plugin "vitest"` and, misleadingly,
+  `no TestRunner plugins were loaded` — bun's `.bun/` store defeats its plugin scan;
+- its **initial dry run executes the entire suite**, all 1405 files, before it
+  mutates anything. It times out long before that finishes, so `mutate` scoped to
+  one file is not enough on its own: the _test command_ has to be scoped too, and
+  `dryRunTimeoutMinutes` raised.
+
+So a diff-scoped mutation gate here is not "point Stryker at the changed files".
+It has to derive both the mutant set and the test selection from the diff.
 
 ## 1x — The DB suites are flaky under parallel load
 
