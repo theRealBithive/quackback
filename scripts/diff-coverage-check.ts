@@ -98,7 +98,17 @@ function readReportOrExit(file: string): CoverageReport {
 
   const relative: CoverageReport = {}
   for (const [absolute, coverage] of Object.entries(parsed)) {
-    relative[path.relative(repoRoot, absolute)] = coverage
+    const inRepo = path.relative(repoRoot, absolute)
+    if (inRepo.startsWith('..')) {
+      // The report was written somewhere else — CI artifacts read on a laptop,
+      // or a checkout that moved. Every path would then miss the diff's paths,
+      // every touched file would land out of scope, and out of scope passes.
+      couldNotMeasure(
+        `${path.relative(repoRoot, file)} covers ${absolute}, which is not in this checkout.`,
+        `The report has to come from a run in ${repoRoot}.`
+      )
+    }
+    relative[inRepo] = coverage
   }
   return relative
 }
@@ -116,7 +126,10 @@ if (files.length === 0) {
 
 const outcome = mergeReports(files.map(readReportOrExit))
 if (!outcome.merged) {
-  couldNotMeasure(outcome.reason, `The shards have to run the same commit.`)
+  couldNotMeasure(
+    outcome.reason,
+    `An empty report means the run wrote one before it had executed anything.`
+  )
 }
 
 const verdict = grade({ added, coverage: outcome.report })

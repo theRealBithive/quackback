@@ -116,14 +116,27 @@ only by a suite you skipped will read as a hole. That is a reason to widen the
 run, not to argue with the number.
 
 **What is in scope is decided in `vitest.config.ts`**, in the `coverage` block,
-because a source file that falls out of `include` is graded by nobody. The gate
-names every source-looking file it could not grade, so a stale `include` shows
-up in the report of every run instead of going quiet. The two CLI entry points
-(`scripts/*-check.ts`) are excluded on purpose: they run as a spawned `bun`
-process where an in-process provider cannot see them, so measuring them would
-report 0% for code their own end-to-end tests do execute. They are covered by
-spawning them (`scripts/__tests__/*-gate.test.ts`), and the logic beside them
-lives in `*-policy.ts`, which is graded normally. Keep new gates in that shape.
+because a source file that falls out of `include` is graded by nobody — and out
+of scope passes, so narrowing the scope is a way to make the gate green by
+measuring less. Two things stop that being quiet: the gate names every
+source-looking file it could not grade, and
+`scripts/__tests__/coverage-scope.test.ts` asserts the include and exclude lists
+in full, so a removal turns a test red rather than a report shorter. The two CLI
+entry points (`scripts/*-check.ts`) are the one deliberate exclusion: they run
+as a spawned `bun` process where an in-process provider cannot see them, so
+measuring them would report 0% for code their own end-to-end tests do execute.
+They are covered by spawning them (`scripts/__tests__/*-gate.test.ts`), and the
+logic beside them lives in `*-policy.ts`, which is graded normally. Keep new
+gates in that shape.
+
+Two ways the gate can be handed a report that measures nothing, both of which it
+now refuses rather than passes. A report whose paths lie outside the checkout —
+CI artifacts downloaded onto a laptop keep the runner's absolute paths — matches
+no diff path, so everything would land out of scope. And the shards' reports are
+merged **per line, never per statement id**: for the same commit the v8 provider
+does not always emit a statement for a module's first import, and when it skips
+one every id after it shifts, so a merge by id credits one line's executions to
+another. That one is not theoretical; it failed the gate's own first CI run.
 
 ## The test database
 
