@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { coverageConfigDefaults, defineConfig } from 'vitest/config'
 import path from 'path'
 
 export default defineConfig({
@@ -36,6 +36,26 @@ export default defineConfig({
       // `bun run --cwd packages/widget test`. Don't double-run from the root.
       'packages/widget/**',
     ],
+    // What the diff-coverage gate grades (`scripts/diff-coverage-check.ts`).
+    // The scope lives here rather than in CI flags because it is a fact about
+    // this repository, and because it has to be readable: a source file that
+    // falls out of `include` is graded by nobody. The gate names every
+    // source-looking file it could not grade, so an `include` that stops
+    // matching shows up in the report of every run.
+    coverage: {
+      provider: 'v8',
+      include: ['apps/web/src/**/*.{ts,tsx}', 'packages/*/src/**/*.ts', 'scripts/**/*.ts'],
+      exclude: [
+        ...coverageConfigDefaults.exclude,
+        // CLI entry points. They run as a spawned `bun` process, where an
+        // in-process coverage provider cannot see them at all — measuring
+        // them here would report 0% for code that its own end-to-end test
+        // does execute. Their guarantees are covered by spawning them:
+        // `scripts/__tests__/*-gate.test.ts`. The policy modules beside them
+        // (`*-policy.ts`) hold the logic and are graded normally.
+        'scripts/*-check.ts',
+      ],
+    },
     // Use ts-node or vite's transformation instead of stripping
     typecheck: {
       enabled: false,

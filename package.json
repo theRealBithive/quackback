@@ -6,6 +6,7 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@types/node": "^26.2.0",
     "@typescript/typescript6": "^6.0.2",
+    "@vitest/coverage-v8": "4.1.11",
     "dotenv-cli": "^11.0.0",
     "fast-check": "^4.9.0",
     "happy-dom": "^20.11.2",
