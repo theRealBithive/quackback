@@ -429,3 +429,82 @@ export function formatVerdict(verdict: Verdict): string[] {
 
   return lines
 }
+
+/** Everything Stryker is told about one run of this gate. */
+export type StrykerConfig = {
+  packageManager: string
+  testRunner: string
+  plugins: string[]
+  vitest: { configFile: string }
+  mutate: string[]
+  coverageAnalysis: string
+  reporters: string[]
+  jsonReporter: { fileName: string }
+  timeoutMS: number
+  dryRunTimeoutMinutes: number
+  concurrency: number
+  thresholds: { break: null }
+  tempDirName: string
+  tsconfigFile: string
+  inPlace: boolean
+}
+
+/**
+ * The Stryker configuration for one run, as data.
+ *
+ * It lives here rather than beside the spawn in `mutation-check.ts` because
+ * every value in it is a decision, and a decision that is not asserted
+ * anywhere is a decision that changes without anyone noticing. Paths arrive
+ * already relative to the repository root: this function does no path
+ * arithmetic, so it can be read and tested without a filesystem.
+ */
+export function strykerConfigFor(input: {
+  mutate: string[]
+  vitestConfigFile: string
+  reportFile: string
+  tempDirName: string
+}): StrykerConfig {
+  return {
+    packageManager: 'npm',
+    testRunner: 'vitest',
+    // Listed explicitly: Stryker's plugin discovery does not find the vitest
+    // runner under bun's non-hoisting workspaces.
+    plugins: ['@stryker-mutator/vitest-runner'],
+    vitest: { configFile: input.vitestConfigFile },
+    mutate: input.mutate,
+    coverageAnalysis: 'perTest',
+    reporters: ['clear-text', 'json'],
+    jsonReporter: { fileName: input.reportFile },
+    // Per mutant, and a different thing from the run's wall-clock budget: a
+    // mutant that hangs is a *detected* mutant, because the tests noticed it
+    // by never finishing. Exceeding the budget is the opposite — it means
+    // nothing was measured.
+    timeoutMS: 60000,
+    dryRunTimeoutMinutes: 5,
+    // GitHub-hosted ubuntu-latest is 4 vCPU.
+    concurrency: 4,
+    // The gate decides, not the runner. With a break threshold Stryker would
+    // exit nonzero on a score this gate might have excused, and exit zero on
+    // a score it would not.
+    thresholds: { break: null },
+    tempDirName: input.tempDirName,
+    // Deliberately a file that does not exist. Stryker rewrites the tsconfig
+    // it is pointed at so that `extends` and `references` paths still resolve
+    // after the sandbox moves them — and that rewrite imports the TypeScript
+    // compiler in a way whose result depends on the Node build underneath.
+    // It failed one CI run with `ts.parseConfigFileTextToJson is not a
+    // function` and passed the run before it on the same tree; the two
+    // runners differed only in a Node patch version. This repository needs
+    // the rewrite for nothing: the sandbox is a full copy, every tsconfig
+    // here extends a path inside the repository, and the root one — the only
+    // one Stryker would touch — extends nothing at all. Pointing it at a file
+    // that is not there skips the rewrite, so the gate does not depend on how
+    // a runner's Node resolves a CommonJS default export.
+    tsconfigFile: '.mutation-tmp/no-tsconfig-to-rewrite.json',
+    // The other way to skip that rewrite, and the wrong one: `inPlace` makes
+    // Stryker mutate the checkout instead of a sandbox copy, so a crashed run
+    // leaves mutants in the working tree. Stated rather than left to the
+    // default, because the default is the only thing keeping it false.
+    inPlace: false,
+  }
+}

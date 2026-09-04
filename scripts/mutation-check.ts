@@ -37,6 +37,7 @@ import {
   readManifest,
   readMeasurement,
   selectForChange,
+  strykerConfigFor,
   type Manifest,
 } from './mutation-policy'
 
@@ -149,31 +150,12 @@ export default defineConfig({
   writeFileSync(
     strykerConfig,
     JSON.stringify(
-      {
-        packageManager: 'npm',
-        testRunner: 'vitest',
-        // Listed explicitly: Stryker's plugin discovery does not find the
-        // vitest runner under bun's non-hoisting workspaces.
-        plugins: ['@stryker-mutator/vitest-runner'],
-        vitest: { configFile: path.relative(repoRoot, vitestConfig) },
+      strykerConfigFor({
         mutate: input.files,
-        coverageAnalysis: 'perTest',
-        reporters: ['clear-text', 'json'],
-        jsonReporter: { fileName: path.relative(repoRoot, reportFile) },
-        // Per mutant, and a different thing from the run's budget below: a
-        // mutant that hangs is a *detected* mutant, because the tests noticed
-        // it by never finishing. Exceeding the budget is the opposite — it
-        // means nothing was measured.
-        timeoutMS: 60000,
-        dryRunTimeoutMinutes: 5,
-        // GitHub-hosted ubuntu-latest is 4 vCPU.
-        concurrency: 4,
-        // The gate decides, not the runner. With a break threshold Stryker
-        // would exit nonzero on a score this gate might have excused, and
-        // exit zero on a score it would not.
-        thresholds: { break: null },
-        tempDirName: '.mutation-tmp/stryker',
-      },
+        vitestConfigFile: path.relative(repoRoot, vitestConfig),
+        reportFile: path.relative(repoRoot, reportFile),
+        tempDirName: path.relative(repoRoot, path.join(runDir, 'stryker')),
+      }),
       null,
       2
     )

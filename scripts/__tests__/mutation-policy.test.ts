@@ -49,6 +49,9 @@
  */
 import { describe, it, expect } from 'vitest'
 import fc from 'fast-check'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   dryRunTests,
   filesTouchedBy,
@@ -57,11 +60,14 @@ import {
   readManifest,
   readMeasurement,
   selectForChange,
+  strykerConfigFor,
   type EquivalenceRecord,
   type Manifest,
   type Mutant,
   type MutationReport,
 } from '../mutation-policy'
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 const SEED_MANIFEST: Manifest = {
   graded: [
@@ -733,6 +739,56 @@ describe('the report a run prints (B5, B9)', () => {
     const printed = formatVerdict(clean)
     expect(printed).toHaveLength(3)
     expect(printed.join('\n')).not.toMatch(/did not catch|although they look|excused nothing/)
+  })
+})
+
+describe('the Stryker run the gate asks for (B7)', () => {
+  function generated() {
+    return strykerConfigFor({
+      mutate: ['scripts/mutation-policy.ts'],
+      vitestConfigFile: '.mutation-tmp/run.vitest.config.ts',
+      reportFile: '.mutation-tmp/report.json',
+      tempDirName: '.mutation-tmp/stryker',
+    })
+  }
+
+  it('describes the whole run, so no setting is decided somewhere else', () => {
+    expect(generated()).toEqual({
+      packageManager: 'npm',
+      testRunner: 'vitest',
+      plugins: ['@stryker-mutator/vitest-runner'],
+      vitest: { configFile: '.mutation-tmp/run.vitest.config.ts' },
+      mutate: ['scripts/mutation-policy.ts'],
+      coverageAnalysis: 'perTest',
+      reporters: ['clear-text', 'json'],
+      jsonReporter: { fileName: '.mutation-tmp/report.json' },
+      timeoutMS: 60000,
+      dryRunTimeoutMinutes: 5,
+      concurrency: 4,
+      thresholds: { break: null },
+      tempDirName: '.mutation-tmp/stryker',
+      tsconfigFile: '.mutation-tmp/no-tsconfig-to-rewrite.json',
+      inPlace: false,
+    })
+  })
+
+  it('names a tsconfig that does not exist, so the sandbox never rewrites one', () => {
+    // Stryker rewrites the tsconfig it is pointed at, and that code path
+    // imports the TypeScript compiler in a way whose result depends on the
+    // Node build it runs under — it failed one CI run and passed the one
+    // before it on the same tree. This repository needs the rewrite for
+    // nothing: it exists for `extends` and `references` paths that fall
+    // outside the sandbox, every tsconfig here extends a path inside the
+    // repository, and the root one extends nothing at all.
+    const named = generated().tsconfigFile
+    expect(existsSync(path.join(repoRoot, named))).toBe(false)
+  })
+
+  it('never mutates the checkout in place, whatever else changes', () => {
+    // `inPlace` would make Stryker edit the working tree instead of a
+    // sandbox copy, and a crashed run would leave mutants in it. It is also
+    // the other way to skip the tsconfig rewrite, and the wrong one.
+    expect(generated().inPlace).toBe(false)
   })
 })
 

@@ -310,6 +310,44 @@ database up in one command.
 
 # Resolved
 
+## 1x — A Stryker run leaves two things behind that nothing else guards
+
+Both surfaced within an hour of the mutation gate going green, and neither is
+about mutation scores.
+
+**A crashed run leaves a sandbox, and vitest collected it.** Stryker copies the
+whole checkout into `.mutation-tmp/stryker/sandbox-XXXXXX/` and applies one
+mutant to the copy. `.mutation-tmp/` is gitignored, which is not the same as
+being outside vitest's `include` — so after a run that crashed, a plain
+`bun x vitest run <suite>` collected the suite twice and reported four failures
+from a file that had already been restored on disk. The failing paths name the
+sandbox, which is the only clue, and it reads like a stale cache. CI never sees
+it (one checkout per job); a laptop does.
+
+**Closed** by `'**/.mutation-tmp/**'` in the root config's `test.exclude`,
+asserted in full by `scripts/__tests__/coverage-scope.test.ts`.
+
+**Stryker's tsconfig rewrite depends on the runner's Node build.** The gate
+passed on one commit and failed on the next, same tree, with
+`TypeError: ts.parseConfigFileTextToJson is not a function` inside
+`TSConfigPreprocessor.rewriteTSConfigFile`. That function does
+`const { default: ts } = await import('typescript')` — CommonJS interop, whose
+named and default bindings a Node patch release can change. The two runners
+differed in exactly that: Node v22.23.1 passed, v22.23.2 failed. Nothing in
+`ci.yml` pins Node, because the workflow installs bun and Stryker's bin then
+runs under whatever `node` the runner image ships.
+
+**Closed** by not needing that code path: `strykerConfigFor` points
+`tsconfigFile` at a file that does not exist, so the rewrite is skipped. It
+exists for `extends` and `references` paths that fall outside the sandbox, and
+here every tsconfig extends a path inside the repository while the root one —
+the only file Stryker would have touched — extends nothing at all.
+
+Still open, and worth knowing before it bites elsewhere: **the Node version in
+CI is not controlled.** Every job that runs a tool with a `#!/usr/bin/env node`
+shebang gets the runner image's Node, which drifts between images inside a
+single workflow run. Pinning it needs `actions/setup-node` in each such job.
+
 ## 3x — Coverage had to be re-installed for every measurement
 
 The tooling for non-trivial logic is half-present. `fast-check` is a
