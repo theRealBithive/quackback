@@ -1,5 +1,7 @@
 /**
- * What the diff-coverage gate is allowed to grade.
+ * What the vitest run collects, and what the diff-coverage gate is allowed to
+ * grade. Both are lists in `vitest.config.ts`, and both fail quietly when they
+ * shrink, so both are asserted here in full.
  *
  * B7 A gate that could not measure fails rather than passes — no diff base,
  *    missing provider, budget exceeded.
@@ -21,6 +23,11 @@
 import { describe, it, expect } from 'vitest'
 import { coverageConfigDefaults } from 'vitest/config'
 import rootConfig from '../../vitest.config'
+
+/** The `test` block of the root config. */
+function testScope(): { exclude?: string[] } {
+  return ((rootConfig as { test?: unknown }).test ?? {}) as { exclude?: string[] }
+}
 
 /** The coverage block, whichever shape of vitest config holds it. */
 function coverageScope(): { include?: string[]; exclude?: string[] } {
@@ -50,5 +57,31 @@ describe('the coverage scope the gate grades against (B7)', () => {
     // The gate reads the istanbul-shaped `coverage-final.json` that both
     // providers write. Changing the provider is fine; dropping it is not.
     expect((coverageScope() as { provider?: string }).provider).toBe('v8')
+  })
+})
+
+describe('what the run is allowed to collect', () => {
+  it('never collects a mutation sandbox, which is a stale copy of this repository', () => {
+    // Stryker copies the whole checkout into `.mutation-tmp/stryker/sandbox-*`
+    // and applies a mutant to it. A crashed run leaves that copy behind, and
+    // it holds a full second set of test files — so the next plain `vitest
+    // run` collects both, grades source that is not the checkout, and fails
+    // on assertions nobody wrote. Measured: a leftover sandbox reported four
+    // failures from a test file that had already been restored.
+    expect(testScope().exclude).toContain('**/.mutation-tmp/**')
+  })
+
+  it('excludes exactly the directories the run must not walk into', () => {
+    // Asserted in full, because the dangerous edit is a removal.
+    expect(testScope().exclude).toEqual([
+      '**/node_modules/**',
+      '**/.next/**',
+      '**/e2e/**',
+      '**/.output/**',
+      '**/.claude/**',
+      '**/.mutation-tmp/**',
+      '**/*-integration.test.ts',
+      'packages/widget/**',
+    ])
   })
 })

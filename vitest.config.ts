@@ -31,6 +31,10 @@ export default defineConfig({
       // Isolated git worktrees live here; they are separate checkouts with
       // their own deps and must not be run by the parent repo's suite.
       '**/.claude/**',
+      // Stryker's sandbox is a full copy of this checkout with a mutant
+      // applied. A crashed run leaves one behind, and collecting it means
+      // running a second, stale set of every test file in the repository.
+      '**/.mutation-tmp/**',
       '**/*-integration.test.ts',
       // Widget package has its own vitest.config.ts with happy-dom — run via
       // `bun run --cwd packages/widget test`. Don't double-run from the root.
