@@ -74,3 +74,5 @@ scratchpad/
 # Mutation testing: Stryker's sandbox copy of the repo and its report output.
 .stryker-tmp/
 reports/mutation/
+# The mutation gate's generated run configuration and its report.
+.mutation-tmp/

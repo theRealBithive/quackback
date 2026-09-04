@@ -1,0 +1,33 @@
+{
+  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing — the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
+  "graded": [
+    {
+      "file": "scripts/audit-policy.ts",
+      "suites": ["scripts/__tests__/audit-policy.test.ts"]
+    },
+    {
+      "file": "scripts/diff-coverage-policy.ts",
+      "suites": ["scripts/__tests__/diff-coverage-policy.test.ts"]
+    },
+    {
+      "file": "scripts/mutation-policy.ts",
+      "suites": ["scripts/__tests__/mutation-policy.test.ts"]
+    }
+  ],
+  "equivalents": [
+    {
+      "file": "scripts/diff-coverage-policy.ts",
+      "mutator": "EqualityOperator",
+      "line": "if (highest === undefined || highest < count) known.executions.set(line, count)",
+      "replacement": "highest <= count",
+      "why": "The comparison keeps the highest count a shard reported. With `<=` an equal count overwrites an equal count, which stores the same number it replaced. No input can distinguish the two, so no test can."
+    },
+    {
+      "file": "scripts/diff-coverage-policy.ts",
+      "mutator": "EqualityOperator",
+      "line": "if (best === undefined || best < count) executions.set(line, count)",
+      "replacement": "best <= count",
+      "why": "The same maximum, taken over the statements starting on one line. `<=` replaces an equal value with an equal value."
+    }
+  ]
+}
