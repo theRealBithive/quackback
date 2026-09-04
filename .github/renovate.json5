@@ -1,0 +1,91 @@
+// Automated dependency updates for this fork.
+//
+// This file does nothing on its own: the Renovate GitHub App has to be
+// installed on the repository first. Once it is, Renovate finds this config and
+// skips its onboarding pull request.
+//
+// Why Renovate and not Dependabot. Dependabot's bun support covers version
+// updates only — security updates are marked unsupported for bun in GitHub's
+// own ecosystem table — and Dependabot has no equivalent of
+// `lockFileMaintenance`. Most advisories live in transitive dependencies, and
+// refreshing the lockfile is the only thing that moves those without a direct
+// dependency bump. For a fork that is run as a network service and no longer
+// gets upstream's security bumps for free, that is the feature that matters.
+//
+// What this costs while we still sync from upstream: every bump diverges an
+// upstream-owned `package.json`, so a sync conflicts on those lines. `bun.lock`
+// conflicts too, but it is generated — the resolution is to regenerate it. If
+// the divergence becomes the dominant cost, narrow this config to security
+// updates by disabling the `major`/`minor` rules below rather than uninstalling
+// the app, so the lockfile keeps moving.
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:recommended'],
+
+  timezone: 'Europe/Berlin',
+  // One batch a week, before the working day. Dependency review is a task
+  // someone sits down for, not a stream of interruptions.
+  schedule: ['before 6am on monday'],
+  labels: ['dependencies'],
+
+  // Nothing merges itself. A fork that is run as a service owns every line it
+  // ships, and an unreviewed transitive bump is how that stops being true.
+  automerge: false,
+
+  // Matches the repo's conventional commits (`chore(deps):`, `fix(deps):`).
+  semanticCommits: 'enabled',
+
+  // Refresh the lockfile even when no direct dependency changed. This is the
+  // only mechanism here that closes an advisory in a transitive package.
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ['before 6am on monday'],
+  },
+
+  // Reads GitHub's Dependabot alerts, which are fed by the dependency graph.
+  // The graph is currently DISABLED on this repository — forks have it off by
+  // default — so this section is inert until someone enables it under
+  // Settings > Advanced Security. Whether it then parses `bun.lock` at all is
+  // unproven; until it does, `bun scripts/audit-check.ts` in CI is the only
+  // advisory detection we have.
+  vulnerabilityAlerts: {
+    enabled: true,
+    labels: ['dependencies', 'security'],
+  },
+
+  prConcurrentLimit: 5,
+  prHourlyLimit: 2,
+
+  packageRules: [
+    {
+      // One pull request for the whole test and build toolchain. These land
+      // together, break together, and are reviewed by running the suite.
+      matchDepTypes: ['devDependencies'],
+      matchUpdateTypes: ['minor', 'patch'],
+      groupName: 'dev tooling (non-major)',
+    },
+    {
+      // Majors stay separate and unbatched: each one is a migration, and
+      // grouping them means bisecting a red suite across several of them.
+      matchUpdateTypes: ['major'],
+      groupName: null,
+      labels: ['dependencies', 'major'],
+    },
+    {
+      // The bun version itself gates every CI job and the pre-commit hook. It
+      // gets its own pull request, never a group.
+      matchDepTypes: ['packageManager', 'engines'],
+      groupName: null,
+      labels: ['dependencies', 'toolchain'],
+    },
+    {
+      // Action versions are updated, but their digests are not pinned. Pinning
+      // would rewrite every upstream-owned workflow file and conflict on every
+      // sync. Worth turning on (`pinDigests: true`) once this fork stops
+      // syncing — until then the cost outweighs it.
+      matchManagers: ['github-actions'],
+      pinDigests: false,
+      groupName: 'github actions',
+    },
+  ],
+}

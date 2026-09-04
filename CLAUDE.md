@@ -162,6 +162,46 @@ The image tag has to be valid semver, because the workflow derives it via
 `type=semver`. For a name that semver cannot express, dispatch the workflow
 manually with `sha` and `image_tag` instead — that path takes any string.
 
+## Branch protection and dependency updates
+
+Both are repository settings, not files, so nothing in this repo can enforce
+them — this section records what they are supposed to be.
+
+**Required status checks on `main`.** Use a ruleset (Settings > Rules), not
+classic branch protection, and require exactly these:
+
+- `check` — lint, build, typecheck, manifest and widget checks.
+- `test` — the aggregate job. It exists for this purpose: it asserts
+  `needs.unit.result == 'success'` and therefore covers all four shards. Do not
+  require the individual `test (n/4)` shards; the names break the moment the
+  shard count changes.
+- `e2e-smoke`.
+
+Never require `e2e-full`. It carries `if: github.event_name == 'schedule'`, so
+it never reports on a pull request and would block every one of them forever.
+`live-api` is optional — it does run on pull requests, but the DB suites in that
+neighbourhood are measurably flaky under parallel load.
+
+Two settings do the actual work: **include administrators** (a rule the only
+maintainer can push past is decoration) and **require branches to be up to date
+before merging** (without it, a green check can predate the commit it is
+protecting, which is how `REQUIRE_TEST_DB` stops binding).
+
+**Dependency updates.** `.github/renovate.json5` is configured and inert until
+the Renovate GitHub App is installed on the repository. Renovate is the choice
+because Dependabot supports bun for version updates only — bun security updates
+are unsupported — and because only Renovate's `lockFileMaintenance` moves
+transitive dependencies, where most advisories live. The config's header
+comment carries the reasoning and the one knob worth touching.
+
+The **dependency graph is disabled** on this repository, which is the default
+for a fork. Until someone enables it under Settings, there are no Dependabot
+alerts, Renovate's `vulnerabilityAlerts` section is inert, and
+`bun scripts/audit-check.ts` in CI is the only advisory detection we have. That
+gate audits **production dependencies only** (`bun audit --production`), so an
+advisory in the build toolchain is currently invisible. Widening it means
+editing an upstream-owned file, which is why it has not been done.
+
 ## Licensing
 
 This is an AGPL-3.0 fork that we run as a network service, which carries
