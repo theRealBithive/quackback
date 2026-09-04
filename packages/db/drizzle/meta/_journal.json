@@ -1772,6 +1772,13 @@
       "when": 1785700000033,
       "tag": "0275_changelog_entry_boards",
       "breakpoints": true
+    },
+    {
+      "idx": 253,
+      "version": "7",
+      "when": 1785700000034,
+      "tag": "0276_identity_provider_logo_key",
+      "breakpoints": true
     }
   ]
 }

@@ -350,6 +350,7 @@ describe('replayGateVerdict', () => {
       '0273_post_comments_external_ref',
       '0274_external_link_scope',
       '0275_changelog_entry_boards',
+      '0276_identity_provider_logo_key',
     ])
     const verdict = replayGateVerdict(before, verdictsFor(replaySetFor(before)), false)
     expect(verdict.ok).toBe(false)
