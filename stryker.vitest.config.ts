@@ -18,6 +18,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     pool: 'forks',
-    include: ['scripts/__tests__/audit-policy.test.ts'],
+    include: [
+      'scripts/__tests__/audit-policy.test.ts',
+      'scripts/__tests__/diff-coverage-policy.test.ts',
+    ],
   },
 })

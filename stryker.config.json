@@ -8,7 +8,7 @@
   "vitest": {
     "configFile": "stryker.vitest.config.ts"
   },
-  "mutate": ["scripts/audit-policy.ts"],
+  "mutate": ["scripts/audit-policy.ts", "scripts/diff-coverage-policy.ts"],
   "coverageAnalysis": "perTest",
   "reporters": ["progress", "clear-text", "json"],
   "dryRunTimeoutMinutes": 5,

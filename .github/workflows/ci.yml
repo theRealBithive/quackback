@@ -97,7 +97,21 @@ jobs:
       - name: Check migration/schema drift
         if: matrix.shard == 1
         run: bun run db:check-drift
-      - run: bun run test --run --shard=${{ matrix.shard }}/4 --reporter=dot --reporter=github-actions
+      # Coverage is collected here rather than in a run of its own, because a
+      # shard only knows about the tests it ran: the diff-coverage gate merges
+      # the four reports, and a line is covered when any shard executed it.
+      # What is in scope is decided in vitest.config.ts, not by flags here.
+      - name: Run the shard, collecting coverage
+        run: >
+          bun run test --run --shard=${{ matrix.shard }}/4
+          --reporter=dot --reporter=github-actions
+          --coverage.enabled --coverage.reporter=json
+          --coverage.reportsDirectory=coverage/shard-${{ matrix.shard }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: coverage/shard-${{ matrix.shard }}/coverage-final.json
+          retention-days: 1
 
   # Single check name so existing "test" required-status wiring still matches.
   test:
@@ -107,6 +121,34 @@ jobs:
     steps:
       - name: All unit shards passed
         run: test "${{ needs.unit.result }}" = "success"
+
+  # Every line this change added has to have been executed by a test. Judged on
+  # the diff, not on the repository total: a 60%-covered repository is not an
+  # argument for adding untested lines to it, and a 90% total is not an argument
+  # that these particular lines were tested.
+  diff-coverage:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Full history: the gate compares against the merge base, and a shallow
+      # clone has no common commit to find.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: coverage-shard-*
+          path: coverage
+      # No `bun install`: the gate imports node built-ins and its own policy
+      # module, nothing else.
+      - name: Every added line has to have been executed
+        env:
+          DIFF_BASE: origin/${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+        run: bun scripts/diff-coverage-check.ts
 
   e2e-smoke:
     runs-on: ubuntu-latest
