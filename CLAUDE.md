@@ -113,6 +113,31 @@ whether the new migration writes data:
 - Application code must not import `@quackback/db`. Use `@/lib/server/db` on the
   server, `@/lib/shared/db-types` on the client.
 
+## Releases and deploys
+
+Never deploy a moving tag. A push to `main` publishes
+`ghcr.io/therealbithive/quackback:main`, which is fine to try things with and
+wrong to run: a pod rescheduled overnight silently picks up a different build,
+and afterwards nobody can say which source was running — which is also how AGPL
+§13 quietly stops being satisfied (see [LEGAL.md](LEGAL.md)).
+
+Cut a git tag instead. Fork builds are `vX.Y.Z-exkulpa.N`, where `X.Y.Z` is the
+next upstream patch version, not the current one: semver sorts a prerelease
+_before_ its version, and our build is ahead of the upstream release it is based
+on, not a preview of it. Pushing the tag builds
+`ghcr.io/therealbithive/quackback:X.Y.Z-exkulpa.N` and moves `:latest`.
+
+The image tag has to be valid semver, because the workflow derives it via
+`type=semver`. For a name that semver cannot express, dispatch the workflow
+manually with `sha` and `image_tag` instead — that path takes any string.
+
+## Licensing
+
+This is an AGPL-3.0 fork that we run as a network service, which carries
+obligations towards the people using it. [LEGAL.md](LEGAL.md) records what they
+are, what we already do, and what is still open — read it before building
+anything proprietary into this repository.
+
 ## Commits
 
 Conventional commits (`fix(events):`, `feat(gitlab):`). The subject says what
