@@ -125,6 +125,17 @@ All four CI shards passed with coverage on 4 vCPU. So the local failures are loa
 out took a second full 3-minute shard run as a control. That is the cost of the
 flakiness: no single run means anything, so every measurement needs a twin.
 
+## 1x — The audit gate reports advisory counts without naming them
+
+`bun scripts/audit-check.ts` opens with "production dependencies — 9 package(s),
+17 advisory(ies)" and "build and test toolchain — 1 package(s), 2 advisory(ies)",
+and then names only what fails the run. For the scope that is _reported and never
+fails_, that leaves a number nobody can act on: finding out that one of the 17 is
+GHSA-p2fr-6hmx-4528 in `@better-auth/oauth-provider` took a separate `bun audit
+--json` and a Python one-liner. The report should name package, severity and
+GHSA for everything it counted — that is the whole value of the reported-only
+scope, and right now the scope exists without its payload.
+
 ## 1x — v8 coverage reports are not comparable across shards by statement id
 
 Merging the four CI shards' `coverage-final.json` by statement id looked

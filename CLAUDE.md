@@ -220,13 +220,34 @@ The image tag has to be valid semver, because the workflow derives it via
 `type=semver`. For a name that semver cannot express, dispatch the workflow
 manually with `sha` and `image_tag` instead — that path takes any string.
 
+**Every merge into `main` gets a tag.** Not every merge is worth deploying, but
+every merge is worth being able to name: without a tag the only thing pointing
+at that state is `:main`, which is the moving tag the first paragraph forbids
+running. So after a merge, bump `N` and push `vX.Y.Z-exkulpa.N` — `X.Y.Z` stays
+the next upstream patch version until upstream actually releases, and `N` counts
+our builds on top of it. `git tag --sort=-v:refname | head -1` says where you
+are.
+
+The tag message is where an operator finds out what changed for them, in the
+same shape as a commit body: what is different after deploying, and explicitly
+"nothing in the running service changes" when the merge was CI or docs only.
+That sentence is worth writing precisely because it is the common case, and
+because its absence is what makes someone read the whole diff.
+
 ## Branch protection and dependency updates
 
 Both are repository settings, not files, so nothing in this repo can enforce
-them — this section records what they are supposed to be.
+them. Both are now configured; this section records what they are, so a setting
+that gets turned off can be noticed.
 
-**Required status checks on `main`.** Use a ruleset (Settings > Rules), not
-classic branch protection, and require exactly these:
+**Required status checks on `main`.** Configured as ruleset `22286102`
+("protect main", Settings > Rules — not classic branch protection), `active`,
+targeting `~DEFAULT_BRANCH`, with an empty bypass list. A copy of the payload is
+checked in at [.github/rulesets/main.json](.github/rulesets/main.json); GitHub
+does not read it from there, but `gh api --method PUT
+repos/theRealBithive/quackback/rulesets/22286102 --input .github/rulesets/main.json`
+restores it. It requires a pull request (0 approvals — one maintainer cannot
+approve their own) and these checks:
 
 - `check` — lint, build, typecheck, manifest and widget checks.
 - `test` — the aggregate job. It exists for this purpose: it asserts
@@ -234,11 +255,12 @@ classic branch protection, and require exactly these:
   require the individual `test (n/4)` shards; the names break the moment the
   shard count changes.
 - `e2e-smoke`.
-- `diff-coverage` — every line the change added was executed by a test. Worth
-  requiring once it has run green on a few real pull requests; until then it
-  reports without blocking. It depends on `unit`, so it is skipped when a shard
-  fails, and a skipped check is not the same as a passing one — that is another
-  reason to add it only after `test` is already required.
+- `diff-coverage` — every line the change added was executed by a test.
+  **Deliberately not required yet.** It has one green run. It depends on `unit`,
+  so it is skipped when a shard fails, and a skipped check is not a passing one:
+  requiring it before `test` is proven would turn a shard failure into a merge
+  condition satisfied by a job that graded nothing. Add it after a few real
+  pull requests.
 
 Never require `e2e-full`. It is a job inside `ci.yml`, which does trigger on
 pull requests, so the job does report there — as `skipped`, because of its
@@ -247,24 +269,53 @@ pull requests the way a never-reporting check would; it would be worse, a merge
 condition satisfied by a job that ran no test at all. `live-api` is optional — it does run on pull requests, but the DB suites in that
 neighbourhood are measurably flaky under parallel load.
 
-Two settings do the actual work: **include administrators** (a rule the only
+Two settings do the actual work, and both are on: **include administrators**
+(`bypass_actors` empty, `current_user_can_bypass: never` — a rule the only
 maintainer can push past is decoration) and **require branches to be up to date
-before merging** (without it, a green check can predate the commit it is
-protecting, which is how `REQUIRE_TEST_DB` stops binding).
+before merging** (`strict_required_status_checks_policy`; without it a green
+check can predate the commit it is protecting, which is how `REQUIRE_TEST_DB`
+stops binding).
 
-**Dependency updates.** `.github/renovate.json5` is configured and inert until
-the Renovate GitHub App is installed on the repository. Renovate is the choice
-because Dependabot supports bun for version updates only — bun security updates
-are unsupported — and because only Renovate's `lockFileMaintenance` moves
-transitive dependencies, where most advisories live. The config's header
-comment carries the reasoning and the one knob worth touching.
+One rule GitHub adds by itself is worth knowing before it fires:
+`require_extra_approval_for_unattributed_changes`, which the API sets to `true`
+whether or not you send it. It demands an approving review for commits whose
+author maps to no GitHub account — and with `required_approving_review_count: 0`
+and a single maintainer, that is an approval nobody present can give. Our own
+commits are attributed and the `Co-Authored-By` trailer does not trigger it
+(checked). A patch adopted from someone else, or a commit with an author email
+that belongs to no account, will.
 
-The **dependency graph is disabled** on this repository, which is the default
-for a fork. Until someone enables it under Settings, there are no Dependabot
-alerts, Renovate's `vulnerabilityAlerts` section is inert, and
-`bun scripts/audit-check.ts` in CI is the only advisory detection we have.
+**Dependency updates.** The Renovate GitHub App is installed and reads
+`.github/renovate.json5`; because that config exists, Renovate skips its
+onboarding pull request. Renovate is the choice because Dependabot supports bun
+for version updates only — bun security updates are unsupported — and because
+only Renovate's `lockFileMaintenance` moves transitive dependencies, where most
+advisories live. The config's header comment carries the reasoning and the one
+knob worth touching. Nothing automerges, and pull requests arrive Mondays before
+6am Europe/Berlin, so a quiet week is expected rather than a symptom.
 
-That gate audits the **whole tree**, and grades the two scopes differently: an
+**Issues are disabled on this repository** (the default for a fork), and
+Renovate's dependency dashboard is an issue. Without it there is no surface
+showing what Renovate is holding back and no checkbox to force a run off
+schedule — it still works, you just cannot see it think. Enabling Issues under
+Settings > General > Features is the whole fix.
+
+The **dependency graph and Dependabot alerts are enabled**, and they see less
+than they look like they see: the graph reads the `package.json` manifests, not
+`bun.lock`. Measured on 2026-09-04 — the SBOM lists 223 packages, `bun.lock`
+resolves 1641, and `bun.lock` does not appear in the SBOM at all. So Dependabot
+alerts cover direct dependencies only, and **every transitive advisory is
+invisible to GitHub**. That is not a footnote: it is the majority of the tree,
+it is where the config's `lockFileMaintenance` argument comes from, and it means
+`bun scripts/audit-check.ts` is still the only detection we have for most of
+what could be wrong. Re-measure with
+`gh api repos/theRealBithive/quackback/dependency-graph/sbom` before assuming
+GitHub has started parsing bun lockfiles.
+
+Do **not** enable Dependabot security updates. It would open pull requests
+competing with Renovate's for the same bumps.
+
+The audit gate audits the **whole tree**, and grades the two scopes differently: an
 advisory reachable from the running service fails the run, one that only reaches
 the build and test toolchain is printed and does not. Every run opens with both
 counts, so a PASS says what it covered. It also fails when the audit could not
