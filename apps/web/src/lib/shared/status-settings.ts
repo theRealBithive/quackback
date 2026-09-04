@@ -16,10 +16,12 @@ export type StatusAudience = 'public' | 'authenticated' | 'segments'
 
 export interface StatusSettings {
   /**
-   * Legacy publish bit. The General Status product toggle is the single
-   * publish control: ON writes this true (clearing a stored false); OFF
-   * only flips `featureFlags.statusPage`. Effective published state is
-   * {@link isStatusPagePublished}.
+   * Legacy unpublish override, NOT the product switch — that is
+   * `featureFlags.statusPage`, the Status toggle on Settings → General.
+   * Only an explicit `false` means anything here: it holds the page back
+   * even while the General toggle is on. A workspace that never expressed a
+   * choice resolves to `true`, so it simply follows its toggle. Effective
+   * published state is {@link isStatusPagePublished}.
    */
   enabled: boolean
   /**
@@ -36,7 +38,13 @@ export interface StatusSettings {
 }
 
 export const DEFAULT_STATUS_SETTINGS: StatusSettings = {
-  enabled: false,
+  // "No unpublish override", not "the status page is on" — the page is off by
+  // default because DEFAULT_FEATURE_FLAGS.statusPage is false. This used to be
+  // `false`, which made an unwritten bit indistinguishable from a deliberate
+  // no: every install that reached `statusPage: true` without passing through
+  // the General toggle (an older version, a seed) showed an ON toggle over a
+  // dark page, with no control anywhere to reconcile the two.
+  enabled: true,
   portalTabEnabled: true,
   audience: 'public',
   allowedSegmentIds: [],
@@ -45,10 +53,11 @@ export const DEFAULT_STATUS_SETTINGS: StatusSettings = {
 }
 
 /**
- * Effective status-page publish state: the General product flag AND the
- * legacy `statusSettings.enabled` bit. `enabled !== false` keeps a
- * workspace that stored the flag on but the page unpublished from going
- * live on upgrade until the General toggle is flipped (which writes both).
+ * Effective status-page publish state: the General product flag, minus an
+ * explicit unpublish override. `enabled !== false` is what lets a workspace
+ * that never stored the bit follow its General toggle, while one that
+ * deliberately stored `false` stays dark until the toggle is flipped on
+ * (which clears the override).
  */
 export function isStatusPagePublished(
   flags: { statusPage?: boolean } | null | undefined,

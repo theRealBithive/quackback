@@ -502,17 +502,30 @@ export const getStatusOverviewAdminFn = createServerFn({ method: 'GET' }).handle
   const auth = await requireAuth({ permission: PERMISSIONS.STATUS_PAGE_PUBLISH })
   const now = new Date()
 
-  const [groups, ungrouped, incidents, maintenance, counts, newLast7d, incidentsLast30d, settings] =
-    await Promise.all([
-      listStatusComponentGroupsWithComponents(),
-      listUngroupedStatusComponents(),
-      listStatusIncidents({ kind: 'incident', state: 'active', limit: 20 }),
-      listStatusIncidents({ kind: 'maintenance', state: 'active', limit: 20 }),
-      getStatusSubscriptionCounts(),
-      countStatusSubscriptionsSince(new Date(now.getTime() - 7 * DAY_MS)),
-      countStatusIncidentsSince(new Date(now.getTime() - 30 * DAY_MS)),
-      getStatusSettings(),
-    ])
+  // Same deferred import as resolveStatusPageGate below, for the same reason.
+  const { isFeatureEnabled } = await import('@/lib/server/domains/settings/settings.service')
+
+  const [
+    groups,
+    ungrouped,
+    incidents,
+    maintenance,
+    counts,
+    newLast7d,
+    incidentsLast30d,
+    settings,
+    statusPageFlag,
+  ] = await Promise.all([
+    listStatusComponentGroupsWithComponents(),
+    listUngroupedStatusComponents(),
+    listStatusIncidents({ kind: 'incident', state: 'active', limit: 20 }),
+    listStatusIncidents({ kind: 'maintenance', state: 'active', limit: 20 }),
+    getStatusSubscriptionCounts(),
+    countStatusSubscriptionsSince(new Date(now.getTime() - 7 * DAY_MS)),
+    countStatusIncidentsSince(new Date(now.getTime() - 30 * DAY_MS)),
+    getStatusSettings(),
+    isFeatureEnabled('statusPage'),
+  ])
 
   const leanComponent = (c: { id: string; name: string; status: string }) => ({
     id: c.id,
@@ -537,7 +550,10 @@ export const getStatusOverviewAdminFn = createServerFn({ method: 'GET' }).handle
     allDays.length > 0 ? allDays.reduce((sum, d) => sum + d.uptimePct, 0) / allDays.length : null
 
   return {
-    enabled: settings.enabled,
+    // The composed state, so the admin overview cannot contradict the General
+    // toggle or the public page. `settings.enabled` alone is only the
+    // unpublish override.
+    enabled: isStatusPagePublished({ statusPage: statusPageFlag }, settings),
     topLevelStatus: deriveTopLevelStatus(allComponents.map((c) => c.status)),
     ungroupedComponents: ungrouped.map(leanComponent),
     groups: groups.map((g) => ({

@@ -88,9 +88,9 @@ function DisabledNotice() {
         variant="outline"
         size="sm"
         className="ml-auto shrink-0"
-        onClick={() => void navigate({ to: '/admin/settings/status' })}
+        onClick={() => void navigate({ to: '/admin/settings/general' })}
       >
-        Page settings
+        Turn it on
       </Button>
     </div>
   )
