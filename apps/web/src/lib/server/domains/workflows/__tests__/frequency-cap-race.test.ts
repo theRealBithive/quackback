@@ -51,7 +51,10 @@ vi.mock('@/lib/server/domains/settings/settings.office-hours', () => ({
 vi.mock('@/lib/server/db', async (importOriginal) => {
   // oxlint-disable-next-line no-restricted-imports -- sanctioned test fixture, same as db-test-fixture.ts
   const { createDb } = await import('@quackback/db/client')
-  const url = process.env.DATABASE_URL ?? 'postgresql://postgres:password@localhost:5432/quackback'
+  // One source for the dev-database default, so `db-url-policy.test.ts` can ban
+  // the literal outright: a test that names it can drift into connecting to it.
+  const { DEV_DATABASE_URL } = await import('@/lib/server/__tests__/db-test-fixture')
+  const url = process.env.DATABASE_URL ?? DEV_DATABASE_URL
   return {
     ...(await importOriginal<typeof import('@/lib/server/db')>()),
     db: createDb(url, { max: 5, prepare: false }),

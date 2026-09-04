@@ -31,6 +31,7 @@ import { boards, type BoardAccess, type Database } from '@/lib/server/db'
 // test file is the legitimate second caller of `createDb`.
 // oxlint-disable-next-line no-restricted-imports
 import { createDb } from '@quackback/db/client'
+import { testDatabaseUrls } from '@/lib/server/__tests__/db-test-fixture'
 import { canViewBoard, boardViewFilter } from '../boards'
 import { ANONYMOUS_ACTOR, type Actor } from '../types'
 import { createId, type SegmentId, type PrincipalId, type BoardId } from '@quackback/ids'
@@ -134,17 +135,11 @@ const actors: Record<string, Actor> = {
   }),
 }
 
-// Prefer the user's explicit DATABASE_URL (which vitest.config sets to
-// quackback_test) — but fall back to the dev DB at quackback if the
-// configured URL is unreachable. Either DB has the boards schema after
-// migrations.
-const CANDIDATE_URLS = [
-  process.env.DATABASE_URL,
-  'postgresql://postgres:password@localhost:5432/quackback',
-].filter((u): u is string => !!u)
-
 async function pickWorkingDb(): Promise<{ db: Database; close: () => Promise<void> } | null> {
-  for (const url of CANDIDATE_URLS) {
+  // One source for which database a test may touch: the one it was told to
+  // use, with no silent fallback to the dev database (V7 in
+  // `db-fixture-infra-gate.test.ts`) — these cases write rows.
+  for (const url of testDatabaseUrls(process.env)) {
     try {
       const db = createDb(url, { max: 2, prepare: false })
       // Probe with a no-op + boards-shape check. boards must exist for

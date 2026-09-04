@@ -51,6 +51,7 @@ import {
 } from '@/lib/server/db'
 // oxlint-disable-next-line no-restricted-imports -- legitimate createDb caller: this file owns the global db for its worker (see help-center-segment-gate.integration.test.ts)
 import { createDb } from '@quackback/db/client'
+import { testDatabaseUrls } from '@/lib/server/__tests__/db-test-fixture'
 import { createId, type ChangelogId, type PrincipalId, type SegmentId } from '@quackback/ids'
 import { getChangelogSubscriberTargets } from '../targets'
 import type { EventData } from '../types'
@@ -69,13 +70,11 @@ const ENTRY_EMPTY_SEG = createId('changelog') as ChangelogId
 const MEMBER_EMAIL = `seg-member-${runSuffix}@example.com`
 const OUTSIDER_EMAIL = `seg-outsider-${runSuffix}@example.com`
 
-const CANDIDATE_URLS = [
-  process.env.DATABASE_URL,
-  'postgresql://postgres:password@localhost:5432/quackback',
-].filter((u): u is string => !!u)
-
 async function pickWorkingDb(): Promise<{ db: Database; close: () => Promise<void> } | null> {
-  for (const url of CANDIDATE_URLS) {
+  // One source for which database a test may touch: the one it was told to
+  // use, with no silent fallback to the dev database (V7 in
+  // `db-fixture-infra-gate.test.ts`) — these cases write rows.
+  for (const url of testDatabaseUrls(process.env)) {
     try {
       const db = createDb(url, { max: 4, prepare: false })
       await db.execute(sql`select 1`)

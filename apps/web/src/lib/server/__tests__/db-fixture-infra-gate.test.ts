@@ -24,10 +24,11 @@
  *
  *   V8  The message never reveals the database password. The URL it names
  *       carries credentials, and the message is printed into CI logs.
- *   V9  The gate's own tests are subject to the gate. On a run declared
- *       complete, the files that check V3, V4 and V5 fail for want of a
- *       database instead of skipping — otherwise the guarantees about silent
- *       skips would themselves be verified by a silent skip.
+ *   V9  The gate's own tests are subject to the gate: on a run declared
+ *       complete, the files that check V3, V4 and V5 cannot skip for want of a
+ *       database, because `vitest.global-setup.ts` fails the run before any
+ *       file loads. Otherwise the guarantees about silent skips would
+ *       themselves be verified by a silent skip.
  *
  * V8 is stated as non-interference — changing only the password never changes
  * the message — rather than as "the output lacks this substring". A generated
@@ -43,13 +44,16 @@
  * V1, V3 and V4 need a fixture and therefore a file of their own (the fixture
  * is module-global, one per file): see `db-fixture-infra-gate-throws.test.ts`,
  * `db-fixture-infra-gate-inert.db.test.ts` and
- * `db-fixture-infra-gate-probe.db.test.ts`. The last two enforce V9 at module
- * scope; V2 is checked end to end in `db-fixture-infra-gate-skips.test.ts`.
+ * `db-fixture-infra-gate-probe.db.test.ts`. V2 is checked end to end in
+ * `db-fixture-infra-gate-skips.test.ts`, and V9 is enforced centrally by
+ * `vitest.global-setup.ts`, which also extends V1 and V4 to the 25 suites that
+ * open their own connection instead of using the fixture.
  */
 import { describe, it, expect } from 'vitest'
 import fc from 'fast-check'
 import {
   isTestDatabaseRequired,
+  schemaStaleness,
   testDatabaseUrls,
   unavailableMessage,
   DEV_DATABASE_URL,
@@ -236,6 +240,48 @@ describe('unavailableMessage (V5, V6, V8)', () => {
         const withLeft = unavailableMessage([{ url: urlWithPassword(left), error }])
         const withRight = unavailableMessage([{ url: urlWithPassword(right), error }])
         expect(withLeft).toBe(withRight)
+      })
+    )
+  })
+})
+
+describe('schemaStaleness (V4)', () => {
+  it('a database at the same count as the journal is current', () => {
+    expect(schemaStaleness(251, 251)).toBeNull()
+  })
+
+  it('a database behind the journal is stale, and says by how much', () => {
+    const message = schemaStaleness(249, 251)
+    expect(message).toContain('249 of 251')
+    expect(message).toContain('db:migrate')
+  })
+
+  it('a database ahead of the journal is not stale', () => {
+    // A branch that removed a migration still has a usable database, and a run
+    // on it must not be blocked by a count it cannot satisfy.
+    expect(schemaStaleness(252, 251)).toBeNull()
+  })
+
+  it('never calls a database stale unless it is actually behind', () => {
+    fc.assert(
+      fc.property(fc.nat({ max: 5000 }), fc.nat({ max: 5000 }), (applied, expected) => {
+        const stale = schemaStaleness(applied, expected)
+        // The unguarded law, holding across both branches: staleness and
+        // being behind are the same thing, never merely correlated.
+        expect(stale !== null).toBe(applied < expected)
+      })
+    )
+  })
+
+  it('names both counts whenever it reports staleness', () => {
+    fc.assert(
+      fc.property(fc.nat({ max: 5000 }), fc.nat({ max: 5000 }), (a, b) => {
+        const applied = Math.min(a, b)
+        const expected = Math.max(a, b)
+        fc.pre(applied < expected)
+        const message = schemaStaleness(applied, expected)
+        expect(message).toContain(String(applied))
+        expect(message).toContain(String(expected))
       })
     )
   })

@@ -9,6 +9,7 @@ import { sql, eq, and } from 'drizzle-orm'
 import { boards, posts, principal, type BoardAccess, type Database } from '@/lib/server/db'
 // oxlint-disable-next-line no-restricted-imports -- legitimate second createDb caller (see board-view-filter-parity.test.ts)
 import { createDb } from '@quackback/db/client'
+import { testDatabaseUrls } from '@/lib/server/__tests__/db-test-fixture'
 import { postsVisibilityConditions } from '../posts-retrieval'
 import { createId, type PrincipalId, type BoardId, type PostId } from '@quackback/ids'
 
@@ -40,13 +41,11 @@ function mkAccess(view: BoardAccess['view']): BoardAccess {
   }
 }
 
-const CANDIDATE_URLS = [
-  process.env.DATABASE_URL,
-  'postgresql://postgres:password@localhost:5432/quackback',
-].filter((u): u is string => !!u)
-
 async function pickWorkingDb(): Promise<{ db: Database; close: () => Promise<void> } | null> {
-  for (const url of CANDIDATE_URLS) {
+  // One source for which database a test may touch: the one it was told to
+  // use, with no silent fallback to the dev database (V7 in
+  // `db-fixture-infra-gate.test.ts`) — these cases write rows.
+  for (const url of testDatabaseUrls(process.env)) {
     try {
       const db = createDb(url, { max: 2, prepare: false })
       await db.execute(sql`select 1`)

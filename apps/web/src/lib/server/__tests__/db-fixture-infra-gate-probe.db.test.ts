@@ -13,7 +13,7 @@ import { sql } from 'drizzle-orm'
 // own throwaway connection only to decide whether a database is there at all.
 // oxlint-disable-next-line no-restricted-imports
 import { createDb } from '@quackback/db/client'
-import { createDbTestFixture, isTestDatabaseRequired } from './db-test-fixture'
+import { createDbTestFixture } from './db-test-fixture'
 
 const STALE_SCHEMA = 'column "not_migrated_yet" does not exist'
 
@@ -34,15 +34,9 @@ async function answersSelectOne(url: string | undefined): Promise<boolean> {
 
 const reachable = await answersSelectOne(process.env.DATABASE_URL)
 
-// This file is a test *of* the gate, so it must not skip on the runs the gate
-// exists for: V4 and V5 would then go unverified and the run would still be
-// green — the same hole V1 closes, one level up.
-if (!reachable && isTestDatabaseRequired(process.env)) {
-  throw new Error(
-    'db-fixture-infra-gate: REQUIRE_TEST_DB declared this run complete, but no database answered, ' +
-      'so V4 and V5 could not be checked. Supply a test database, or unset REQUIRE_TEST_DB.'
-  )
-}
+// A run declared complete cannot reach this file without a usable
+// database: `vitest.global-setup.ts` fails the run first (V1, V4). So a
+// skip here means a laptop with no Postgres, which is V2 working.
 
 // Stubbed rather than assigned: the forks pool gives each test file its own
 // process, so a raw `process.env` write here reaches no other suite today.

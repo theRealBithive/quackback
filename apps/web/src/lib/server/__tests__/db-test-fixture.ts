@@ -64,6 +64,20 @@ export function testDatabaseUrls(env: Record<string, string | undefined>): strin
   return [told]
 }
 
+/**
+ * Why the database is behind the migrations in the tree, or null when it is not.
+ *
+ * Contract: V4 — a stale schema counts as missing infrastructure. Ahead is not
+ * stale: a branch that removed a migration still has a usable database.
+ */
+export function schemaStaleness(applied: number, expected: number): string | null {
+  if (applied >= expected) return null
+  return (
+    `schema is stale: ${applied} of ${expected} migrations applied. ` +
+    'Run `bun run db:migrate` against this database.'
+  )
+}
+
 /** How far down a cause chain to report before giving up on it. */
 const MAX_CAUSE_DEPTH = 5
 
@@ -112,7 +126,7 @@ export function unavailableMessage(failures: readonly TestDatabaseFailure[]): st
     (failure) => `  - ${redactPassword(failure.url)}\n      ${describeFailure(failure.error)}`
   )
   return [
-    'db-test-fixture: no usable test database, and REQUIRE_TEST_DB declared this run complete.',
+    'No usable test database, and REQUIRE_TEST_DB declared this run complete.',
     ...(attempts.length > 0 ? ['Tried:', ...attempts] : ['No database was configured to try.']),
     'Supply one with:',
     '  docker run -d --name quackback-test-pg -e POSTGRES_PASSWORD=password \\',

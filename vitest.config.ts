@@ -20,6 +20,9 @@ export default defineConfig({
     testTimeout: 20000,
     include: ['**/*.test.ts', '**/*.test.tsx'],
     setupFiles: [path.resolve(__dirname, './vitest.setup.ts')],
+    // Fails the run when REQUIRE_TEST_DB declared it complete and no usable
+    // database answers, so a missing or stale schema cannot report as skips.
+    globalSetup: [path.resolve(__dirname, './apps/web/vitest.global-setup.ts')],
     exclude: [
       '**/node_modules/**',
       '**/.next/**',

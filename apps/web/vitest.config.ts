@@ -19,6 +19,9 @@ export default defineConfig({
     testTimeout: 15_000,
     include: ['src/**/*.test.tsx', 'src/**/*.test.ts'],
     setupFiles: [path.resolve(__dirname, '../../vitest.setup.ts')],
+    // Fails the run when REQUIRE_TEST_DB declared it complete and no usable
+    // database answers, so a missing or stale schema cannot report as skips.
+    globalSetup: [path.resolve(__dirname, './vitest.global-setup.ts')],
     exclude: ['**/node_modules/**', '**/.output/**', '**/e2e/**'],
     env: {
       // Overridable, because `quackback_test` is shared with every other
