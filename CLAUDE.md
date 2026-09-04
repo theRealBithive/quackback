@@ -68,21 +68,66 @@ branches.
   Prefer non-interference properties ("changing a field the parser must not read
   never changes the output") over asserting an absent substring: they are
   stronger and cannot produce spurious counterexamples.
-- **A measured mutation score.** Stryker is wired up: `bun x stryker run`, using
-  `stryker.config.json` and the narrow `stryker.vitest.config.ts` beside it. The
-  bar is **no unjustified survivors**, not the number 100 — record any equivalent
-  mutant, and why it is equivalent, in the test module. Record the score there
-  too, with the suites it was measured over: a score is a claim about the runner's
-  selection, not about the module.
+- **A measured mutation score.** CI enforces this in the `mutation` job, and the
+  same check runs locally:
 
-  Two things about it are not obvious and cost a run each. `mutate` and the
-  vitest `include` both have to be narrowed to the change: under the root config
-  the dry run loads all 1400-odd test files before the first mutant, and the
-  suites that need a database or a browser make it worse than slow. And **a
+  ```bash
+  DIFF_BASE=origin/main bun scripts/mutation-check.ts
+  ```
+
+  It mutates the files your change touched, and it fails on two things: a mutant
+  that survived, and a mutant **no selected suite ever executed**. The second one
+  is the reason this gate exists in the shape it does — Stryker calls it
+  `NoCoverage` and leaves it out of the score it prints largest, so a module can
+  read 92% while a third of it was never touched. The bar is **no unjustified
+  survivors and nothing ungraded**, not the number 100.
+
+  **A file is graded because [`scripts/mutation-manifest.json`](scripts/mutation-manifest.json)
+  declares it**, not because it has a suite next to it. An entry pairs a file with
+  the suites that pin it, and adding one is an assertion: these suites, on their
+  own, hold this file's behaviour. Selecting by convention was measured and
+  rejected — 27% of this repository's source files have a co-located
+  `__tests__/<name>.test.ts`, and on the file that probe ran against, that suite
+  reached only the module's pure half. So a touched file with no entry is printed
+  as not mutation-graded **by name** rather than passed over, and
+  `scripts/__tests__/mutation-scope.test.ts` asserts the whole list, because a
+  list that quietly shrinks is how this gate would pass by grading less. Growing
+  it is meant to be easy and to leave a trace in the diff.
+
+  An equivalent mutant is recorded in the manifest's `equivalents`, addressed by
+  the **text** of its line rather than by `file:line` — so the record retires when
+  the line is edited and follows it when the line merely moves. Every record needs
+  the reason no test could tell the difference; a record without one is an
+  allowlist entry, and the gate refuses to run on it.
+
+  The budget is `MUTATION_BUDGET_SECONDS` in `ci.yml`, so raising it stands in a
+  diff. It is wall clock for the whole run and a different thing from Stryker's
+  per-mutant `timeoutMS`: a mutant that hangs is a mutant the tests **caught**,
+  while an exceeded budget means nothing was measured, and the gate fails as such.
+
+  A red suite is not a low score. Stryker aborts in its dry run as soon as any
+  test fails, so the gate reports that it graded **nothing** rather than reading
+  an unrun suite as hundreds of survivors — measured, by breaking one assertion
+  on purpose. That is also why the job waits for `unit`: the verdict is honest
+  either way, but it only means something over tests that pass, and reaching it
+  costs twenty minutes.
+
+  Both Stryker configurations are generated from the manifest per run, into the
+  gitignored `.mutation-tmp/`. There is deliberately no checked-in
+  `stryker.config.json` any more: its `mutate` list and the vitest `include`
+  beside it were two more lists that had to agree with the manifest, and nothing
+  would have noticed when they stopped.
+
+  Two things about running it are not obvious and cost a run each. The dry run has
+  to be narrowed to the change — under the root config it loads all 1400-odd test
+  files before the first mutant, and the suites that need a database or a browser
+  make it worse than slow; that is what the generated `include` is for. And **a
   mutant that crashes a suite during collection is reported as `Survived`** — the
   suite never ran, so nothing failed. A call into production code in a module
   scope or a `describe` body is enough to trigger it, and it under-reports in the
-  reassuring direction. Build fixtures inside the test.
+  reassuring direction. Build fixtures inside the test. That one is not
+  theoretical: it was the last survivor in this gate's own first run against
+  itself.
 
 Two things tests do not prove, so do not claim them: a high mutation score does
 not mean the code is correct (it measures whether tests notice _changes_, and a
@@ -261,6 +306,12 @@ approve their own) and these checks:
   requiring it before `test` is proven would turn a shard failure into a merge
   condition satisfied by a job that graded nothing. Add it after a few real
   pull requests.
+- `mutation` — every mutant of the code the change touched was caught.
+  **Also deliberately not required yet.** It depends on `unit` for the same
+  reason `diff-coverage` does, and it carries one of its own: it is the newest
+  gate, and the cost of a run scales with how many declared files a change
+  touches. Require it once the manifest has grown past its seed entries and a
+  few pull requests have shown what a real run costs.
 
 Never require `e2e-full`. It is a job inside `ci.yml`, which does trigger on
 pull requests, so the job does report there — as `skipped`, because of its

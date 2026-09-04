@@ -5,48 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
-
-Three wasted turns diagnosing an env-leakage question, all of them spent on the
-test runner rather than the question:
-
-- `--reporter=basic` is gone in vitest 4 and fails as
-  `Failed to load custom Reporter from basic`, which reads like a missing file.
-- `--poolOptions.forks.singleFork` is gone too — `Unknown option --poolOptions`.
-  Sequential-in-one-worker is now `--maxWorkers=1 --fileParallelism=false`.
-- `console.log` inside a test never reaches the terminal, even with
-  `--silent=false`. A throwaway probe has to _assert_ what it wants to report
-  and read the value out of the assertion diff.
-
-Worth knowing while writing such a probe: the `forks` pool leaves `isolate` at
-its default, so every test file gets a fresh process and **no** `process.env`
-write crosses files — not even a raw one. Measured, not assumed: a control file
-that stubbed the env and never restored it left the next file untouched, and the
-two files reported different pids. Env hygiene between files is therefore not a
-real hazard here, and `vi.stubEnv` is worth using for the day someone sets
-`isolate: false`, not for today.
-
-Second run, a different corner of the same tool. A `globalSetup` file resolves
-its own imports **from its own location**, not from the config that registers
-it — and bun workspaces do not hoist third-party dependencies to the repo root,
-so a setup file at the root cannot import `drizzle-orm` at all
-(`ERR_MODULE_NOT_FOUND`, raised before the setup body runs, which breaks every
-suite in the repo at once). The workspace packages are worse: `node_modules/@quackback/`
-does not exist, and `@quackback/db/client` resolves **only** through the `alias`
-block in `vitest.config.ts`, which applies to test modules and not to
-globalSetup. A file shared by both configs therefore has to live inside
-`apps/web` and import `../../packages/db/src/client` by path. Three turns.
-
-Third run, the coverage options. **Setting `coverage.exclude` replaces vitest's
-default exclude list rather than adding to it**, and the defaults are what keep
-test files, config files and build output out of the report. On the command
-line there is no way to spread `coverageConfigDefaults.exclude`, so a
-`--coverage.exclude=...` flag silently pulls every test file into scope — and
-for a gate that grades coverage, test files counting as source is exactly the
-kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
-whole coverage block in `vitest.config.ts`, where the defaults can be spread.
-
-## 3x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
+## 4x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
 Measured while checking whether the hand-rolled mutation script can be replaced.
 `@stryker-mutator/core@10` and `@stryker-mutator/vitest-runner@10` do install and
@@ -98,6 +57,73 @@ and was read as a file header), several were redundant guards where two
 mechanisms covered one decision, and only two were genuinely equivalent
 mutants. A survivor list is a to-do list, not a score.
 
+Fourth run, and the crashed-suite half bit again — while building the gate that
+exists to catch it. Mutating the argument object of an internal call to `{}`
+threw immediately, inside a fixture built in a `describe` body. The crash
+happens during **collection**, vitest reports `Tests no tests`, and Stryker
+reads zero failing tests as `Survived`. Two things make it hard to spot from the
+report alone: the mutant looks like a deep logic survivor rather than a fixture
+problem, and it is the only failure mode of this tool that under-reports in the
+reassuring direction. Reproducing a survivor by hand is what identified it — the
+Stryker report cannot say "your suite did not run".
+
+What the gate built on this now handles, and what it still cannot. Deriving both
+the mutant set and the test selection from the diff is automated —
+`scripts/mutation-check.ts` generates the vitest and Stryker configs per run from
+`scripts/mutation-manifest.json` — so the dry-run scoping above is no longer
+something to remember, and a red suite is reported as "graded nothing" rather
+than as a score. The crashed-suite half is not fixed and cannot be fixed from
+here; it is how the runner reports, and the only defence is the discipline of
+building fixtures inside the test.
+
+One concrete gap is left, and it is small. The gate prints a survivor as file,
+line, mutator and replacement — not enough to re-apply it by hand when several
+mutants share a line, which is exactly the trap this entry's third run
+describes. The columns are already in `.mutation-tmp/report.json`; carrying
+`location.start.column` into a `Finding` and printing it would retire that
+manual step.
+
+## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
+
+Three wasted turns diagnosing an env-leakage question, all of them spent on the
+test runner rather than the question:
+
+- `--reporter=basic` is gone in vitest 4 and fails as
+  `Failed to load custom Reporter from basic`, which reads like a missing file.
+- `--poolOptions.forks.singleFork` is gone too — `Unknown option --poolOptions`.
+  Sequential-in-one-worker is now `--maxWorkers=1 --fileParallelism=false`.
+- `console.log` inside a test never reaches the terminal, even with
+  `--silent=false`. A throwaway probe has to _assert_ what it wants to report
+  and read the value out of the assertion diff.
+
+Worth knowing while writing such a probe: the `forks` pool leaves `isolate` at
+its default, so every test file gets a fresh process and **no** `process.env`
+write crosses files — not even a raw one. Measured, not assumed: a control file
+that stubbed the env and never restored it left the next file untouched, and the
+two files reported different pids. Env hygiene between files is therefore not a
+real hazard here, and `vi.stubEnv` is worth using for the day someone sets
+`isolate: false`, not for today.
+
+Second run, a different corner of the same tool. A `globalSetup` file resolves
+its own imports **from its own location**, not from the config that registers
+it — and bun workspaces do not hoist third-party dependencies to the repo root,
+so a setup file at the root cannot import `drizzle-orm` at all
+(`ERR_MODULE_NOT_FOUND`, raised before the setup body runs, which breaks every
+suite in the repo at once). The workspace packages are worse: `node_modules/@quackback/`
+does not exist, and `@quackback/db/client` resolves **only** through the `alias`
+block in `vitest.config.ts`, which applies to test modules and not to
+globalSetup. A file shared by both configs therefore has to live inside
+`apps/web` and import `../../packages/db/src/client` by path. Three turns.
+
+Third run, the coverage options. **Setting `coverage.exclude` replaces vitest's
+default exclude list rather than adding to it**, and the defaults are what keep
+test files, config files and build output out of the report. On the command
+line there is no way to spread `coverageConfigDefaults.exclude`, so a
+`--coverage.exclude=...` flag silently pulls every test file into scope — and
+for a gate that grades coverage, test files counting as source is exactly the
+kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
+whole coverage block in `vitest.config.ts`, where the defaults can be spread.
+
 ## 2x — The DB suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
@@ -124,6 +150,38 @@ All four CI shards passed with coverage on 4 vCPU. So the local failures are loa
 — this laptop runs vitest 11-way with Postgres on the same box — but ruling that
 out took a second full 3-minute shard run as a control. That is the cost of the
 flakiness: no single run means anything, so every measurement needs a twin.
+
+## 1x — Generating a vitest config has two traps, both of which look like a hang
+
+The mutation gate writes the runner's config per run, and both mistakes cost a
+debugging round:
+
+- **`mergeConfig` concatenates arrays.** Merging an override with the root
+  config leaves the root's `include` in place, so the selection becomes
+  "the whole suite plus my file" — 1400-odd test files, per mutant. It presents
+  as a hang, not as a configuration error. Override with a spread
+  (`{ ...base.test, include: [...] }`), not with `mergeConfig`.
+- **A config outside the repo tree cannot resolve `vitest/config`.** Written to
+  `mktemp -d`, the config fails with `Cannot find module 'vitest/config'`,
+  because bare specifiers resolve from the config's own location and `/tmp` has
+  no `node_modules` above it. Generated configs have to live inside the
+  checkout — the gate uses a gitignored `.mutation-tmp/`.
+
+Also worth knowing while writing one: `coverage: undefined` in the test block is
+not the same as omitting it, and fails with
+`TypeError: Cannot read properties of undefined (reading 'enabled')`.
+
+## 1x — Overriding `core.hooksPath` silently skips lint-staged
+
+husky v9 in this repo sets `core.hooksPath` to `.husky/_`, and the executable
+runner in there sources the non-executable `.husky/pre-commit`. Committing with
+`git -c core.hooksPath=.husky` therefore points git at the wrong directory, and
+its warning names the wrong cause: "the '.husky/pre-commit' hook was ignored
+because it's not set as executable" reads like a permission to fix, when the
+file is meant to be non-executable and the wiring was correct until the
+override. The commit goes through with no formatting or lint run, and the next
+signal is CI's `check` job several minutes later. Do not pass `core.hooksPath`;
+if a hook has to be skipped, `--no-verify` says so honestly.
 
 ## 1x — The audit gate reports advisory counts without naming them
 
@@ -251,6 +309,44 @@ Still open: there is no `docker compose -f compose.test.yml up -d` to bring the
 database up in one command.
 
 # Resolved
+
+## 1x — A Stryker run leaves two things behind that nothing else guards
+
+Both surfaced within an hour of the mutation gate going green, and neither is
+about mutation scores.
+
+**A crashed run leaves a sandbox, and vitest collected it.** Stryker copies the
+whole checkout into `.mutation-tmp/stryker/sandbox-XXXXXX/` and applies one
+mutant to the copy. `.mutation-tmp/` is gitignored, which is not the same as
+being outside vitest's `include` — so after a run that crashed, a plain
+`bun x vitest run <suite>` collected the suite twice and reported four failures
+from a file that had already been restored on disk. The failing paths name the
+sandbox, which is the only clue, and it reads like a stale cache. CI never sees
+it (one checkout per job); a laptop does.
+
+**Closed** by `'**/.mutation-tmp/**'` in the root config's `test.exclude`,
+asserted in full by `scripts/__tests__/coverage-scope.test.ts`.
+
+**Stryker's tsconfig rewrite depends on the runner's Node build.** The gate
+passed on one commit and failed on the next, same tree, with
+`TypeError: ts.parseConfigFileTextToJson is not a function` inside
+`TSConfigPreprocessor.rewriteTSConfigFile`. That function does
+`const { default: ts } = await import('typescript')` — CommonJS interop, whose
+named and default bindings a Node patch release can change. The two runners
+differed in exactly that: Node v22.23.1 passed, v22.23.2 failed. Nothing in
+`ci.yml` pins Node, because the workflow installs bun and Stryker's bin then
+runs under whatever `node` the runner image ships.
+
+**Closed** by not needing that code path: `strykerConfigFor` points
+`tsconfigFile` at a file that does not exist, so the rewrite is skipped. It
+exists for `extends` and `references` paths that fall outside the sandbox, and
+here every tsconfig extends a path inside the repository while the root one —
+the only file Stryker would have touched — extends nothing at all.
+
+Still open, and worth knowing before it bites elsewhere: **the Node version in
+CI is not controlled.** Every job that runs a tool with a `#!/usr/bin/env node`
+shebang gets the runner image's Node, which drifts between images inside a
+single workflow run. Pinning it needs `actions/setup-node` in each such job.
 
 ## 3x — Coverage had to be re-installed for every measurement
 
