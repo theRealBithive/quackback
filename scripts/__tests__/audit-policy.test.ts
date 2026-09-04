@@ -35,6 +35,11 @@
  * (a timeout is a detected mutant), no survivors, so there is no equivalent
  * mutant to justify here. `bun x stryker run` reproduces it.
  *
+ * The one timeout is `index -= 1` in the retry loop, which never terminates. It
+ * is worth naming because a timeout that is really just a slow test flips to
+ * "survived" on a faster machine, and this one cannot: the mutated loop has no
+ * exit, so no runner will ever see it finish.
+ *
  * What that number covers: this module against `audit-policy.ts`. It says
  * nothing about `audit-check.ts`, whose wiring is where the defect actually
  * lived — that is covered by `audit-check-gate.test.ts`, which is not in the
