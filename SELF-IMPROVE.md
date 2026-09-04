@@ -67,6 +67,22 @@ problem, and it is the only failure mode of this tool that under-reports in the
 reassuring direction. Reproducing a survivor by hand is what identified it — the
 Stryker report cannot say "your suite did not run".
 
+What the gate built on this now handles, and what it still cannot. Deriving both
+the mutant set and the test selection from the diff is automated —
+`scripts/mutation-check.ts` generates the vitest and Stryker configs per run from
+`scripts/mutation-manifest.json` — so the dry-run scoping above is no longer
+something to remember, and a red suite is reported as "graded nothing" rather
+than as a score. The crashed-suite half is not fixed and cannot be fixed from
+here; it is how the runner reports, and the only defence is the discipline of
+building fixtures inside the test.
+
+One concrete gap is left, and it is small. The gate prints a survivor as file,
+line, mutator and replacement — not enough to re-apply it by hand when several
+mutants share a line, which is exactly the trap this entry's third run
+describes. The columns are already in `.mutation-tmp/report.json`; carrying
+`location.start.column` into a `Finding` and printing it would retire that
+manual step.
+
 ## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
 
 Three wasted turns diagnosing an env-leakage question, all of them spent on the
@@ -154,6 +170,18 @@ debugging round:
 Also worth knowing while writing one: `coverage: undefined` in the test block is
 not the same as omitting it, and fails with
 `TypeError: Cannot read properties of undefined (reading 'enabled')`.
+
+## 1x — Overriding `core.hooksPath` silently skips lint-staged
+
+husky v9 in this repo sets `core.hooksPath` to `.husky/_`, and the executable
+runner in there sources the non-executable `.husky/pre-commit`. Committing with
+`git -c core.hooksPath=.husky` therefore points git at the wrong directory, and
+its warning names the wrong cause: "the '.husky/pre-commit' hook was ignored
+because it's not set as executable" reads like a permission to fix, when the
+file is meant to be non-executable and the wiring was correct until the
+override. The commit goes through with no formatting or lint run, and the next
+signal is CI's `check` job several minutes later. Do not pass `core.hooksPath`;
+if a hook has to be skipped, `--no-verify` says so honestly.
 
 ## 1x — The audit gate reports advisory counts without naming them
 
