@@ -59,6 +59,11 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
+    env:
+      # Declare the run complete: a suite whose database is missing or whose
+      # schema is stale fails here instead of skipping itself. 120 suites guard
+      # on the fixture's `available` flag, and `12 skipped` reads like success.
+      REQUIRE_TEST_DB: '1'
     services:
       postgres:
         image: pgvector/pgvector:pg17

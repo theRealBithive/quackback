@@ -101,7 +101,21 @@ docker run -d --name quackback-test-pg -e POSTGRES_PASSWORD=password \
 DATABASE_URL=postgresql://postgres:password@localhost:5432/quackback_test bun run db:migrate
 ```
 
-Re-run the migration after adding one, or every DB-backed suite silently skips.
+Re-run the migration after adding one, or every DB-backed suite silently skips
+— unless the run says it must not. CI's `unit` job sets `REQUIRE_TEST_DB=1`,
+which turns an unreachable or stale database from a quiet skip into a failure
+naming the database it tried and the reason. Reproducing a CI failure locally
+means setting it too:
+
+```bash
+REQUIRE_TEST_DB=1 DATABASE_URL=postgresql://postgres:password@localhost:5432/quackback_test bun run test
+```
+
+Leave it unset on a laptop and the old behaviour is back: suites without a
+database skip and the run stays green. The guarantees are numbered in
+`apps/web/src/lib/server/__tests__/db-fixture-infra-gate.test.ts`; the ~19
+suites that carry their own `pickWorkingDb` copy instead of the fixture are
+still outside the gate and still skip silently.
 
 ## Migrations
 

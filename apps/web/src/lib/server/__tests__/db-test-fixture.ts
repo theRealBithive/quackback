@@ -29,10 +29,98 @@ import { createDb, type Database } from '@quackback/db/client'
 /** The transaction handle type the fixture parks each test inside. */
 export type TestTransaction = Parameters<Parameters<Database['transaction']>[0]>[0]
 
-const CANDIDATE_URLS = [
-  process.env.DATABASE_URL,
-  'postgresql://postgres:password@localhost:5432/quackback',
-].filter((u): u is string => !!u)
+/** The dev database, used only by a run that was told nothing at all. */
+export const DEV_DATABASE_URL = 'postgresql://postgres:password@localhost:5432/quackback'
+
+/** One candidate database and why it could not be used. */
+export interface TestDatabaseFailure {
+  url: string
+  error: unknown
+}
+
+/** The spellings of REQUIRE_TEST_DB that leave a run free to skip. */
+const SKIPPING_ALLOWED = ['', '0', 'false', 'no']
+
+/**
+ * Whether this run was declared complete, in which case a missing database
+ * fails the run instead of skipping 120 suites quietly. CI sets
+ * REQUIRE_TEST_DB=1; a laptop sets nothing, so local runs still skip. Any
+ * other value counts as "on" — someone who wrote `true` meant to fail loud.
+ */
+export function isTestDatabaseRequired(env: Record<string, string | undefined>): boolean {
+  const declared = env.REQUIRE_TEST_DB
+  if (declared === undefined) return false
+  return !SKIPPING_ALLOWED.includes(declared.trim().toLowerCase())
+}
+
+/**
+ * The databases this run may use. A run that was told which database to use
+ * gets exactly that one — falling back to the dev database would quietly run
+ * the suite against different data than the operator named.
+ */
+export function testDatabaseUrls(env: Record<string, string | undefined>): string[] {
+  const told = env.DATABASE_URL
+  if (!told || told.trim().length === 0) return [DEV_DATABASE_URL]
+  return [told]
+}
+
+/** How far down a cause chain to report before giving up on it. */
+const MAX_CAUSE_DEPTH = 5
+
+/**
+ * Renders whatever was thrown, Error or not, so no reason is lost. The chain
+ * matters: postgres-js reports `Failed query: select 1` at the top and keeps
+ * the half an operator needs — `connect ECONNREFUSED` — in `cause`. The depth
+ * limit keeps a self-referencing cause from looping.
+ */
+function describeFailure(error: unknown): string {
+  const reasons: string[] = []
+  let current: unknown = error
+  for (let depth = 0; current != null && depth < MAX_CAUSE_DEPTH; depth += 1) {
+    reasons.push(renderReason(current))
+    current = current instanceof Error ? current.cause : null
+  }
+  return reasons.filter((reason) => reason.length > 0).join('\n      caused by: ')
+}
+
+/**
+ * One link of the chain. An AggregateError carries an empty message and keeps
+ * the reasons in `errors` — that is how `localhost` failing on both ::1 and
+ * 127.0.0.1 arrives, and printing its message alone says nothing.
+ */
+function renderReason(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const nested = error instanceof AggregateError ? error.errors : []
+  const parts = [
+    error.message,
+    ...nested.map((inner: unknown) => (inner instanceof Error ? inner.message : String(inner))),
+  ]
+  return parts.filter((part) => part.length > 0).join('; ')
+}
+
+/** Blanks the password in a URL's userinfo, so it never reaches a CI log. */
+function redactPassword(url: string): string {
+  return url.replace(/\/\/([^/@]*):([^/@]*)@/, '//$1:***@')
+}
+
+/**
+ * Why no database could be used and what to do about it. This lands in CI
+ * logs, so it names the database and the remedy but never the password.
+ */
+export function unavailableMessage(failures: readonly TestDatabaseFailure[]): string {
+  const attempts = failures.map(
+    (failure) => `  - ${redactPassword(failure.url)}\n      ${describeFailure(failure.error)}`
+  )
+  return [
+    'db-test-fixture: no usable test database, and REQUIRE_TEST_DB declared this run complete.',
+    ...(attempts.length > 0 ? ['Tried:', ...attempts] : ['No database was configured to try.']),
+    'Supply one with:',
+    '  docker run -d --name quackback-test-pg -e POSTGRES_PASSWORD=password \\',
+    '    -e POSTGRES_DB=quackback_test -p 5432:5432 pgvector/pgvector:pg17',
+    '  DATABASE_URL=postgresql://postgres:password@localhost:5432/quackback_test bun run db:migrate',
+    'Or unset REQUIRE_TEST_DB to let suites without a database skip again.',
+  ].join('\n')
+}
 
 /** Thrown into the transaction callback so postgres always rolls back; compared by identity. */
 const ROLLBACK = new Error('db-test-fixture: intentional rollback')
@@ -74,7 +162,11 @@ export interface DbTestFixtureOptions {
 }
 
 export interface DbTestFixture {
-  /** False when no candidate DB is reachable/current; use describe.skipIf. */
+  /**
+   * False when the DB is not reachable/current; use describe.skipIf. Never
+   * false when REQUIRE_TEST_DB declared the run complete — creating the
+   * fixture throws instead, so the skip cannot pass for a green run.
+   */
   available: boolean
   /** Open the per-test transaction. Call from beforeEach. */
   begin: () => Promise<void>
@@ -103,16 +195,24 @@ export async function createDbTestFixture(
   }
   created = true
 
-  for (const url of CANDIDATE_URLS) {
+  const failures: TestDatabaseFailure[] = []
+  for (const url of testDatabaseUrls(process.env)) {
     const candidate = createDb(url, { max: 1, prepare: false })
     try {
       await candidate.execute(sql`select 1`)
       await options.probe?.(candidate)
       activeDb = candidate
       break
-    } catch {
+    } catch (error) {
+      // Keep the reason: a swallowed probe failure is what turns a stale
+      // schema into a silently skipped suite.
+      failures.push({ url, error })
       await endClient(candidate).catch(() => {})
     }
+  }
+
+  if (!activeDb && isTestDatabaseRequired(process.env)) {
+    throw new Error(unavailableMessage(failures))
   }
 
   const begin = async (): Promise<void> => {
