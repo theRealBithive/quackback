@@ -1,0 +1,121 @@
+# Working in this repo
+
+Fork-local conventions. Upstream has no `CLAUDE.md`, so this file never conflicts
+on a sync. Concrete gotchas that cost real time are collected in
+[SELF-IMPROVE.md](SELF-IMPROVE.md); this file is how to work given they exist.
+
+## Tests come before the code, and the contract comes before the tests
+
+For anything non-trivial — branches, arithmetic, money, dates, state transitions,
+permissions, parsing, concurrency — the order is:
+
+1. **Write the guarantees as a numbered list in domain language, no code** (`V1`,
+   `V2`, …). Derive them from what the software must promise, not from what the
+   code currently does. A property read off the implementation can never fail: it
+   freezes the bug and the green suite hides it.
+   - Right: "V3 A workspace that explicitly held the page back stays dark."
+   - Wrong: "V3 In the else branch `enabled` is false."
+2. **Show the list and wait for confirmation.** This is the one blocking step and
+   the cheap one — it is prose, nothing is built yet.
+3. Put the confirmed list **verbatim into the test module header**. Every test
+   names its number (`(V3)`). A test with no number was probably read off the
+   code; a number with no test is a gap.
+4. Prove the tests **red for the right reason**, then implement.
+
+A skipped suite is not a passing suite. The DB fixture skips itself when the
+schema is stale (see below), and `12 skipped` reads like success in a terminal.
+
+## Never soften a failing test
+
+Red is a finding. Forbidden: narrowing generators to exclude the counterexample,
+lowering example counts, `skip`/`xfail`, widening tolerances, pinning the failing
+case as a fixed example. Exactly three allowed reactions: fix the production
+code; correct the property if it stated the contract wrongly, saying why in the
+docstring; or document it as accepted behaviour and ask.
+
+A restriction that follows from the contract _before_ the first run is
+specification. The same restriction _after_ a red run is a cover-up.
+
+Watch for the quiet version: an `if` inside a test that skips exactly the branch
+where the implementation differs. Every branched calculation needs at least one
+**unguarded** assertion — usually a conservation law that holds across all
+branches.
+
+## What "done" means
+
+- **100% line coverage of the lines this change adds or touches** — not the repo
+  total. Report the number.
+- **Property tests for non-trivial logic.** `fast-check` is a devDependency.
+  Prefer non-interference properties ("changing a field the parser must not read
+  never changes the output") over asserting an absent substring: they are
+  stronger and cannot produce spurious counterexamples.
+- **A measured mutation score.** There is no mutation runner here. Until there
+  is, write a throwaway script that applies mutants textually one at a time and
+  runs the suite. The bar is **no unjustified survivors**, not the number 100 —
+  record any equivalent mutant, and why it is equivalent, in the test module.
+
+Two things tests do not prove, so do not claim them: a high mutation score does
+not mean the code is correct (it measures whether tests notice _changes_, and a
+pre-existing bug is not a mutant), and a differential test against your own
+earlier version finds nothing, because both sides agree by construction.
+
+## Measuring coverage
+
+No coverage provider is installed. Install it transiently, measure, then restore
+`package.json` and `bun.lock` so the dependency does not land in a commit:
+
+```bash
+bun add -d @vitest/coverage-v8@4.1.11
+bun x vitest run --coverage.enabled --coverage.provider=v8 \
+  --coverage.reporter=text --coverage.include='<the files you changed>' <suites>
+```
+
+Whole-file percentages are not the number to report. Intersect the JSON reporter's
+uncovered lines with the added lines from `git diff -U0`.
+
+## The test database
+
+Real-DB suites need Postgres **with pgvector** — plain `postgres:16` fails deep
+inside the migration with `extension "vector" is not available`:
+
+```bash
+docker run -d --name quackback-test-pg -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=quackback_test -p 5432:5432 pgvector/pgvector:pg17
+DATABASE_URL=postgresql://postgres:password@localhost:5432/quackback_test bun run db:migrate
+```
+
+Re-run the migration after adding one, or every DB-backed suite silently skips.
+
+## Migrations
+
+`bun run db:generate` is broken (a drizzle snapshot collision predating this
+fork). Write the SQL by hand in `packages/db/drizzle/`, using `IF NOT EXISTS`
+like the surrounding files, and append an entry to `drizzle/meta/_journal.json`
+(`idx` +1, `when` +1, `tag` = the filename without `.sql`).
+
+Adding a migration turns two tests red **on purpose**, so a human confirms
+whether the new migration writes data:
+
+- `fleet/__tests__/migrator-gate.test.ts` lists the post-0248 span; append the tag.
+- `policy/migration-contract/__tests__/ledger.test.ts` snapshots `CONTRACT.md`;
+  regenerate with `-u` and check the diff is only the scanned count. Destructive
+  DDL needs a `-- @contract: safe-after X.Y.Z` comment in the migration, never an
+  allowlist entry.
+
+## Things the linter and typechecker will not tell you plainly
+
+- `bun run typecheck` reports **~815 pre-existing errors** on a clean tree,
+  because the generated route types are not built locally. To know whether you
+  added one, count, `git stash`, count again.
+- Job handler modules must not contain a call-time `import()`
+  (`jobs/__tests__/handler-imports.test.ts`). It would load that module graph
+  inside a per-pass workspace scope.
+- Application code must not import `@quackback/db`. Use `@/lib/server/db` on the
+  server, `@/lib/shared/db-types` on the client.
+
+## Commits
+
+Conventional commits (`fix(events):`, `feat(gitlab):`). The subject says what
+changed for a user or an operator, and the body says why — including the
+behaviour change someone will notice after deploying. The pre-commit hook runs
+`lint-staged` and needs `bun` on `PATH`.
