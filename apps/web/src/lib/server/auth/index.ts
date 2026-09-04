@@ -728,7 +728,14 @@ async function createAuth() {
           ...API_KEY_SCOPES,
         ],
 
-        // MCP endpoint is a valid token audience
+        // MCP endpoint is a valid token audience.
+        //
+        // Exactly one entry, and that is load-bearing: this provider version
+        // does not bind the requested resource to the authorization grant
+        // (GHSA-p2fr-6hmx-4528), so a second audience here would let a client
+        // mint a token for a resource the user never authorized. Guarded by
+        // `__tests__/token-audience-binding.test.ts`, which says what to do
+        // instead.
         validAudiences: [`${baseURL}/api/mcp`],
 
         // Better Auth warns that /.well-known/oauth-authorization-server/api/auth

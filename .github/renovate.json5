@@ -43,11 +43,14 @@
   },
 
   // Reads GitHub's Dependabot alerts, which are fed by the dependency graph.
-  // The graph is currently DISABLED on this repository — forks have it off by
-  // default — so this section is inert until someone enables it under
-  // Settings > Advanced Security. Whether it then parses `bun.lock` at all is
-  // unproven; until it does, `bun scripts/audit-check.ts` in CI is the only
-  // advisory detection we have.
+  // Both are enabled now, and the open question is answered: the graph does
+  // NOT parse `bun.lock`. Measured 2026-09-04 — the SBOM lists 223 packages
+  // where `bun.lock` resolves 1641, and the lockfile appears in the SBOM not
+  // at all. So this section only ever sees advisories in DIRECT dependencies.
+  // Every transitive one stays invisible to GitHub, which is exactly what
+  // `lockFileMaintenance` above exists for, and why
+  // `bun scripts/audit-check.ts` in CI remains the detection that covers the
+  // whole tree.
   vulnerabilityAlerts: {
     enabled: true,
     labels: ['dependencies', 'security'],
