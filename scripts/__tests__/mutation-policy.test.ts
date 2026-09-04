@@ -50,6 +50,7 @@
 import { describe, it, expect } from 'vitest'
 import fc from 'fast-check'
 import {
+  dryRunTests,
   filesTouchedBy,
   formatVerdict,
   gradeReport,
@@ -117,6 +118,16 @@ describe('what a change reaches (B4)', () => {
     expect(reached).not.toContain('scripts/diff-coverage-policy.ts')
   })
 
+  it('reaches the file when only one of its several suites was edited', () => {
+    // Each suite in an entry is part of the same claim, so editing any one of
+    // them re-opens it.
+    const manifest: Manifest = {
+      graded: [{ file: 'src/a.ts', suites: ['t/one.test.ts', 't/two.test.ts'] }],
+      equivalents: [],
+    }
+    expect(filesTouchedBy({ changed: ['t/two.test.ts'], manifest })).toContain('src/a.ts')
+  })
+
   it('names a file once, however many of its suites were edited', () => {
     const manifest: Manifest = {
       graded: [{ file: 'src/a.ts', suites: ['t/one.test.ts', 't/two.test.ts'] }],
@@ -166,10 +177,37 @@ describe('which files a change puts under mutation (B4)', () => {
 
   it('does not name a test file as ungraded — a suite is not the code under test', () => {
     const selection = selectForChange({
-      changed: ['scripts/__tests__/audit-policy.test.ts'],
+      changed: [
+        'scripts/__tests__/audit-policy.test.ts',
+        // Not in a `__tests__` directory, so only the suffix rules it out.
+        'src/thing.test.ts',
+        'src/thing.test.tsx',
+        // In one, but not itself a suite: a fixture or a helper.
+        'src/__tests__/helpers.ts',
+      ],
       manifest: SEED_MANIFEST,
     })
     expect(selection.notGraded).toEqual([])
+  })
+
+  it('does not name a declaration file, which holds no behaviour to mutate', () => {
+    const selection = selectForChange({ changed: ['src/types.d.ts'], manifest: SEED_MANIFEST })
+    expect(selection.notGraded).toEqual([])
+  })
+
+  it('names a component as ungraded, the same as any other source', () => {
+    const selection = selectForChange({ changed: ['src/Widget.tsx'], manifest: SEED_MANIFEST })
+    expect(selection.notGraded).toEqual(['src/Widget.tsx'])
+  })
+
+  it('names what it did not grade in a stable order', () => {
+    // The report is read by people and diffed by machines; an order that
+    // depends on how git happened to list the change is neither.
+    const selection = selectForChange({
+      changed: ['src/z.ts', 'src/a.ts', 'src/m.ts'],
+      manifest: SEED_MANIFEST,
+    })
+    expect(selection.notGraded).toEqual(['src/a.ts', 'src/m.ts', 'src/z.ts'])
   })
 
   it('runs each declared suite once, however many files name it', () => {
@@ -225,7 +263,64 @@ describe('what fails the gate (B5, B9)', () => {
       notGraded: [],
     })
     expect(verdict.findings).toEqual([])
+    expect(verdict.counts.timeout).toBe(1)
     expect(verdict.score).toBe(1)
+  })
+
+  it('counts a status the score leaves out without failing on it', () => {
+    // A runner error is not a suite's fault and not a mutant that got away.
+    // Counting it as either would make the score say something it does not know.
+    const verdict = gradeReport({
+      report: reportOf('src/a.ts', source, [
+        mutant({ status: 'Killed' }),
+        mutant({ status: 'RuntimeError' }),
+        mutant({ status: 'Ignored' }),
+      ]),
+      equivalents: [],
+      notGraded: [],
+    })
+    expect(verdict.findings).toEqual([])
+    expect(verdict.counts.other).toBe(2)
+    expect(verdict.score).toBe(1)
+  })
+
+  it('scores a run whose every mutant the score leaves out as measured, not as NaN', () => {
+    const verdict = gradeReport({
+      report: reportOf('src/a.ts', source, [mutant({ status: 'CompileError' })]),
+      equivalents: [],
+      notGraded: [],
+    })
+    expect(verdict.score).toBe(1)
+  })
+
+  it('counts a timeout towards the score, not against it', () => {
+    // 1 killed and 1 timeout are both detections, against 2 that got away.
+    const verdict = gradeReport({
+      report: reportOf('src/a.ts', source, [
+        mutant({ status: 'Killed' }),
+        mutant({ status: 'Timeout' }),
+        mutant({ status: 'Survived' }),
+        mutant({ status: 'NoCoverage' }),
+      ]),
+      equivalents: [],
+      notGraded: [],
+    })
+    expect(verdict.score).toBe(0.5)
+  })
+
+  it('reports findings in a stable order across files', () => {
+    const verdict = gradeReport({
+      report: {
+        files: {
+          'src/z.ts': { source: source.join('\n'), mutants: [mutant({ status: 'Survived' })] },
+          'src/a.ts': { source: source.join('\n'), mutants: [mutant({ status: 'Survived' })] },
+        },
+        testFiles: { 'some.test.ts': { tests: [{}] } },
+      },
+      equivalents: [],
+      notGraded: [],
+    })
+    expect(verdict.findings.map((finding) => finding.file)).toEqual(['src/a.ts', 'src/z.ts'])
   })
 
   it('scores over every mutant, not over the covered ones (B9)', () => {
@@ -305,6 +400,33 @@ describe('an equivalence record excuses one mutation and no more (B6)', () => {
     })
     expect(verdict.findings).toEqual([])
     expect(verdict.counts.excused).toBe(1)
+    // And it is not also reported stale: a record that did its work is not a
+    // record whose line has gone.
+    expect(verdict.stale).toEqual([])
+  })
+
+  it('excuses a record whose line was written down with its indentation', () => {
+    const indented = { ...record, line: '      if (a < b) run()' }
+    const verdict = gradeReport({
+      report: reportOf('src/a.ts', source, [survivor]),
+      equivalents: [indented],
+      notGraded: [],
+    })
+    expect(verdict.findings).toEqual([])
+  })
+
+  it('excuses nothing for a mutant whose line is not in the source at all', () => {
+    // A report and a checkout that disagree — a stale report, a file that
+    // shrank. The mutant is a finding, and reading past the end of the source
+    // is not a way to decide otherwise.
+    const verdict = gradeReport({
+      report: reportOf('src/a.ts', source, [
+        mutant({ ...survivor, location: { start: { line: 99 } } }),
+      ]),
+      equivalents: [record],
+      notGraded: [],
+    })
+    expect(verdict.findings).toHaveLength(1)
   })
 
   it('does not silence a different mutator on the same line', () => {
@@ -433,6 +555,20 @@ describe('a manifest that cannot be trusted is not read (B4, B6)', () => {
     expect(() => readManifest({ ...valid, graded: [{ file: 'src/a.ts', suites: [7] }] })).toThrow(
       /at least one suite/
     )
+    // Every suite has to be a name, not merely one of them: a list with a
+    // stray number in it would be handed to vitest as an include pattern.
+    expect(() =>
+      readManifest({ ...valid, graded: [{ file: 'src/a.ts', suites: ['t/a.test.ts', 7] }] })
+    ).toThrow(/at least one suite/)
+  })
+
+  it('refuses an equivalence record that is not an object at all', () => {
+    // Says what is wrong rather than failing while taking the record apart.
+    for (const record of [null, 'a line of prose', 42, ['file', 'mutator']]) {
+      expect(() => readManifest({ ...valid, equivalents: [record] })).toThrow(
+        /an equivalence record needs/
+      )
+    }
   })
 
   it('refuses an equivalence record with a field missing', () => {
@@ -457,9 +593,31 @@ describe('a manifest that cannot be trusted is not read (B4, B6)', () => {
 
 describe('a run that measured nothing is not a pass (B7)', () => {
   it('refuses something that parses but is not a mutation report', () => {
-    for (const value of [null, 42, 'a string', {}, { files: 3 }, { files: { 'a.ts': {} } }]) {
+    for (const value of [null, 42, 'a string', {}, { files: 3 }]) {
       const measurement = readMeasurement(value)
       expect(measurement.measured).toBe(false)
+      expect(measurement.measured === false && measurement.reason).toMatch(/not a report/i)
+    }
+  })
+
+  it('refuses a report whose entry for a file carries no mutants', () => {
+    // Checked before the test count, and reported by naming the file: this is
+    // the shape a report truncated mid-write has, and "no test ran" would send
+    // whoever reads it to the wrong place.
+    const ranATest = { testFiles: { 'some.test.ts': { tests: [{ id: '1' }] } } }
+    for (const entry of [
+      {},
+      'not an object',
+      { source: 'const a = 1' },
+      { mutants: [] },
+      { source: 3, mutants: [] },
+      { source: 'const a = 1', mutants: 'not an array' },
+    ]) {
+      const measurement = readMeasurement({ files: { 'src/a.ts': entry }, ...ranATest })
+      expect(measurement.measured, JSON.stringify(entry)).toBe(false)
+      expect(measurement.measured === false && measurement.reason).toMatch(
+        /entry for src\/a\.ts has no source and mutants/
+      )
     }
   })
 
@@ -484,6 +642,97 @@ describe('a run that measured nothing is not a pass (B7)', () => {
   it('accepts a report that mutated a file and ran a test', () => {
     const measurement = readMeasurement(reportOf('src/a.ts', ['const a = 1'], [mutant()]))
     expect(measurement.measured).toBe(true)
+  })
+
+  it('counts the tests the dry run found, across every suite', () => {
+    // The number itself, not just whether it is zero: it is what separates a
+    // selection that pointed at nothing from one that ran.
+    expect(
+      dryRunTests({
+        files: {},
+        testFiles: {
+          'a.test.ts': { tests: [{}, {}, {}] },
+          'b.test.ts': { tests: [{}, {}] },
+        },
+      })
+    ).toBe(5)
+    expect(dryRunTests({ files: {} })).toBe(0)
+  })
+})
+
+describe('the report a run prints (B5, B9)', () => {
+  // Asserted in full rather than by substring. The report is the whole
+  // interface of this gate: it is what a pull request shows, and what somebody
+  // reads at the point where they have to decide whether a mutant matters. A
+  // number quietly dropped from it, a blank line that stops separating the
+  // sections, or a section that stops being printed, is the same class of
+  // failure as grading less.
+  //
+  // Built inside each test, never in this describe body. A mutant that crashes
+  // a fixture at collection time makes vitest report zero tests, and Stryker
+  // reads zero failing tests as a mutant that survived — under-reporting in
+  // the reassuring direction. Measured here: it cost one run of this gate
+  // against itself.
+  function reportedVerdict() {
+    return gradeReport({
+      report: reportOf(
+        'src/a.ts',
+        ['const a = 1', 'if (a <= b) run()'],
+        [
+          mutant({ status: 'Killed' }),
+          mutant({ status: 'Survived', location: { start: { line: 2 } } }),
+          // A different line and a different mutator, so that the report has
+          // to pair each mutant with its own status rather than merely print
+          // both words somewhere.
+          mutant({
+            status: 'NoCoverage',
+            mutatorName: 'StringLiteral',
+            replacement: '""',
+            location: { start: { line: 1 } },
+          }),
+        ]
+      ),
+      equivalents: [
+        {
+          file: 'src/a.ts',
+          mutator: 'EqualityOperator',
+          replacement: 'a <= b',
+          // The line the record was written for is not in the source any more.
+          line: 'if (a < b) run()',
+          why: 'Written for a line that has since been rewritten.',
+        },
+      ],
+      notGraded: ['src/undeclared.ts'],
+    })
+  }
+
+  it('prints what was graded, what got away, and what excused nothing', () => {
+    expect(formatVerdict(reportedVerdict())).toEqual([
+      'Mutated (the files this change touched that the manifest declares): 1 file(s), 3 mutant(s) \u2014 1 killed, 0 killed by timeout, 1 survived, 1 never executed.',
+      'Score over every mutant: 33.33% (0 excused as equivalent, 0 did not compile, 0 neither).',
+      'Not mutation-graded (touched, but no entry in the manifest): 1 file(s).',
+      '',
+      'Mutants the tests did not catch:',
+      '  - src/a.ts:2 EqualityOperator -> a <= b (survived)',
+      '  - src/a.ts:1 StringLiteral -> "" (never executed)',
+      '',
+      'Not mutation-graded, although they look like source:',
+      '  - src/undeclared.ts',
+      '',
+      'Equivalence records that excused nothing \u2014 the line they name has changed:',
+      '  - src/a.ts: EqualityOperator -> a <= b on `if (a < b) run()`',
+    ])
+  })
+
+  it('prints no empty section when there is nothing to put in it', () => {
+    const clean = gradeReport({
+      report: reportOf('src/a.ts', ['const a = 1'], [mutant({ status: 'Killed' })]),
+      equivalents: [],
+      notGraded: [],
+    })
+    const printed = formatVerdict(clean)
+    expect(printed).toHaveLength(3)
+    expect(printed.join('\n')).not.toMatch(/did not catch|although they look|excused nothing/)
   })
 })
 
