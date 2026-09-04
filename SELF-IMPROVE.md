@@ -3,6 +3,22 @@
 Gotchas from concrete runs of work in this repo. One counter per entry; bump it
 when the same thing bites again and re-sort the list by counter, descending.
 
+## 2x — No property-test and mutation infrastructure
+
+The tooling is missing for non-trivial logic. `fast-check` is a devDependency and
+is used by exactly two suites; a mutation runner (Stryker) is still missing, so
+every mutation number in this repo is produced by a throwaway script that applies
+mutants textually one at a time and re-runs the suite by hand.
+
+Second run: the infrastructure gate on the DB fixture needed 25 mutants written
+out by hand to find the four that mattered (three unasserted lines of the
+remediation message, and — the one that counted — no end-to-end test that an
+unreachable database _without_ `REQUIRE_TEST_DB` still skips instead of throwing,
+which is the regression that would have turned every laptop run red). A real
+runner would have listed those in one command instead of one bespoke script per
+change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
+transiently and `package.json`/`bun.lock` restored afterwards, every time.
+
 ## 1x — The event fan-out can be completely dead without anything saying so
 
 `resolveTargets` (`events/resolvers/registry.ts`) resolves against a module-level
@@ -69,13 +85,47 @@ aborts mid-migration with `extension "vector" is not available`. The right image
 
 Making it worse: if the DB is missing or the schema is stale, the fixture **skips** the suite
 silently (`describe.skipIf(!fixture.available)`). The run looks green and checked nothing — in
-that run it showed `12 skipped`, which reads easily as success. A
-`docker compose -f compose.test.yml up -d` plus a note in the output when a suite was skipped
-for lack of a DB would settle both.
+that run it showed `12 skipped`, which reads easily as success.
 
-## 1x — No property-test and mutation infrastructure
+_Half closed:_ `REQUIRE_TEST_DB=1` (set on the CI unit job) now turns an unreachable
+or stale database into a failure that names the database, the reason and the remedy,
+for the ~120 suites that use the fixture. Still open: the ~19 suites carrying their
+own `pickWorkingDb()` copy skip silently regardless, and there is still no
+`docker compose -f compose.test.yml up -d` to bring the DB up in one command.
 
-The tooling is missing for non-trivial logic (here: parsing foreign webhook payloads).
-`fast-check` was added as a devDependency during that run; a mutation runner (Stryker) is
-still missing, and the mutants had to be applied by hand with a throwaway script. As long as
-that stays the case, the mutation number in every report is hand-made and not reproducible.
+## 1x — vitest 4 dropped flags and swallows `console.log`
+
+Three wasted turns diagnosing an env-leakage question, all of them spent on the
+test runner rather than the question:
+
+- `--reporter=basic` is gone in vitest 4 and fails as
+  `Failed to load custom Reporter from basic`, which reads like a missing file.
+- `--poolOptions.forks.singleFork` is gone too — `Unknown option --poolOptions`.
+  Sequential-in-one-worker is now `--maxWorkers=1 --fileParallelism=false`.
+- `console.log` inside a test never reaches the terminal, even with
+  `--silent=false`. A throwaway probe has to _assert_ what it wants to report
+  and read the value out of the assertion diff.
+
+Worth knowing while writing such a probe: the `forks` pool leaves `isolate` at
+its default, so every test file gets a fresh process and **no** `process.env`
+write crosses files — not even a raw one. Measured, not assumed: a control file
+that stubbed the env and never restored it left the next file untouched, and the
+two files reported different pids. Env hygiene between files is therefore not a
+real hazard here, and `vi.stubEnv` is worth using for the day someone sets
+`isolate: false`, not for today.
+
+## 1x — The DB suites are flaky under parallel load
+
+`principals/__tests__/seat-usage.db.test.ts` and
+`tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
+the ~120 fixture-backed suites run together, and pass when run alone. Measured
+over nine full runs of that set: 3 failures in 6 runs on one branch, 1 in 3 on an
+unmodified tree — different files, same shape. `seat-usage` asserts
+`after.members === before.members + 2` against a database-wide count and saw +4,
+so something outside its own rolled-back transaction commits rows while it runs.
+
+The cost is not the flake itself, it is that it makes any change to shared test
+infrastructure unfalsifiable: proving a fixture change innocent took six 75-second
+full-set runs plus a stash-and-compare, because a single red run says nothing.
+Either make the whole-DB counts workspace-scoped, or serialise the suites that
+count globally.
