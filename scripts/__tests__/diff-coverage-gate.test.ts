@@ -205,7 +205,7 @@ describe('the diff-coverage gate as a process (B7, B8)', () => {
     }
   })
 
-  it('fails when two shards read different sources for the same file (B7)', async () => {
+  it('reads every shard, and one shard executing a line is enough (B7)', async () => {
     const root = repoWhoseBaseMovedOn()
     try {
       const shard = (statements: Record<string, unknown>, counts: Record<string, number>) =>
@@ -218,21 +218,73 @@ describe('the diff-coverage gate as a process (B7, B8)', () => {
         })
       mkdirSync(path.join(root, 'coverage', 'one'), { recursive: true })
       mkdirSync(path.join(root, 'coverage', 'two'), { recursive: true })
+      // Two shards of the same commit whose statement ids do not line up: the
+      // second reports a statement the first does not, which shifts every id
+      // after it. Only the second shard executed line 1. This is the shape the
+      // v8 provider actually produces, and reading it per id rather than per
+      // line failed the whole gate on a real run.
       writeFileSync(
         path.join(root, 'coverage', 'one', 'coverage-final.json'),
-        shard({ '0': { start: { line: 1 } } }, { '0': 1 })
+        shard({ '0': { start: { line: 1 } } }, { '0': 0 })
       )
       writeFileSync(
         path.join(root, 'coverage', 'two', 'coverage-final.json'),
-        shard({ '0': { start: { line: 1 } }, '1': { start: { line: 2 } } }, { '0': 0, '1': 0 })
+        shard({ '0': { start: { line: 9 } }, '1': { start: { line: 1 } } }, { '0': 2, '1': 4 })
+      )
+
+      const result = await runGate(root, { DIFF_BASE: 'main' })
+
+      expect(result.stdout).toContain('2 report(s)')
+      expect(result.stdout).toContain('PASS')
+      expect(result.exitCode).toBe(0)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('fails when every report that arrived was empty (B7)', async () => {
+    const root = repoWhoseBaseMovedOn()
+    try {
+      // A report can be valid JSON of the right shape and still say nothing.
+      // It would leave every touched file out of scope, and out of scope
+      // passes — so an empty merge has to fail instead.
+      mkdirSync(path.join(root, 'coverage'), { recursive: true })
+      writeFileSync(path.join(root, 'coverage', 'coverage-final.json'), '{}')
+
+      const result = await runGate(root, { DIFF_BASE: 'main' })
+
+      expect(result.exitCode).not.toBe(0)
+      expect(result.stdout).not.toContain('PASS')
+      expect(result.stderr).toMatch(/nothing was measured/i)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('fails on a report written in a different checkout (B7)', async () => {
+    const root = repoWhoseBaseMovedOn()
+    try {
+      // What downloading CI's artifacts onto another machine produces: the
+      // paths are absolute and belong to the runner's checkout. Grading them
+      // against this checkout's diff matches nothing, leaves every touched
+      // file out of scope, and prints a pass.
+      mkdirSync(path.join(root, 'coverage'), { recursive: true })
+      writeFileSync(
+        path.join(root, 'coverage', 'coverage-final.json'),
+        JSON.stringify({
+          '/home/runner/work/quackback/quackback/mine.ts': {
+            path: '/home/runner/work/quackback/quackback/mine.ts',
+            statementMap: { '0': { start: { line: 1 } } },
+            s: { '0': 1 },
+          },
+        })
       )
 
       const result = await runGate(root, { DIFF_BASE: 'main' })
 
       expect(result.exitCode).not.toBe(0)
       expect(result.stdout).not.toContain('PASS')
-      expect(result.stderr).toMatch(/different statements/i)
-      expect(result.stderr).toContain('mine.ts')
+      expect(result.stderr).toMatch(/not in this checkout/i)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

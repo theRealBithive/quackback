@@ -98,6 +98,57 @@ and was read as a file header), several were redundant guards where two
 mechanisms covered one decision, and only two were genuinely equivalent
 mutants. A survivor list is a to-do list, not a score.
 
+## 2x — The DB suites are flaky under parallel load
+
+`principals/__tests__/seat-usage.db.test.ts` and
+`tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
+the ~120 fixture-backed suites run together, and pass when run alone. Measured
+over nine full runs of that set: 3 failures in 6 runs on one branch, 1 in 3 on an
+unmodified tree — different files, same shape. `seat-usage` asserts
+`after.members === before.members + 2` against a database-wide count and saw +4,
+so something outside its own rolled-back transaction commits rows while it runs.
+
+The cost is not the flake itself, it is that it makes any change to shared test
+infrastructure unfalsifiable: proving a fixture change innocent took six 75-second
+full-set runs plus a stash-and-compare, because a single red run says nothing.
+Either make the whole-DB counts workspace-scoped, or serialise the suites that
+count globally.
+
+Hit again while measuring what coverage costs a shard. Locally, shard 1/4 with
+coverage failed 4 tests and without coverage failed 1 — which reads as "coverage
+broke the suite" until you notice the one failure is in both runs
+(`singletons-not-shared.test.ts`, a 20s timeout) and the other three are
+`channel-accounts/__tests__/channel-account.service.test.ts`, a real-DB suite,
+two of them with `Cannot access '__vite_ssr_import_4__' before initialization`.
+All four CI shards passed with coverage on 4 vCPU. So the local failures are load
+— this laptop runs vitest 11-way with Postgres on the same box — but ruling that
+out took a second full 3-minute shard run as a control. That is the cost of the
+flakiness: no single run means anything, so every measurement needs a twin.
+
+## 1x — v8 coverage reports are not comparable across shards by statement id
+
+Merging the four CI shards' `coverage-final.json` by statement id looked
+obviously right and is wrong. For the same commit and the same source, the v8
+provider does not always emit a statement for a module's first import — and when
+it skips one, every id after it shifts, so id 1 is line 28 in one shard's report
+and line 29 in another's. Adding counts up by id then credits one line's
+executions to a statement on a different line.
+
+Measured over the four shards of run 33892255803: 2 of 2632 files disagreed,
+both of them on line 1, and both times the contested statement was an import
+that had obviously run. Small enough to miss in a fixture, certain enough to
+appear on a real run — the first CI run of the diff-coverage gate failed on it.
+
+Anything that merges these reports has to key on **lines**, not statements: a
+line is executable when some shard lists a statement starting on it, and covered
+when some shard's count for it is above zero. The `statementMap` is a per-run
+artefact; the line number is the only coordinate every shard agrees on.
+
+Related: a coverage report read outside the checkout that produced it (CI
+artifacts downloaded onto a laptop) has absolute paths that match nothing, so
+every touched file lands "out of scope" and the gate prints a pass. Both
+failures now fail loudly instead — `scripts/__tests__/diff-coverage-gate.test.ts`.
+
 ## 1x — `gh` in this checkout talks to the upstream repository, not ours
 
 `gh repo view` here reports `QuackbackIO/quackback`, because the `upstream`
@@ -187,22 +238,6 @@ migrations connects fine and turns every per-file probe into a skip.
 
 Still open: there is no `docker compose -f compose.test.yml up -d` to bring the
 database up in one command.
-
-## 1x — The DB suites are flaky under parallel load
-
-`principals/__tests__/seat-usage.db.test.ts` and
-`tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
-the ~120 fixture-backed suites run together, and pass when run alone. Measured
-over nine full runs of that set: 3 failures in 6 runs on one branch, 1 in 3 on an
-unmodified tree — different files, same shape. `seat-usage` asserts
-`after.members === before.members + 2` against a database-wide count and saw +4,
-so something outside its own rolled-back transaction commits rows while it runs.
-
-The cost is not the flake itself, it is that it makes any change to shared test
-infrastructure unfalsifiable: proving a fixture change innocent took six 75-second
-full-set runs plus a stash-and-compare, because a single red run says nothing.
-Either make the whole-DB counts workspace-scoped, or serialise the suites that
-count globally.
 
 # Resolved
 

@@ -116,48 +116,80 @@ function newSideRange(hunk: string): { start: number; count: number } | null {
 }
 
 /**
- * One coverage report out of the shards' reports.
+ * One coverage report out of the shards' reports, keyed by line.
  *
  * Every shard runs a subset of the suite, so each one reports zero for the
- * files its tests never loaded. A line is covered when *some* shard ran it,
- * which makes summing the per-statement counts the whole merge.
+ * files its tests never loaded. A line is covered when *some* shard ran it.
+ *
+ * The merge is per line rather than per statement, because the shards' statement
+ * ids do not line up. The v8 provider does not always emit a statement for a
+ * module's first import, and when it skips one, every id after it shifts — so
+ * adding counts up by id credits one line's executions to a statement on
+ * another line. Measured over the four shards of one run: 2 of 2632 files
+ * disagreed that way, both of them on line 1. The line is the granularity every
+ * shard agrees on, so the merged report carries one statement per line, keyed
+ * by it.
+ *
+ * A count in the merged report is therefore the highest any shard saw, not a
+ * sum. Line coverage only asks whether a line ran, and a sum over reports that
+ * do not agree on statements is not a number that means anything.
+ *
+ * There is no check here that the shards read the same source. A report carries
+ * no commit, so this module cannot tell; CI guarantees it by construction —
+ * one checkout per workflow run, and the artifacts are scoped to that run.
  */
 export function mergeReports(reports: CoverageReport[]): MergeOutcome {
-  if (reports.length === 0) {
-    return { merged: false, reason: 'no coverage report was collected, so nothing was measured' }
-  }
-
-  const merged: CoverageReport = {}
+  const best = new Map<string, { path: string; executions: Map<number, number> }>()
 
   for (const report of reports) {
     for (const [file, coverage] of Object.entries(report)) {
-      const known = merged[file]
-      if (!known) {
-        merged[file] = {
-          path: coverage.path,
-          statementMap: coverage.statementMap,
-          s: { ...coverage.s },
-        }
-        continue
+      const known = best.get(file) ?? { path: coverage.path, executions: new Map() }
+      for (const [line, count] of executionsPerLine(coverage)) {
+        const highest = known.executions.get(line)
+        if (highest === undefined || highest < count) known.executions.set(line, count)
       }
-      if (statementLayout(known) !== statementLayout(coverage)) {
-        return {
-          merged: false,
-          reason: `${file}: two shards report different statements for it, so they did not read the same source`,
-        }
-      }
-      for (const [id, count] of Object.entries(coverage.s)) known.s[id] += count
+      best.set(file, known)
     }
+  }
+
+  if (best.size === 0) {
+    return {
+      merged: false,
+      reason: 'the coverage reports name no file at all, so nothing was measured',
+    }
+  }
+
+  const merged: CoverageReport = {}
+  for (const [file, { path, executions }] of best) {
+    const statementMap: FileCoverage['statementMap'] = {}
+    const counts: FileCoverage['s'] = {}
+    for (const [line, count] of executions) {
+      statementMap[String(line)] = { start: { line } }
+      counts[String(line)] = count
+    }
+    merged[file] = { path, statementMap, s: counts }
   }
 
   return { merged: true, report: merged }
 }
 
-/** Where a file's statements start, as one string: same source, same layout. */
-function statementLayout(coverage: FileCoverage): string {
-  return Object.entries(coverage.statementMap)
-    .map(([id, statement]) => `${id}:${statement.start.line}`)
-    .join(',')
+/**
+ * The highest execution count among the statements starting on each line.
+ *
+ * A line absent from this map has no statement of its own — a comment, a blank
+ * line, a type, or the tail of a multi-line statement — and is not judged.
+ */
+function executionsPerLine(coverage: FileCoverage): Map<number, number> {
+  const executions = new Map<number, number>()
+
+  for (const [id, statement] of Object.entries(coverage.statementMap)) {
+    const line = statement.start.line
+    const count = coverage.s[id]
+    const best = executions.get(line)
+    if (best === undefined || best < count) executions.set(line, count)
+  }
+
+  return executions
 }
 
 /** Does this parse as a coverage report, or is it merely valid JSON? */
@@ -221,25 +253,6 @@ export function grade(input: { added: AddedLines; coverage: CoverageReport }): V
       unnamed: unnamedOutOfScope,
     },
   }
-}
-
-/**
- * The highest execution count among the statements starting on each line.
- *
- * A line absent from this map has no statement of its own — a comment, a blank
- * line, a type, or the tail of a multi-line statement — and is not judged.
- */
-function executionsPerLine(coverage: FileCoverage): Map<number, number> {
-  const executions = new Map<number, number>()
-
-  for (const [id, statement] of Object.entries(coverage.statementMap)) {
-    const line = statement.start.line
-    const count = coverage.s[id]
-    const best = executions.get(line)
-    if (best === undefined || best < count) executions.set(line, count)
-  }
-
-  return executions
 }
 
 function looksLikeSource(file: string): boolean {

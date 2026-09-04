@@ -28,19 +28,23 @@
  * against the real gate in `diff-coverage-gate.test.ts`, on a throwaway
  * repository whose branch has moved on.
  *
- * Measured on 2026-09-04 with `bun x stryker run`: line coverage of
- * `diff-coverage-policy.ts` 100% (84/84 lines, 101/101 statements, 53/53
- * branches, 13/13 functions), mutation score 98.91% — 183 mutants, 180 killed,
- * 1 timeout (an infinite loop, so detected on any machine), 2 survivors. Both
- * survivors are equivalent mutants, and here is why:
+ * Nothing here checks that the shards read the same source, and nothing could:
+ * a coverage report carries no commit. An earlier draft that tried anyway — by refusing to merge
+ * shards whose statement maps differed — failed the gate's own first CI run.
+ * The maps legitimately differ: the v8 provider does not always emit a
+ * statement for a module's first import, and skipping one shifts every id after
+ * it. So the merge keys on lines, and the same-commit guarantee comes from CI
+ * by construction: one checkout per workflow run, artifacts scoped to that run.
  *
- *   - `best < count` → `best <= count` in `executionsPerLine`. The two differ
- *     only when the counts are equal, and then the mutant overwrites the entry
- *     with the value it already held. No input can tell them apart.
- *   - `.join(',')` → `.join('')` in `statementLayout`. Every entry is written
- *     `<id>:<line>` and a line number cannot contain a colon, so the `<id>:`
- *     markers already separate the entries unambiguously. The comma carries no
- *     information the string does not have without it.
+ * Measured on 2026-09-04 with `bun x stryker run`: line coverage of
+ * `diff-coverage-policy.ts` 100% (88/88 lines, 105/105 statements, 55/55
+ * branches, 11/11 functions), mutation score 98.91% — 183 mutants, 180 killed,
+ * 1 timeout (an infinite loop, so detected on any machine), 2 survivors. Both
+ * survivors are the same equivalent mutant, in the two places a maximum is
+ * taken — `highest < count` in `mergeReports` and `best < count` in
+ * `executionsPerLine`, each mutated to `<=`. The two forms differ only when the
+ * counts are equal, and then the mutant overwrites the entry with the value it
+ * already held. No input can tell them apart.
  *
  * What that number covers: this module, against this suite. It says nothing
  * about `diff-coverage-check.ts`, which runs as a spawned bun process where
@@ -471,7 +475,7 @@ describe('merging the shards (B7)', () => {
 
     expect(outcome.merged).toBe(true)
     const merged = outcome.merged && outcome.report['src/a.ts']
-    expect(merged && merged.s).toEqual({ '0': 2, '1': 4 })
+    expect(merged && merged.s).toEqual({ '1': 2, '2': 4 })
   })
 
   it('keeps a file only one shard saw', () => {
@@ -483,51 +487,66 @@ describe('merging the shards (B7)', () => {
     expect(outcome.merged && Object.keys(outcome.report).sort()).toEqual(['src/a.ts', 'src/b.ts'])
   })
 
-  it('refuses to merge shards that disagree about a file, rather than guessing (B7)', () => {
-    // Same path, different statement maps: the two shards read different
-    // sources. Any merge of that is a made-up number.
-    const outcome = mergeReports([
-      report(fileCoverage('src/a.ts', [[1, 1]])),
-      report(
-        fileCoverage('src/a.ts', [
-          [1, 1],
-          [2, 0],
-        ])
-      ),
-    ])
+  it('merges shards whose statement ids do not line up (B7)', () => {
+    // The shape a real run produces. One shard emits a statement for the
+    // module's first import and another does not, which shifts every id after
+    // it — so id 1 is line 28 in one report and line 29 in the other, and
+    // adding counts up by id credits one line's executions to another.
+    // Measured over the four shards of one CI run: 2 of 2632 files disagreed
+    // like this, both of them on line 1.
+    const withFirstImport = report(
+      fileCoverage('src/a.ts', [
+        [1, 1],
+        [28, 0],
+        [29, 5],
+      ])
+    )
+    const withoutFirstImport = report(
+      fileCoverage('src/a.ts', [
+        [28, 3],
+        [29, 0],
+      ])
+    )
 
-    expect(outcome.merged).toBe(false)
-    expect(outcome.merged === false && outcome.reason).toContain('src/a.ts')
+    const outcome = mergeReports([withFirstImport, withoutFirstImport])
+
+    expect(outcome.merged).toBe(true)
+    // Keyed by line, because the line is the granularity the shards agree on.
+    expect(outcome.merged && outcome.report['src/a.ts'].s).toEqual({
+      '1': 1,
+      '28': 3,
+      '29': 5,
+    })
   })
 
-  it('refuses shards whose statements sit on different lines, not just a different count (B7)', () => {
-    // Same number of statements, different places: two revisions of one file
-    // where a line moved. Comparing only the counts would call these the same
-    // source and add up counts that belong to different lines.
-    const outcome = mergeReports([
-      report(
-        fileCoverage('src/a.ts', [
-          [1, 1],
-          [2, 1],
-        ])
-      ),
-      report(
-        fileCoverage('src/a.ts', [
-          [1, 0],
-          [9, 0],
-        ])
-      ),
-    ])
+  it('judges a line only some shards knew about, rather than dropping it (B7)', () => {
+    // A line one shard lists as never executed and another does not list at
+    // all still has something to execute. Letting the silent shard decide
+    // would turn it into a line nobody grades, which is the direction that
+    // hides a hole; the shard that saw it wins.
+    const sawIt = report(fileCoverage('src/a.ts', [[4, 0]]))
+    const blindToIt = report(fileCoverage('src/a.ts', [[7, 1]]))
 
-    expect(outcome.merged).toBe(false)
-    expect(outcome.merged === false && outcome.reason).toContain('src/a.ts')
+    const outcome = mergeReports([sawIt, blindToIt])
+
+    expect(outcome.merged).toBe(true)
+    const verdict = grade({
+      added: { 'src/a.ts': [4, 7] },
+      coverage: outcome.merged ? outcome.report : {},
+    })
+    expect(verdict.uncovered).toEqual([{ file: 'src/a.ts', line: 4 }])
   })
 
-  it('fails when no shard produced a report at all (B7)', () => {
-    const outcome = mergeReports([])
+  it('refuses a merge that knows no file at all, rather than grading nothing (B7)', () => {
+    // Two ways to arrive here: no shard uploaded a report, or every report
+    // that arrived was empty. Both mean the run measured nothing, and both
+    // would otherwise leave every touched file out of scope and pass.
+    for (const reports of [[], [{}, {}]]) {
+      const outcome = mergeReports(reports)
 
-    expect(outcome.merged).toBe(false)
-    expect(outcome.merged === false && outcome.reason).toMatch(/no coverage/i)
+      expect(outcome.merged).toBe(false)
+      expect(outcome.merged === false && outcome.reason).toMatch(/nothing was measured/i)
+    }
   })
 })
 
@@ -743,7 +762,7 @@ describe('properties of the grading (B1, B2, B3)', () => {
         const merged = forward.merged && forward.report['src/a.ts']
         for (let index = 0; index < 3; index += 1) {
           const ranSomewhere = first[index] > 0 || second[index] > 0
-          expect(merged && merged.s[String(index)] > 0).toBe(ranSomewhere)
+          expect(merged && merged.s[String(index + 1)] > 0).toBe(ranSomewhere)
         }
       })
     )
