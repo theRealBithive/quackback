@@ -66,10 +66,21 @@ branches.
   Prefer non-interference properties ("changing a field the parser must not read
   never changes the output") over asserting an absent substring: they are
   stronger and cannot produce spurious counterexamples.
-- **A measured mutation score.** There is no mutation runner here. Until there
-  is, write a throwaway script that applies mutants textually one at a time and
-  runs the suite. The bar is **no unjustified survivors**, not the number 100 —
-  record any equivalent mutant, and why it is equivalent, in the test module.
+- **A measured mutation score.** Stryker is wired up: `bun x stryker run`, using
+  `stryker.config.json` and the narrow `stryker.vitest.config.ts` beside it. The
+  bar is **no unjustified survivors**, not the number 100 — record any equivalent
+  mutant, and why it is equivalent, in the test module. Record the score there
+  too, with the suites it was measured over: a score is a claim about the runner's
+  selection, not about the module.
+
+  Two things about it are not obvious and cost a run each. `mutate` and the
+  vitest `include` both have to be narrowed to the change: under the root config
+  the dry run loads all 1400-odd test files before the first mutant, and the
+  suites that need a database or a browser make it worse than slow. And **a
+  mutant that crashes a suite during collection is reported as `Survived`** — the
+  suite never ran, so nothing failed. A call into production code in a module
+  scope or a `describe` body is enough to trigger it, and it under-reports in the
+  reassuring direction. Build fixtures inside the test.
 
 Two things tests do not prove, so do not claim them: a high mutation score does
 not mean the code is correct (it measures whether tests notice _changes_, and a
@@ -149,6 +160,10 @@ whether the new migration writes data:
   inside a per-pass workspace scope.
 - Application code must not import `@quackback/db`. Use `@/lib/server/db` on the
   server, `@/lib/shared/db-types` on the client.
+- `bun run typecheck` does not cover `scripts/`; that project is checked
+  separately (`bunx tsc --noEmit -p scripts/tsconfig.json`, wired into CI's
+  `check` job). Anything added under `scripts/` is typechecked only if it is
+  reachable from there.
 
 ## Releases and deploys
 
@@ -183,9 +198,11 @@ classic branch protection, and require exactly these:
   shard count changes.
 - `e2e-smoke`.
 
-Never require `e2e-full`. It carries `if: github.event_name == 'schedule'`, so
-it never reports on a pull request and would block every one of them forever.
-`live-api` is optional — it does run on pull requests, but the DB suites in that
+Never require `e2e-full`. It is a job inside `ci.yml`, which does trigger on
+pull requests, so the job does report there — as `skipped`, because of its
+`if: github.event_name == 'schedule'`. Requiring it would therefore not block
+pull requests the way a never-reporting check would; it would be worse, a merge
+condition satisfied by a job that ran no test at all. `live-api` is optional — it does run on pull requests, but the DB suites in that
 neighbourhood are measurably flaky under parallel load.
 
 Two settings do the actual work: **include administrators** (a rule the only
@@ -203,10 +220,17 @@ comment carries the reasoning and the one knob worth touching.
 The **dependency graph is disabled** on this repository, which is the default
 for a fork. Until someone enables it under Settings, there are no Dependabot
 alerts, Renovate's `vulnerabilityAlerts` section is inert, and
-`bun scripts/audit-check.ts` in CI is the only advisory detection we have. That
-gate audits **production dependencies only** (`bun audit --production`), so an
-advisory in the build toolchain is currently invisible. Widening it means
-editing an upstream-owned file, which is why it has not been done.
+`bun scripts/audit-check.ts` in CI is the only advisory detection we have.
+
+That gate audits the **whole tree**, and grades the two scopes differently: an
+advisory reachable from the running service fails the run, one that only reaches
+the build and test toolchain is printed and does not. Every run opens with both
+counts, so a PASS says what it covered. It also fails when the audit could not
+be performed at all — `bun audit` exits 1 for an unreachable registry exactly as
+it does for a real finding, and reading that as "no advisories" is how the gate
+used to pass while measuring nothing. The policy is pure and lives in
+`scripts/audit-policy.ts` (guarantees A1–A10 in its test module); the
+upstream-owned `audit-check.ts` is only the process around it.
 
 ## Licensing
 

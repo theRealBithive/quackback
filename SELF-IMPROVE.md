@@ -3,12 +3,13 @@
 Gotchas from concrete runs of work in this repo. One counter per entry; bump it
 when the same thing bites again and re-sort the list by counter, descending.
 
-## 2x — No property-test and mutation infrastructure
+## 3x — Coverage has to be re-installed for every measurement
 
-The tooling is missing for non-trivial logic. `fast-check` is a devDependency and
-is used by exactly two suites; a mutation runner (Stryker) is still missing, so
-every mutation number in this repo is produced by a throwaway script that applies
-mutants textually one at a time and re-runs the suite by hand.
+The tooling for non-trivial logic is half-present. `fast-check` is a
+devDependency and is used by a handful of suites; a mutation runner was missing,
+so every mutation number in this repo up to the audit-gate change was produced by
+a throwaway script that applies mutants textually one at a time and re-runs the
+suite by hand.
 
 Second run: the infrastructure gate on the DB fixture needed 25 mutants written
 out by hand to find the four that mattered (three unasserted lines of the
@@ -18,6 +19,15 @@ which is the regression that would have turned every laptop run red). A real
 runner would have listed those in one command instead of one bespoke script per
 change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
 transiently and `package.json`/`bun.lock` restored afterwards, every time.
+
+Third run closed the mutation half — Stryker landed with the dependency-audit
+gate — and left the coverage half exactly as it was. `@vitest/coverage-v8` still
+has to be added, used, and then unpicked from `package.json` and `bun.lock`
+before anything can be committed, and the whole-file percentage it prints is not
+the number the discipline asks for: the lines a change touches have to be
+intersected with the JSON reporter's uncovered list by hand. Installing it as a
+devDependency the way Stryker now is would remove one install, one restore and
+one chance to commit a stray manifest per change.
 
 ## 2x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
 
@@ -50,6 +60,42 @@ does not exist, and `@quackback/db/client` resolves **only** through the `alias`
 block in `vitest.config.ts`, which applies to test modules and not to
 globalSetup. A file shared by both configs therefore has to live inside
 `apps/web` and import `../../packages/db/src/client` by path. Three turns.
+
+## 2x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
+
+Measured while checking whether the hand-rolled mutation script can be replaced.
+`@stryker-mutator/core@10` and `@stryker-mutator/vitest-runner@10` do install and
+work under bun, with two conditions that cost a run each:
+
+- the runner has to be named explicitly in `plugins: ["@stryker-mutator/vitest-runner"]`,
+  or Stryker reports `Cannot find TestRunner plugin "vitest"` and, misleadingly,
+  `no TestRunner plugins were loaded` — bun's `.bun/` store defeats its plugin scan;
+- its **initial dry run executes the entire suite**, all 1405 files, before it
+  mutates anything. It times out long before that finishes, so `mutate` scoped to
+  one file is not enough on its own: the _test command_ has to be scoped too, and
+  `dryRunTimeoutMinutes` raised.
+
+So a diff-scoped mutation gate here is not "point Stryker at the changed files".
+It has to derive both the mutant set and the test selection from the diff.
+
+Second run, with Stryker actually in use. The lever for the dry run is
+`vitest.configFile`, pointing at a second, narrow vitest config whose `include`
+lists only the suites that can reach the mutated module, and whose `globalSetup`
+is deliberately absent so no mutant pays for a test-database probe. The dry run
+went from "all 1405 files, times out" to `Ran 42 tests in 1 second`, and a full
+run of 176 mutants takes about a minute.
+
+The expensive finding is the other one. **A mutant that makes a suite crash
+during collection is reported as `Survived`, not killed.** The file never got as
+far as running a test, nothing failed, so Stryker sees no killing test. It only
+came out by hand: a survivor that looked impossible — `if (!exception)` →
+`if (exception)`, which inverts the whole blocking decision — failed with
+`Tests no tests` and a `TypeError` when the same edit was applied manually. The
+cause was one line of fixture setup outside a test, a `grade(...)` call in the
+`describe` body. This misreports in the reassuring direction, and it is a
+property of the runner rather than of that file: any suite that calls production
+code at module or `describe` scope will quietly under-report its own mutation
+score. Build fixtures inside the test.
 
 ## 1x — The event fan-out can be completely dead without anything saying so
 
@@ -129,23 +175,6 @@ migrations connects fine and turns every per-file probe into a skip.
 
 Still open: there is no `docker compose -f compose.test.yml up -d` to bring the
 database up in one command.
-
-## 1x — Stryker runs the whole suite before the first mutant
-
-Measured while checking whether the hand-rolled mutation script can be replaced.
-`@stryker-mutator/core@10` and `@stryker-mutator/vitest-runner@10` do install and
-work under bun, with two conditions that cost a run each:
-
-- the runner has to be named explicitly in `plugins: ["@stryker-mutator/vitest-runner"]`,
-  or Stryker reports `Cannot find TestRunner plugin "vitest"` and, misleadingly,
-  `no TestRunner plugins were loaded` — bun's `.bun/` store defeats its plugin scan;
-- its **initial dry run executes the entire suite**, all 1405 files, before it
-  mutates anything. It times out long before that finishes, so `mutate` scoped to
-  one file is not enough on its own: the _test command_ has to be scoped too, and
-  `dryRunTimeoutMinutes` raised.
-
-So a diff-scoped mutation gate here is not "point Stryker at the changed files".
-It has to derive both the mutant set and the test selection from the diff.
 
 ## 1x — The DB suites are flaky under parallel load
 
