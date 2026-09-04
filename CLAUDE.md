@@ -105,6 +105,13 @@ branches.
   per-mutant `timeoutMS`: a mutant that hangs is a mutant the tests **caught**,
   while an exceeded budget means nothing was measured, and the gate fails as such.
 
+  A red suite is not a low score. Stryker aborts in its dry run as soon as any
+  test fails, so the gate reports that it graded **nothing** rather than reading
+  an unrun suite as hundreds of survivors — measured, by breaking one assertion
+  on purpose. That is also why the job waits for `unit`: the verdict is honest
+  either way, but it only means something over tests that pass, and reaching it
+  costs twenty minutes.
+
   Both Stryker configurations are generated from the manifest per run, into the
   gitignored `.mutation-tmp/`. There is deliberately no checked-in
   `stryker.config.json` any more: its `mutate` list and the vitest `include`
@@ -300,10 +307,11 @@ approve their own) and these checks:
   condition satisfied by a job that graded nothing. Add it after a few real
   pull requests.
 - `mutation` — every mutant of the code the change touched was caught.
-  **Also deliberately not required yet**, for the same reason and one more of
-  its own: it is the newest gate, and the cost of a run scales with how many
-  declared files a change touches. Require it once the manifest has grown past
-  its seed entries and a few pull requests have shown what a real run costs.
+  **Also deliberately not required yet.** It depends on `unit` for the same
+  reason `diff-coverage` does, and it carries one of its own: it is the newest
+  gate, and the cost of a run scales with how many declared files a change
+  touches. Require it once the manifest has grown past its seed entries and a
+  few pull requests have shown what a real run costs.
 
 Never require `e2e-full`. It is a job inside `ci.yml`, which does trigger on
 pull requests, so the job does report there — as `skipped`, because of its

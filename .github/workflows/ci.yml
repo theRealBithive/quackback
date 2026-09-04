@@ -160,6 +160,13 @@ jobs:
   # caught, while an exceeded budget means nothing was measured, and the gate
   # fails as such.
   mutation:
+    # A mutation score over a red suite is not a number. Stryker aborts in its
+    # dry run when any test fails, so the gate reports "graded nothing" rather
+    # than mistaking an unrun suite for hundreds of survivors (measured) — an
+    # honest verdict, but a meaningless one, and it costs a 20-minute job to
+    # reach. Waiting for `unit` also makes the ordering explicit: this gate
+    # grades tests that pass.
+    needs: unit
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
