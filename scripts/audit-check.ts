@@ -2,40 +2,47 @@
 /**
  * CI dependency-audit gate with a reviewed, time-boxed exception list.
  *
- * Runs `bun audit` over production dependencies and fails when any high or
- * critical advisory is present, UNLESS it is listed in `.audit-allowlist.json`
- * with an `expires` date that is still in the future. Expired exceptions whose
- * advisory is still present also fail the gate, so an exception cannot silence a
- * live vulnerability forever. Exceptions that no longer match any advisory are
- * reported as stale (safe to delete) but do not fail the build.
+ * The grading lives in `audit-policy.ts` and is covered by
+ * `__tests__/audit-policy.test.ts`. This file is only the process around it: it
+ * spawns `bun audit`, reads the allowlist, prints, and picks an exit code.
+ *
+ * Two audits run. Production dependencies can fail the run. The whole tree is
+ * audited as well so that an advisory which only reaches the build and test
+ * toolchain is still reported — reported, not blocking, which is a decision:
+ * a compromised toolchain is worth knowing about and is not a reason to stop
+ * unrelated work.
+ *
+ * The one thing this gate must never do is pass because it could not measure.
+ * `bun audit` exits 1 both when advisories exist and when it cannot reach the
+ * registry, and an earlier version of this file read the second case as "no
+ * advisories" and printed PASS.
  *
  * Usage: bun scripts/audit-check.ts
  */
+import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import {
+  formatVerdict,
+  grade,
+  measureWithRetry,
+  startOfUtcDay,
+  type AllowlistEntry,
+  type AuditReport,
+  type AuditRun,
+} from './audit-policy'
 
-const BLOCKING_SEVERITIES = new Set(['high', 'critical'])
-
-interface RawAdvisory {
-  id: number
-  url: string
-  title: string
-  severity: string
-}
-interface AllowlistEntry {
-  ghsa: string
-  reason: string
-  expires: string
-}
+/**
+ * How many times to attempt an audit that could not be performed.
+ *
+ * Lowered in tests that assert the failure path, so they do not sit through the
+ * retry delays. CI leaves it alone.
+ */
+const AUDIT_ATTEMPTS = Number(process.env.AUDIT_ATTEMPTS ?? 3)
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const allowlistPath = path.join(repoRoot, '.audit-allowlist.json')
-
-/** GHSA identifier is the last path segment of the advisory url. */
-function ghsaOf(advisory: RawAdvisory): string {
-  return advisory.url.split('/').pop() ?? String(advisory.id)
-}
 
 function loadAllowlist(): AllowlistEntry[] {
   let parsed: { advisories?: AllowlistEntry[] }
@@ -63,75 +70,73 @@ function loadAllowlist(): AllowlistEntry[] {
   return entries
 }
 
-async function runAudit(): Promise<Record<string, RawAdvisory[]>> {
-  const proc = Bun.spawn(['bun', 'audit', '--production', '--json'], {
-    cwd: repoRoot,
-    stdout: 'pipe',
-    stderr: 'pipe',
+/**
+ * One `bun audit` invocation over the given dependency scope.
+ *
+ * `node:child_process` rather than `Bun.spawn`: it types against `@types/node`,
+ * which is already here, so this file can be typechecked without adding a
+ * dependency for the sake of one call. It runs the same under bun.
+ */
+function auditOnce(scopeArgs: string[]): Promise<AuditRun> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('bun', ['audit', ...scopeArgs, '--json'], { cwd: repoRoot })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk) => (stdout += chunk))
+    child.stderr.on('data', (chunk) => (stderr += chunk))
+    child.on('error', reject)
+    // A process killed by a signal reports a null code. There is no report in
+    // that case either, so it counts as an audit that could not be performed.
+    child.on('close', (code) => resolve({ exitCode: code ?? 1, stdout, stderr }))
   })
-  const stdout = await new Response(proc.stdout).text()
-  await proc.exited
-  // `bun audit` exits non-zero when advisories exist; that is expected here, we
-  // grade the parsed output ourselves. Only a missing/unparseable body is fatal.
-  if (!stdout.trim()) return {}
-  try {
-    return JSON.parse(stdout)
-  } catch (error) {
-    console.error(`Could not parse bun audit output: ${(error as Error).message}`)
-    console.error(stdout.slice(0, 2000))
-    process.exit(2)
-  }
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Measure one scope, or fail the run: a gate that graded nothing is not a pass. */
+async function measureOrExit(label: string, scopeArgs: string[]): Promise<AuditReport> {
+  const outcome = await measureWithRetry(() => auditOnce(scopeArgs), {
+    attempts: AUDIT_ATTEMPTS,
+    wait,
+  })
+  if (outcome.measured) return outcome.report
+
+  console.error(`\nFAIL: the ${label} audit did not run, so this gate graded nothing.`)
+  console.error(`  ${outcome.reason}`)
+  console.error(
+    `  Attempted ${AUDIT_ATTEMPTS} time(s). Passing here would have reported "not measured" as "no advisories".`
+  )
+  process.exit(1)
 }
 
 const allowlist = loadAllowlist()
-const allowByGhsa = new Map(allowlist.map((entry) => [entry.ghsa, entry]))
-const report = await runAudit()
+const production = await measureOrExit('production dependency', ['--production'])
+const all = await measureOrExit('full dependency tree', [])
 
-// Compare against the start of today (UTC) so an exception is valid through its
-// stated expiry day.
-const today = new Date()
-const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
+const verdict = grade({
+  production,
+  all,
+  allowlist,
+  todayUtcMs: startOfUtcDay(new Date()),
+})
 
-const blocking: string[] = []
-const suppressed: string[] = []
-const matchedGhsa = new Set<string>()
+for (const line of formatVerdict(verdict)) console.log(line)
 
-for (const [pkg, advisories] of Object.entries(report)) {
-  for (const advisory of advisories) {
-    if (!BLOCKING_SEVERITIES.has(advisory.severity)) continue
-    const ghsa = ghsaOf(advisory)
-    const entry = allowByGhsa.get(ghsa)
-    const label = `${pkg} ${ghsa} (${advisory.severity}) - ${advisory.title}`
-    if (!entry) {
-      blocking.push(label)
-      continue
-    }
-    matchedGhsa.add(ghsa)
-    const expired = Date.parse(entry.expires) < todayUtc
-    if (expired) {
-      blocking.push(`${label} [allowlist entry expired ${entry.expires}, re-review required]`)
-    } else {
-      suppressed.push(`${label} [allowed until ${entry.expires}: ${entry.reason}]`)
-    }
-  }
-}
-
-const stale = allowlist.filter((entry) => !matchedGhsa.has(entry.ghsa))
-
-if (suppressed.length) {
-  console.log('Allowlisted advisories (not blocking):')
-  for (const line of suppressed) console.log(`  - ${line}`)
-}
-if (stale.length) {
-  console.log('Stale allowlist entries (advisory no longer present, safe to remove):')
-  for (const entry of stale) console.log(`  - ${entry.ghsa} (${entry.reason})`)
-}
-
-if (blocking.length) {
+if (verdict.blocking.length) {
   console.error(
-    `\nFAIL: ${blocking.length} production high/critical advisory(ies) not covered by a valid allowlist entry:`
+    `\nFAIL: ${verdict.blocking.length} production high/critical advisory(ies) not covered by a valid allowlist entry:`
   )
-  for (const line of blocking) console.error(`  - ${line}`)
+  for (const finding of verdict.blocking) {
+    const expiredNote =
+      finding.why === 'exception expired'
+        ? ` [allowlist entry expired ${finding.expires}, re-review required]`
+        : ''
+    console.error(
+      `  - ${finding.package} ${finding.ghsa} (${finding.severity}) - ${finding.title}${expiredNote}`
+    )
+  }
   console.error(
     `\nRemediate by upgrading/overriding the dependency, or add a reviewed, dated exception to ${path.relative(
       repoRoot,
@@ -141,4 +146,4 @@ if (blocking.length) {
   process.exit(1)
 }
 
-console.log(`\nPASS: no un-allowlisted production high/critical advisories.`)
+console.log('\nPASS: no un-allowlisted production high/critical advisories.')
