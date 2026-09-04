@@ -1,86 +1,81 @@
 # SELF-IMPROVE
 
-Gotchas aus konkreten Arbeitsläufen in diesem Repo. Pro Eintrag ein Zähler; beim
-erneuten Auftreten hochzählen und die Liste nach Zähler absteigend sortieren.
+Gotchas from concrete runs of work in this repo. One counter per entry; bump it
+when the same thing bites again and re-sort the list by counter, descending.
 
-## 1x — Der Event-Fan-out kann komplett tot sein, ohne dass irgendetwas es sagt
+## 1x — The event fan-out can be completely dead without anything saying so
 
-`resolveTargets` (`events/resolvers/registry.ts`) löst gegen ein Modul-Array auf, das
-nur `registerAllResolvers()` befüllt. Verliert der letzte Aufrufer sein Call-Site
-(genau das passierte beim WO-18-Cutover, der `getHookTargets()` entkoppelte), liefert
-jeder Resolve `[]`: das Event wird als `published` gestempelt, kein Hook-Job entsteht,
-kein Log, kein Fehler. Sämtliche Sinks — Integrationen, Webhooks, Notifications, AI,
-Workflows — sind dann still aus.
+`resolveTargets` (`events/resolvers/registry.ts`) resolves against a module-level
+array that only `registerAllResolvers()` fills. If the last caller loses its call
+site — exactly what happened in the WO-18 cutover that decoupled `getHookTargets()` —
+every resolve returns `[]`: the event is stamped `published`, no hook job is created,
+no log, no error. Every sink — integrations, webhooks, notifications, AI, workflows —
+is then silently off.
 
-Die Diagnose kostete rund fünfzehn Turns und mehrere DB-Runden über `events`,
-`job_queue`, `kv_store` und `hook_deliveries`, weil kein einziger Log-Eintrag in die
-richtige Richtung zeigte. Was gefehlt hat:
+Diagnosing it took roughly fifteen turns and several DB rounds across `events`,
+`job_queue`, `kv_store` and `hook_deliveries`, because not one log line pointed in the
+right direction. What was missing:
 
-- Eine Warnung in `resolveTargets`, wenn die Registry leer ist. Ein leeres Register ist
-  in einem laufenden Tier immer ein Bug, nie ein gültiger Zustand. _(In diesem Lauf
-  nachgezogen — die beiden folgenden Punkte fehlen weiterhin.)_
-- Eine Boot-Log-Zeile, die die registrierten Sinks auflistet — analog zu
-  `job.worker_started`.
-- Ein Admin-Surface für `listResolvers()`. Der Kommentar in `registry.ts:71` nennt es
-  bereits "die 'did it fire?'-Fläche", aber nichts exponiert sie.
+- A warning in `resolveTargets` when the registry is empty. An empty registry is always
+  a bug in a running tier, never a valid state. _(Added during that run — the two points
+  below are still missing.)_
+- A boot log line listing the registered sinks, analogous to `job.worker_started`.
+- An admin surface for `listResolvers()`. The comment in `registry.ts:71` already calls
+  it "the 'did it fire?' surface", but nothing exposes it.
 
-## 1x — Kein "warum kam nichts an?"-Pfad für Integrationen
+## 1x — No "why did nothing arrive?" path for integrations
 
-Um zu klären, warum eine korrekt konfigurierte GitLab-Integration nichts erzeugt, muss
-man die Kette `events` → `job_queue('event-dispatch')` → Resolver → `job_queue('events')`
-→ `hook_deliveries` von Hand in SQL nachbauen und dazu wissen, dass der Mapping-Cache in
-`kv_store` unter `hooks:integration-mappings` liegt. Zwei Abbruchstellen im Resolver
-(`integration.resolver.ts:81-85` fehlende `channelId`, `:91-102` Decrypt-Fehler)
-verwerfen ein Target still per `continue`.
+To work out why a correctly configured GitLab integration produces nothing, you have to
+rebuild the chain `events` → `job_queue('event-dispatch')` → resolver → `job_queue('events')`
+→ `hook_deliveries` by hand in SQL, and know that the mapping cache lives in `kv_store`
+under `hooks:integration-mappings`. Two bail-outs in the resolver
+(`integration.resolver.ts:81-85` missing `channelId`, `:91-102` decrypt failure) discard a
+target silently via `continue`.
 
-Eine Diagnose-Ansicht pro Integration — letztes Event, letztes Target, letzter
-Zustellversuch, Grund des Verwerfens — würde diesen Ablauf auf einen Blick reduzieren.
-Die Spalten dafür existieren teilweise schon (`last_outbound_at`, `last_error`), werden
-aber nur beim tatsächlichen HTTP-Call geschrieben, also genau dann nicht, wenn das
-Problem davor liegt.
+A per-integration diagnostic view — last event, last target, last delivery attempt, reason
+for discarding — would collapse that whole procedure into one glance. Some of the columns
+already exist (`last_outbound_at`, `last_error`), but they are only written on an actual
+HTTP call, so precisely not when the problem sits before it.
 
-## 1x — `db:generate` ist kaputt, Migrationen müssen von Hand geschrieben werden
+## 1x — `db:generate` is broken, migrations have to be written by hand
 
-`bun run db:generate` bricht ab mit `[drizzle/meta/0050_snapshot.json, 0051, 0052] are
-pointing to a parent snapshot: ... which is a collision.` Die Snapshots enden bei 0052,
-die Migrationen laufen bis 0273 — der generierte Pfad wurde vor langer Zeit verlassen.
-Tatsächlich üblich ist: SQL-Datei von Hand in `packages/db/drizzle/` anlegen (mit
-`IF NOT EXISTS`, wie 0272) und in `drizzle/meta/_journal.json` einen Eintrag anhängen
-(`idx` +1, `when` +1, `tag` = Dateiname ohne `.sql`).
+`bun run db:generate` aborts with `[drizzle/meta/0050_snapshot.json, 0051, 0052] are
+pointing to a parent snapshot: ... which is a collision.` The snapshots stop at 0052, the
+migrations run to 0273 — the generated path was abandoned long ago. What is actually
+customary: write the SQL file by hand in `packages/db/drizzle/` (with `IF NOT EXISTS`, like 0272) and append an entry to `drizzle/meta/_journal.json` (`idx` +1, `when` +1, `tag` = the
+filename without `.sql`).
 
-Nichts im Repo sagt das. Entweder die Snapshot-Kollision reparieren oder den
-`db:generate`-Skripteintrag entfernen und das Handverfahren in `packages/db/README`
-festhalten — sonst probiert es jeder neu und verliert dieselbe Runde.
+Nothing in the repo says so. Either fix the snapshot collision or remove the `db:generate`
+script entry and record the manual procedure in `packages/db/README` — otherwise everyone
+tries it again and loses the same round.
 
-## 1x — Lokaler `typecheck` meldet 815 vorbestehende Fehler
+## 1x — Local `typecheck` reports 815 pre-existing errors
 
-`bun run typecheck` liefert auf einem **sauberen** Tree 815 `error TS`, fast alle in
-`apps/web/src/routes/**`, weil die generierten Route-Typen lokal nicht gebaut sind. Ob
-die eigene Änderung einen Fehler hinzugefügt hat, lässt sich nur feststellen, indem man
-stasht, die Fehler zählt, zurückholt und wieder zählt.
+`bun run typecheck` yields 815 `error TS` on a **clean** tree, almost all in
+`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
+your own change added an error can only be established by stashing, counting the errors,
+restoring and counting again.
 
-Entweder den Codegen-Schritt in das `typecheck`-Skript ziehen oder dokumentieren, welcher
-Befehl vorher laufen muss.
+Either pull the codegen step into the `typecheck` script or document which command has to
+run first.
 
-## 1x — Kein dokumentierter Weg zur lokalen Test-Datenbank
+## 1x — No documented path to a local test database
 
-Die DB-gestützten Suites brauchen Postgres auf `localhost:5432`, Datenbank
-`quackback_test`, migriert. Das steht nirgends zusammenhängend, und der naheliegende
-Versuch scheitert: `postgres:16` bricht mitten in der Migration mit
-`extension "vector" is not available` ab. Richtig ist `pgvector/pgvector:pg17` (steht nur
-in `.github/workflows/ci.yml`), danach
+The DB-backed suites need Postgres on `localhost:5432`, database `quackback_test`, migrated.
+That is written down nowhere in one place, and the obvious attempt fails: `postgres:16`
+aborts mid-migration with `extension "vector" is not available`. The right image is
+`pgvector/pgvector:pg17` (stated only in `.github/workflows/ci.yml`), followed by
 `DATABASE_URL=postgresql://postgres:password@localhost:5432/quackback_test bun run db:migrate`.
 
-Verschärfend: fehlt die DB oder ist das Schema veraltet, **überspringt** das Fixture die
-Suite lautlos (`describe.skipIf(!fixture.available)`). Der Lauf sieht grün aus und hat
-nichts geprüft — in diesem Lauf zeigte er `12 skipped`, was man leicht als Erfolg liest.
-Ein `docker compose -f compose.test.yml up -d` plus ein Hinweis in der Ausgabe, wenn eine
-Suite mangels DB übersprungen wurde, würde beides erledigen.
+Making it worse: if the DB is missing or the schema is stale, the fixture **skips** the suite
+silently (`describe.skipIf(!fixture.available)`). The run looks green and checked nothing — in
+that run it showed `12 skipped`, which reads easily as success. A
+`docker compose -f compose.test.yml up -d` plus a note in the output when a suite was skipped
+for lack of a DB would settle both.
 
-## 1x — Keine Property-Test- und Mutation-Infrastruktur
+## 1x — No property-test and mutation infrastructure
 
-Für nicht-triviale Logik (hier: das Parsen fremder Webhook-Payloads) fehlen die Werkzeuge.
-`fast-check` wurde in diesem Lauf als devDependency ergänzt; ein Mutation-Runner
-(Stryker) fehlt weiterhin, die Mutanten mussten mit einem Wegwerf-Skript von Hand gesetzt
-werden. Solange das so bleibt, ist die Mutation-Zahl in jedem Bericht handgemacht und
-nicht reproduzierbar.
+The tooling is missing for non-trivial logic (here: parsing foreign webhook payloads).
+`fast-check` was added as a devDependency during that run; a mutation runner (Stryker) is
+still missing, and the mutants had to be applied by hand with a throwaway script. As long as
+that stays the case, the mutation number in every report is hand-made and not reproducible.

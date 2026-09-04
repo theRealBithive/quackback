@@ -4,6 +4,23 @@ Fork-local conventions. Upstream has no `CLAUDE.md`, so this file never conflict
 on a sync. Concrete gotchas that cost real time are collected in
 [SELF-IMPROVE.md](SELF-IMPROVE.md); this file is how to work given they exist.
 
+## Everything that lands in the repo is written in English
+
+We talk German. The repository does not. Every artefact that ends up on disk or
+in the history is English: code, comments, identifiers, test names, commit
+messages, documentation, log messages, error strings, user-facing copy, and the
+notes in [SELF-IMPROVE.md](SELF-IMPROVE.md).
+
+This is not a style preference. It is an AGPL fork of a public upstream project,
+and the source is offered to the people using our instance. A patch has to be
+able to go upstream without a translation pass, and anyone who reads the code —
+a contributor, a future colleague, whoever picks this up after us — must not
+need German to follow it.
+
+Chat stays German whenever that is the language of the conversation. The
+boundary is the file, not the topic: the moment something is written into the
+repo, it is English.
+
 ## Tests come before the code, and the contract comes before the tests
 
 For anything non-trivial — branches, arithmetic, money, dates, state transitions,
