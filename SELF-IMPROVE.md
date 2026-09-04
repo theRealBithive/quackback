@@ -5,48 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
-
-Three wasted turns diagnosing an env-leakage question, all of them spent on the
-test runner rather than the question:
-
-- `--reporter=basic` is gone in vitest 4 and fails as
-  `Failed to load custom Reporter from basic`, which reads like a missing file.
-- `--poolOptions.forks.singleFork` is gone too — `Unknown option --poolOptions`.
-  Sequential-in-one-worker is now `--maxWorkers=1 --fileParallelism=false`.
-- `console.log` inside a test never reaches the terminal, even with
-  `--silent=false`. A throwaway probe has to _assert_ what it wants to report
-  and read the value out of the assertion diff.
-
-Worth knowing while writing such a probe: the `forks` pool leaves `isolate` at
-its default, so every test file gets a fresh process and **no** `process.env`
-write crosses files — not even a raw one. Measured, not assumed: a control file
-that stubbed the env and never restored it left the next file untouched, and the
-two files reported different pids. Env hygiene between files is therefore not a
-real hazard here, and `vi.stubEnv` is worth using for the day someone sets
-`isolate: false`, not for today.
-
-Second run, a different corner of the same tool. A `globalSetup` file resolves
-its own imports **from its own location**, not from the config that registers
-it — and bun workspaces do not hoist third-party dependencies to the repo root,
-so a setup file at the root cannot import `drizzle-orm` at all
-(`ERR_MODULE_NOT_FOUND`, raised before the setup body runs, which breaks every
-suite in the repo at once). The workspace packages are worse: `node_modules/@quackback/`
-does not exist, and `@quackback/db/client` resolves **only** through the `alias`
-block in `vitest.config.ts`, which applies to test modules and not to
-globalSetup. A file shared by both configs therefore has to live inside
-`apps/web` and import `../../packages/db/src/client` by path. Three turns.
-
-Third run, the coverage options. **Setting `coverage.exclude` replaces vitest's
-default exclude list rather than adding to it**, and the defaults are what keep
-test files, config files and build output out of the report. On the command
-line there is no way to spread `coverageConfigDefaults.exclude`, so a
-`--coverage.exclude=...` flag silently pulls every test file into scope — and
-for a gate that grades coverage, test files counting as source is exactly the
-kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
-whole coverage block in `vitest.config.ts`, where the defaults can be spread.
-
-## 3x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
+## 4x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
 Measured while checking whether the hand-rolled mutation script can be replaced.
 `@stryker-mutator/core@10` and `@stryker-mutator/vitest-runner@10` do install and
@@ -98,6 +57,57 @@ and was read as a file header), several were redundant guards where two
 mechanisms covered one decision, and only two were genuinely equivalent
 mutants. A survivor list is a to-do list, not a score.
 
+Fourth run, and the crashed-suite half bit again — while building the gate that
+exists to catch it. Mutating the argument object of an internal call to `{}`
+threw immediately, inside a fixture built in a `describe` body. The crash
+happens during **collection**, vitest reports `Tests no tests`, and Stryker
+reads zero failing tests as `Survived`. Two things make it hard to spot from the
+report alone: the mutant looks like a deep logic survivor rather than a fixture
+problem, and it is the only failure mode of this tool that under-reports in the
+reassuring direction. Reproducing a survivor by hand is what identified it — the
+Stryker report cannot say "your suite did not run".
+
+## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
+
+Three wasted turns diagnosing an env-leakage question, all of them spent on the
+test runner rather than the question:
+
+- `--reporter=basic` is gone in vitest 4 and fails as
+  `Failed to load custom Reporter from basic`, which reads like a missing file.
+- `--poolOptions.forks.singleFork` is gone too — `Unknown option --poolOptions`.
+  Sequential-in-one-worker is now `--maxWorkers=1 --fileParallelism=false`.
+- `console.log` inside a test never reaches the terminal, even with
+  `--silent=false`. A throwaway probe has to _assert_ what it wants to report
+  and read the value out of the assertion diff.
+
+Worth knowing while writing such a probe: the `forks` pool leaves `isolate` at
+its default, so every test file gets a fresh process and **no** `process.env`
+write crosses files — not even a raw one. Measured, not assumed: a control file
+that stubbed the env and never restored it left the next file untouched, and the
+two files reported different pids. Env hygiene between files is therefore not a
+real hazard here, and `vi.stubEnv` is worth using for the day someone sets
+`isolate: false`, not for today.
+
+Second run, a different corner of the same tool. A `globalSetup` file resolves
+its own imports **from its own location**, not from the config that registers
+it — and bun workspaces do not hoist third-party dependencies to the repo root,
+so a setup file at the root cannot import `drizzle-orm` at all
+(`ERR_MODULE_NOT_FOUND`, raised before the setup body runs, which breaks every
+suite in the repo at once). The workspace packages are worse: `node_modules/@quackback/`
+does not exist, and `@quackback/db/client` resolves **only** through the `alias`
+block in `vitest.config.ts`, which applies to test modules and not to
+globalSetup. A file shared by both configs therefore has to live inside
+`apps/web` and import `../../packages/db/src/client` by path. Three turns.
+
+Third run, the coverage options. **Setting `coverage.exclude` replaces vitest's
+default exclude list rather than adding to it**, and the defaults are what keep
+test files, config files and build output out of the report. On the command
+line there is no way to spread `coverageConfigDefaults.exclude`, so a
+`--coverage.exclude=...` flag silently pulls every test file into scope — and
+for a gate that grades coverage, test files counting as source is exactly the
+kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
+whole coverage block in `vitest.config.ts`, where the defaults can be spread.
+
 ## 2x — The DB suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
@@ -124,6 +134,26 @@ All four CI shards passed with coverage on 4 vCPU. So the local failures are loa
 — this laptop runs vitest 11-way with Postgres on the same box — but ruling that
 out took a second full 3-minute shard run as a control. That is the cost of the
 flakiness: no single run means anything, so every measurement needs a twin.
+
+## 1x — Generating a vitest config has two traps, both of which look like a hang
+
+The mutation gate writes the runner's config per run, and both mistakes cost a
+debugging round:
+
+- **`mergeConfig` concatenates arrays.** Merging an override with the root
+  config leaves the root's `include` in place, so the selection becomes
+  "the whole suite plus my file" — 1400-odd test files, per mutant. It presents
+  as a hang, not as a configuration error. Override with a spread
+  (`{ ...base.test, include: [...] }`), not with `mergeConfig`.
+- **A config outside the repo tree cannot resolve `vitest/config`.** Written to
+  `mktemp -d`, the config fails with `Cannot find module 'vitest/config'`,
+  because bare specifiers resolve from the config's own location and `/tmp` has
+  no `node_modules` above it. Generated configs have to live inside the
+  checkout — the gate uses a gitignored `.mutation-tmp/`.
+
+Also worth knowing while writing one: `coverage: undefined` in the test block is
+not the same as omitting it, and fails with
+`TypeError: Cannot read properties of undefined (reading 'enabled')`.
 
 ## 1x — The audit gate reports advisory counts without naming them
 
