@@ -2,34 +2,10 @@
 
 Gotchas from concrete runs of work in this repo. One counter per entry; bump it
 when the same thing bites again and re-sort the list by counter, descending.
+Entries that have actually been fixed move to **Resolved** at the end, with what
+fixed them — they are the record of what the counters bought.
 
-## 3x — Coverage has to be re-installed for every measurement
-
-The tooling for non-trivial logic is half-present. `fast-check` is a
-devDependency and is used by a handful of suites; a mutation runner was missing,
-so every mutation number in this repo up to the audit-gate change was produced by
-a throwaway script that applies mutants textually one at a time and re-runs the
-suite by hand.
-
-Second run: the infrastructure gate on the DB fixture needed 25 mutants written
-out by hand to find the four that mattered (three unasserted lines of the
-remediation message, and — the one that counted — no end-to-end test that an
-unreachable database _without_ `REQUIRE_TEST_DB` still skips instead of throwing,
-which is the regression that would have turned every laptop run red). A real
-runner would have listed those in one command instead of one bespoke script per
-change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
-transiently and `package.json`/`bun.lock` restored afterwards, every time.
-
-Third run closed the mutation half — Stryker landed with the dependency-audit
-gate — and left the coverage half exactly as it was. `@vitest/coverage-v8` still
-has to be added, used, and then unpicked from `package.json` and `bun.lock`
-before anything can be committed, and the whole-file percentage it prints is not
-the number the discipline asks for: the lines a change touches have to be
-intersected with the JSON reporter's uncovered list by hand. Installing it as a
-devDependency the way Stryker now is would remove one install, one restore and
-one chance to commit a stray manifest per change.
-
-## 2x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
+## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
 
 Three wasted turns diagnosing an env-leakage question, all of them spent on the
 test runner rather than the question:
@@ -61,7 +37,16 @@ block in `vitest.config.ts`, which applies to test modules and not to
 globalSetup. A file shared by both configs therefore has to live inside
 `apps/web` and import `../../packages/db/src/client` by path. Three turns.
 
-## 2x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
+Third run, the coverage options. **Setting `coverage.exclude` replaces vitest's
+default exclude list rather than adding to it**, and the defaults are what keep
+test files, config files and build output out of the report. On the command
+line there is no way to spread `coverageConfigDefaults.exclude`, so a
+`--coverage.exclude=...` flag silently pulls every test file into scope — and
+for a gate that grades coverage, test files counting as source is exactly the
+kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
+whole coverage block in `vitest.config.ts`, where the defaults can be spread.
+
+## 3x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
 Measured while checking whether the hand-rolled mutation script can be replaced.
 `@stryker-mutator/core@10` and `@stryker-mutator/vitest-runner@10` do install and
@@ -96,6 +81,33 @@ cause was one line of fixture setup outside a test, a `grade(...)` call in the
 property of the runner rather than of that file: any suite that calls production
 code at module or `describe` scope will quietly under-report its own mutation
 score. Build fixtures inside the test.
+
+Third run, on how to read a survivor. Hand-applying a mutant to check it is the
+right move — it is what found the collection crash above — but the _line_ in
+the report is not enough to reproduce it. Stryker mutates sub-expressions, so
+`if (a || b)` yields separate mutants for the whole condition, for `a`, and for
+`b`, all reported on the same line. Rewriting the line from the line number
+alone applies a different mutant than the one that survived; here that briefly
+looked like the runner reporting a killed mutant as survived. Read
+`location.start.column`/`end.column` out of `reports/mutation/mutation.json`
+and slice the original text with them, then apply exactly that.
+
+The payoff for doing it properly: of 23 survivors in one module, two were real
+defects in a diff parser (a removed SQL comment `-- note` arrives as `--- note`
+and was read as a file header), several were redundant guards where two
+mechanisms covered one decision, and only two were genuinely equivalent
+mutants. A survivor list is a to-do list, not a score.
+
+## 1x — `gh` in this checkout talks to the upstream repository, not ours
+
+`gh repo view` here reports `QuackbackIO/quackback`, because the `upstream`
+remote exists and gh resolves it first. So `gh pr create` failed with
+`No commits between main and <branch>` — which reads like a git problem and is
+not one: it was opening the pull request against upstream, where our branch
+does not exist. Every `gh` call needs `--repo theRealBithive/quackback`, or one
+`gh repo set-default theRealBithive/quackback` per clone, which is what was
+done. Worth knowing before the first `gh` command in a fresh clone, because the
+error message points away from the cause.
 
 ## 1x — The event fan-out can be completely dead without anything saying so
 
@@ -191,3 +203,36 @@ infrastructure unfalsifiable: proving a fixture change innocent took six 75-seco
 full-set runs plus a stash-and-compare, because a single red run says nothing.
 Either make the whole-DB counts workspace-scoped, or serialise the suites that
 count globally.
+
+# Resolved
+
+## 3x — Coverage had to be re-installed for every measurement
+
+The tooling for non-trivial logic is half-present. `fast-check` is a
+devDependency and is used by a handful of suites; a mutation runner was missing,
+so every mutation number in this repo up to the audit-gate change was produced by
+a throwaway script that applies mutants textually one at a time and re-runs the
+suite by hand.
+
+Second run: the infrastructure gate on the DB fixture needed 25 mutants written
+out by hand to find the four that mattered (three unasserted lines of the
+remediation message, and — the one that counted — no end-to-end test that an
+unreachable database _without_ `REQUIRE_TEST_DB` still skips instead of throwing,
+which is the regression that would have turned every laptop run red). A real
+runner would have listed those in one command instead of one bespoke script per
+change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
+transiently and `package.json`/`bun.lock` restored afterwards, every time.
+
+Third run closed the mutation half — Stryker landed with the dependency-audit
+gate — and left the coverage half exactly as it was. `@vitest/coverage-v8` still
+has to be added, used, and then unpicked from `package.json` and `bun.lock`
+before anything can be committed, and the whole-file percentage it prints is not
+the number the discipline asks for: the lines a change touches have to be
+intersected with the JSON reporter's uncovered list by hand. Installing it as a
+devDependency the way Stryker now is would remove one install, one restore and
+one chance to commit a stray manifest per change.
+
+**Closed** by the diff-coverage gate: `@vitest/coverage-v8` is a devDependency,
+the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
+does the intersection with the diff that used to be done by hand. Three runs
+paid for it.

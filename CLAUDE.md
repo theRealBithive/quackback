@@ -61,7 +61,9 @@ branches.
 ## What "done" means
 
 - **100% line coverage of the lines this change adds or touches** — not the repo
-  total. Report the number.
+  total. Report the number. CI enforces this in the `diff-coverage` job and
+  prints the file and line of anything missing; see [Measuring
+  coverage](#measuring-coverage) for the same check locally.
 - **Property tests for non-trivial logic.** `fast-check` is a devDependency.
   Prefer non-interference properties ("changing a field the parser must not read
   never changes the output") over asserting an absent substring: they are
@@ -89,17 +91,39 @@ earlier version finds nothing, because both sides agree by construction.
 
 ## Measuring coverage
 
-No coverage provider is installed. Install it transiently, measure, then restore
-`package.json` and `bun.lock` so the dependency does not land in a commit:
+`@vitest/coverage-v8` is a devDependency and the provider is set in
+`vitest.config.ts`, so `--coverage.enabled` is the whole flag:
 
 ```bash
-bun add -d @vitest/coverage-v8@4.1.11
-bun x vitest run --coverage.enabled --coverage.provider=v8 \
-  --coverage.reporter=text --coverage.include='<the files you changed>' <suites>
+bun x vitest run --coverage.enabled --coverage.reporter=text <suites>
 ```
 
-Whole-file percentages are not the number to report. Intersect the JSON reporter's
-uncovered lines with the added lines from `git diff -U0`.
+Whole-file percentages are not the number to report, and you do not have to
+work the difference out by hand. `scripts/diff-coverage-check.ts` intersects
+the report with the lines your change added and prints what is missing, file
+and line. Locally that is two commands:
+
+```bash
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportsDirectory=coverage/local <the suites that reach your change>
+DIFF_BASE=origin/main bun scripts/diff-coverage-check.ts
+```
+
+The second reads every `coverage-final.json` under `coverage/`, so a local run
+and CI's four shard reports go through the same code. Locally you are grading
+against the suites you chose to run — CI runs all of them, and a line covered
+only by a suite you skipped will read as a hole. That is a reason to widen the
+run, not to argue with the number.
+
+**What is in scope is decided in `vitest.config.ts`**, in the `coverage` block,
+because a source file that falls out of `include` is graded by nobody. The gate
+names every source-looking file it could not grade, so a stale `include` shows
+up in the report of every run instead of going quiet. The two CLI entry points
+(`scripts/*-check.ts`) are excluded on purpose: they run as a spawned `bun`
+process where an in-process provider cannot see them, so measuring them would
+report 0% for code their own end-to-end tests do execute. They are covered by
+spawning them (`scripts/__tests__/*-gate.test.ts`), and the logic beside them
+lives in `*-policy.ts`, which is graded normally. Keep new gates in that shape.
 
 ## The test database
 
@@ -197,6 +221,11 @@ classic branch protection, and require exactly these:
   require the individual `test (n/4)` shards; the names break the moment the
   shard count changes.
 - `e2e-smoke`.
+- `diff-coverage` — every line the change added was executed by a test. Worth
+  requiring once it has run green on a few real pull requests; until then it
+  reports without blocking. It depends on `unit`, so it is skipped when a shard
+  fails, and a skipped check is not the same as a passing one — that is another
+  reason to add it only after `test` is already required.
 
 Never require `e2e-full`. It is a job inside `ci.yml`, which does trigger on
 pull requests, so the job does report there — as `skipped`, because of its
