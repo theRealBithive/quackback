@@ -1,0 +1,12 @@
+{
+  // `bun run typecheck` covers apps/web, and CI adds the widget, db and email
+  // packages. Nothing covered `scripts/`, so the dependency-audit gate — which
+  // decides whether a change ships — was the only unchecked TypeScript in the
+  // repository. Wired into CI's `check` job next to the other typechecks.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

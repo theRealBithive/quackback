@@ -28,7 +28,10 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
-      - name: Audit production dependencies
+      # Production advisories fail this job; toolchain-only ones are reported.
+      # The gate also fails when the audit could not be performed at all — it
+      # used to read an unreachable registry as "no advisories" and pass.
+      - name: Audit dependencies
         run: bun scripts/audit-check.ts
       - run: bun run lint
       # Build the widget bundle first — apps/web imports
@@ -48,6 +51,9 @@ jobs:
       - run: bun run --cwd packages/widget test
       - run: bun run --cwd packages/db typecheck
       - run: bunx tsc --noEmit -p packages/email/tsconfig.json
+      # `scripts/` was the only TypeScript nothing typechecked, and the
+      # dependency-audit gate lives there.
+      - run: bunx tsc --noEmit -p scripts/tsconfig.json
 
   # Four shards on four-core runners. The ~1,300-file suite was ~8–9 min of
   # wall clock on one job; splitting files is what makes the unit gate finish

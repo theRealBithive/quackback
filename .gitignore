@@ -70,3 +70,7 @@ docs/superpowers/
 
 # Local scratch
 scratchpad/
+
+# Mutation testing: Stryker's sandbox copy of the repo and its report output.
+.stryker-tmp/
+reports/mutation/
