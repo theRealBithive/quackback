@@ -5,7 +5,7 @@
  * per-integration access token, and emits one target per channel. Behavior +
  * target shape are preserved; only the event access (payload vs data) changes.
  */
-import { db, integrations, integrationEventMappings, eq, and } from '@/lib/server/db'
+import { db, integrations, integrationEventMappings, posts, eq, and } from '@/lib/server/db'
 import { cacheGet, cacheSet, CACHE_KEYS } from '@/lib/server/cache'
 import { decryptSecrets } from '@/lib/server/integrations/encryption'
 import { buildHookContext } from '../hook-context'
@@ -49,17 +49,79 @@ async function loadMappings(): Promise<CachedMapping[]> {
   return rows
 }
 
+interface MappingFilters {
+  boardIds?: string[]
+  statusIds?: string[]
+}
+
+/**
+ * A mapping that names statuses is a per-board routing rule: it says which
+ * project this one board's issues belong in. Nothing else writes `statusIds`,
+ * which is what makes it a safe discriminator — chat mappings are unaffected
+ * by everything that keys off it.
+ */
+function isBoardRoutingRule(filters: MappingFilters | null): boolean {
+  return (filters?.statusIds?.length ?? 0) > 0
+}
+
+/**
+ * Whether a mapping's board filter lets this event through.
+ *
+ * No board filter matches every board — that is how one chat channel
+ * subscribes to a whole instance. A board filter matches when the event names
+ * one of its boards.
+ *
+ * The third case is the one that matters. An event that names no board at all
+ * passes every board filter, and for chat that is deliberate: a conversation
+ * or ticket event has no board, and a channel filtered to a board should keep
+ * receiving them. A routing rule must not get that exception. It names the one
+ * project this board's issues belong in, so "no board" would mean "every
+ * project" — one post opening an issue in every product's tracker, which is
+ * what the code did before this line existed.
+ */
+function boardFilterAllows(filters: MappingFilters | null, boardIds: string[]): boolean {
+  const declared = filters?.boardIds
+  if (!declared?.length) return true
+  if (boardIds.some((id) => declared.includes(id))) return true
+  if (isBoardRoutingRule(filters)) return false
+  return boardIds.length === 0
+}
+
+/**
+ * Whether a mapping's status filter lets this event through.
+ *
+ * Only a routing rule declares one, and it decides *when* an issue is created:
+ * on reaching a triage status, not on the post arriving. An unknown status is
+ * not a wildcard — a rule that names statuses and cannot see one matches
+ * nothing.
+ *
+ * The value compared is the status **id**, read from the post row. The event
+ * payload carries the status *name*, and matching on that would mean renaming
+ * a status silently stops a board from creating issues (V7).
+ */
+function statusFilterAllows(filters: MappingFilters | null, statusId: string | undefined): boolean {
+  const declared = filters?.statusIds
+  if (!declared?.length) return true
+  if (!statusId) return false
+  return declared.includes(statusId)
+}
+
 /**
  * Pure target construction (unit-testable): filter mappings for this event type,
- * apply the board filter, dedupe by (integrationType, channelId), decrypt the
- * token via the injected `decrypt`. Mirrors getIntegrationTargets exactly.
+ * apply the board and status filters, dedupe by (integrationType, channelId),
+ * decrypt the token via the injected `decrypt`.
+ *
+ * `statusId` is the post's current status id, or undefined for an event that
+ * has no post status. Mappings that declare no `statusIds` ignore it, so every
+ * provider that predates per-board routing behaves exactly as before.
  */
 export function buildIntegrationTargets(
   mappings: CachedMapping[],
   eventType: string,
   boardIds: string[],
   rootUrl: string,
-  decrypt: (blob: string) => { accessToken?: string }
+  decrypt: (blob: string) => { accessToken?: string },
+  statusId?: string
 ): HookTarget[] {
   const targets: HookTarget[] = []
   const seen = new Set<string>()
@@ -67,14 +129,9 @@ export function buildIntegrationTargets(
   for (const m of mappings) {
     if (m.eventType !== eventType) continue
 
-    const filters = m.filters as { boardIds?: string[] } | null
-    if (
-      filters?.boardIds?.length &&
-      boardIds.length > 0 &&
-      !boardIds.some((id) => filters.boardIds!.includes(id))
-    ) {
-      continue
-    }
+    const filters = m.filters as MappingFilters | null
+    if (!boardFilterAllows(filters, boardIds)) continue
+    if (!statusFilterAllows(filters, statusId)) continue
 
     const integrationConfig = (m.integrationConfig as Record<string, unknown>) || {}
     const actionConfig = (m.actionConfig as Record<string, unknown>) || {}
@@ -127,6 +184,27 @@ export function buildIntegrationTargets(
   return targets
 }
 
+/**
+ * The post's current status id, read from the row.
+ *
+ * Deliberately not from the payload: `post.status_changed` carries the status
+ * *name* (`newStatus`), and a rule that matched on a name would stop working
+ * the moment someone renames a status in the admin UI — silently, because
+ * nothing fails, issues just stop being created (V7).
+ *
+ * Only called when some mapping actually declares `statusIds`, so an instance
+ * with no per-board routing keeps dispatching without an extra query.
+ */
+async function currentStatusId(event: DomainEvent): Promise<string | undefined> {
+  if (event.entityType !== 'post') return undefined
+  const [post] = await db
+    .select({ statusId: posts.statusId })
+    .from(posts)
+    .where(eq(posts.id, event.entityId as never))
+    .limit(1)
+  return post?.statusId ?? undefined
+}
+
 /** Private comments never reach external integrations. */
 function isPrivateComment(event: DomainEvent): boolean {
   if (
@@ -155,12 +233,17 @@ export const integrationResolver: SinkResolver = {
     if (relevant.length === 0) return []
     const context = await buildHookContext()
     if (!context) throw new Error('Failed to build integration hook context')
+    const anyRuleFiltersByStatus = relevant.some(
+      (m) => ((m.filters as MappingFilters | null)?.statusIds?.length ?? 0) > 0
+    )
+    const statusId = anyRuleFiltersByStatus ? await currentStatusId(event) : undefined
     return buildIntegrationTargets(
       relevant,
       event.type,
       boardIdsFromEvent(event),
       context.portalBaseUrl,
-      (blob) => decryptSecrets<{ accessToken?: string }>(blob)
+      (blob) => decryptSecrets<{ accessToken?: string }>(blob),
+      statusId
     )
   },
 }
