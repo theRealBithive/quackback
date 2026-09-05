@@ -9,7 +9,7 @@ import { IntlProvider } from 'react-intl'
 // chips) so the component takes the empty branch without a live data layer
 // or a QueryClientProvider.
 const mockUseInfiniteQuery = vi.fn()
-const mockUseQuery = vi.fn(() => ({ data: [] }))
+const mockUseQuery = vi.fn((): { data: unknown[] } => ({ data: [] }))
 vi.mock('@tanstack/react-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tanstack/react-query')>()
   return {

@@ -380,6 +380,18 @@ It also matters beyond convenience — a suite that only checks _which filter wa
 resolved_ passes when the filter is never pushed into the WHERE clause, which
 is a survivor the mutation gate pays twenty minutes to find.
 
+A third variant, for when the assertion is "no query was issued at all":
+`testDb` is a **Proxy** onto the active transaction, so `vi.spyOn(testDb,
+'select')` fails with `The property "select" is not defined on the object`, and
+so does spying on its prototype. There is no way to count queries through the
+fixture; that assertion needs its own small suite with a counting stub, which
+then has to be added to that file's `suites` list in the mutation manifest.
+
+One last thing that reads as a pass: `bun scripts/mutation-check.ts | tail -60`
+reports **tail's** exit code. The gate printed `FAIL: 5 mutant(s) ... not
+caught` and the shell said `exited with code 0`. Redirect to a file and read it
+instead of piping, or the one signal CI acts on is the one you discard.
+
 ## 1x — The coverage and mutation gates read HEAD, not the working tree
 
 Both gates ask git for the diff between the merge base and `HEAD`
