@@ -55,10 +55,12 @@ export const Route = createFileRoute('/changelog/feed')({
         // for an entry with no product. A feed that disagreed with the page it
         // is linked from would be worse than no feed filter at all.
         const requestedBoardIds = new URL(request.url).searchParams.getAll('board')
-        const boardFilter = resolveChangelogBoardFilter(
-          requestedBoardIds,
-          actor ? await visibleBoardIdsFor(actor) : []
-        )
+        // The reader's visible boards are only looked up when a product was
+        // actually asked for — the same guard the page uses, so the plain feed
+        // costs exactly what it cost before.
+        const visibleBoardIds =
+          requestedBoardIds.length > 0 && actor ? await visibleBoardIdsFor(actor) : []
+        const boardFilter = resolveChangelogBoardFilter(requestedBoardIds, visibleBoardIds)
         const boardCondition = changelogBoardFilterCondition(boardFilter)
 
         const productEnabled = await isFeatureEnabled('changelog')
