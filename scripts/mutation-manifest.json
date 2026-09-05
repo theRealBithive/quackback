@@ -50,6 +50,10 @@
         "apps/web/src/lib/server/events/resolvers/__tests__/issue-move.resolver.db.test.ts",
         "apps/web/src/lib/server/events/__tests__/issue-move-wiring.test.ts"
       ]
+    },
+    {
+      "file": "apps/web/src/lib/server/domains/posts/post.board.ts",
+      "suites": ["apps/web/src/lib/server/domains/posts/__tests__/post-board.test.ts"]
     }
   ],
   "equivalents": [

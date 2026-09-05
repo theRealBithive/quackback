@@ -389,8 +389,10 @@ describe.skipIf(!fixture.available)('gitlabIssueMoveHook', () => {
   })
 
   it('fails without moving anything when there is no token', async () => {
+    // The empty string, not null: `getValidAccessToken` returns '' for an
+    // integration with no stored secrets, and never a null.
     const s = await seed()
-    getValidAccessToken.mockResolvedValue(null)
+    getValidAccessToken.mockResolvedValue('')
 
     const result = await runMove(s)
 
@@ -426,7 +428,7 @@ describe.skipIf(!fixture.available)('gitlabIssueMoveHook', () => {
 
   it('says why it did nothing when the token could not be had', async () => {
     const s = await seed()
-    getValidAccessToken.mockResolvedValue(null)
+    getValidAccessToken.mockResolvedValue('')
 
     const result = await runMove(s)
 
@@ -531,7 +533,7 @@ describe.skipIf(!fixture.available)(
         () => gitlabFetch.mockResolvedValue({ ok: false, status: 401, text: async () => 'nope' }),
       ],
       ['the network drops', () => gitlabFetch.mockRejectedValue(new Error('ECONNRESET'))],
-      ['there is no token', () => getValidAccessToken.mockResolvedValue(null)],
+      ['there is no token', () => getValidAccessToken.mockResolvedValue('')],
       [
         'the answer has no issue number',
         () => gitlabFetch.mockResolvedValue(movedIssue({ iid: undefined })),
