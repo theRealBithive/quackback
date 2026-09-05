@@ -169,6 +169,23 @@ jobs:
     needs: unit
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Without a database the DB-backed suites skip themselves, Stryker sees no
+      # test covering the code they hold, and the gate reports those mutants as
+      # never executed rather than as survivors. Measured: 113 of 193. This flag
+      # turns a database that is missing or behind the migrations into a failure
+      # naming it, instead of a quiet skip that reads as a coverage hole.
+      REQUIRE_TEST_DB: '1'
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: quackback_test
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
       # Full history: the gate compares against the merge base, and a shallow
       # clone has no common commit to find.
@@ -181,6 +198,7 @@ jobs:
       # Unlike the coverage gate, this one runs a test runner, so it needs the
       # dependencies installed.
       - run: bun install --frozen-lockfile
+      - run: bun run db:migrate
       - name: Every mutant of the touched code has to be caught
         env:
           DIFF_BASE: origin/${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}

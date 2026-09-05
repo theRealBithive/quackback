@@ -105,6 +105,15 @@ branches.
   per-mutant `timeoutMS`: a mutant that hangs is a mutant the tests **caught**,
   while an exceeded budget means nothing was measured, and the gate fails as such.
 
+  **The job needs a database**, for the same reason the `unit` job does: a
+  DB-backed suite with no Postgres skips itself, so Stryker finds no test
+  covering the code it holds and reports those mutants as `NoCoverage` — not as
+  survivors, and not as a pass. Measured on the first run that graded a
+  `.db.test.ts`: 113 of 193 mutants ungraded, with the gate failing on the
+  count rather than on anything about the tests. The job therefore carries the
+  pgvector service, `bun run db:migrate`, and `REQUIRE_TEST_DB=1`, so a
+  database that is missing or behind fails by name.
+
   A red suite is not a low score. Stryker aborts in its dry run as soon as any
   test fails, so the gate reports that it graded **nothing** rather than reading
   an unrun suite as hundreds of survivors — measured, by breaking one assertion
