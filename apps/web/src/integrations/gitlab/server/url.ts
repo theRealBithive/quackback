@@ -19,8 +19,11 @@ export class GitLabInstanceUrlError extends Error {
 /**
  * Normalize a GitLab instance URL to its origin.
  * Empty / missing values resolve to gitlab.com so existing connections
- * keep working. Rejects credentials, non-http(s) schemes, and unparseable
- * strings — the same class of unsafe URLs sibling integrations refuse.
+ * keep working. Rejects credentials, anything that is not HTTPS, and
+ * unparseable strings — the same class of unsafe URLs sibling integrations
+ * refuse. TLS is required rather than merely preferred: every call to this
+ * origin carries `Authorization: Bearer <token>`, so a plain-HTTP instance
+ * would put the credential on the wire in the clear.
  */
 export function normalizeGitLabInstanceUrl(raw?: string | null): string {
   const trimmed = raw?.trim()
@@ -33,8 +36,8 @@ export function normalizeGitLabInstanceUrl(raw?: string | null): string {
     throw new GitLabInstanceUrlError('GitLab instance URL must be a valid URL')
   }
 
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    throw new GitLabInstanceUrlError('GitLab instance URL must be an http(s) URL')
+  if (parsed.protocol !== 'https:') {
+    throw new GitLabInstanceUrlError('GitLab instance URL must be an https URL')
   }
   if (parsed.username || parsed.password) {
     throw new GitLabInstanceUrlError('GitLab instance URL must not include credentials')

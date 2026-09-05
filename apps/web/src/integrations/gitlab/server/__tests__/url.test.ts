@@ -8,6 +8,9 @@
  * V21 An address that does not name an issue yields no project. Nothing is ever
  *     guessed — no match is better than the wrong project, because the path
  *     decides which project we write to.
+ * V23 A configured instance address is accepted only over TLS. Every call to
+ *     that origin carries the token we hold, so an address without TLS would
+ *     put the credential on the wire in the clear.
  * V22 The supported instance is GitLab 18.10 or newer, the version from which
  *     issues live under `/-/work_items/`. Older instances are not served, and
  *     that requirement is written where someone reads it before connecting,
@@ -60,12 +63,16 @@ describe('normalizeGitLabInstanceUrl', () => {
     )
   })
 
-  it('rejects non-http(s) schemes, and says which rule was broken', () => {
+  it('rejects every scheme but https, and says which rule was broken (V23)', () => {
     // The message is the whole diagnosis an operator gets in the settings form,
     // so it is asserted rather than left to the error type. The name goes with
     // it: it is what a log line shows when the message is already truncated.
     expect(() => normalizeGitLabInstanceUrl('javascript:alert(1)')).toThrow(GitLabInstanceUrlError)
-    expect(() => normalizeGitLabInstanceUrl('file:///etc/passwd')).toThrow(/http\(s\) URL/)
+    expect(() => normalizeGitLabInstanceUrl('file:///etc/passwd')).toThrow(/https URL/)
+    // Plain HTTP is refused with the rest, not tolerated as a lesser evil: the
+    // Bearer token goes to this origin on every call.
+    expect(() => normalizeGitLabInstanceUrl('http://gitlab.example.com')).toThrow(/https URL/)
+    expect(() => normalizeGitLabInstanceUrl('http://localhost:8080')).toThrow(/https URL/)
     try {
       normalizeGitLabInstanceUrl('javascript:alert(1)')
       expect.unreachable('a javascript: URL must not be accepted')
