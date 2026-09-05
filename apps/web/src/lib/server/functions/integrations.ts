@@ -1,7 +1,12 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 import { requireAuth } from './auth-helpers'
-import { db, integrations, integrationEventMappings, eq, and, sql } from '@/lib/server/db'
+import { db, integrations, integrationEventMappings, eq, and, inArray, sql } from '@/lib/server/db'
+import {
+  targetKeysToRetire,
+  rulesFromMappings,
+  type BoardRoutingRule,
+} from '@/lib/server/integrations/board-routing-policy'
 import type { IntegrationId } from '@quackback/ids'
 import { PERMISSIONS } from '@/lib/shared/permissions'
 import { logger } from '@/lib/server/logger'
@@ -317,5 +322,170 @@ export const removeNotificationChannelFn = createServerFn({ method: 'POST' })
     const { cacheDel, CACHE_KEYS } = await import('@/lib/server/cache')
     await cacheDel(CACHE_KEYS.INTEGRATION_MAPPINGS)
     log.info({ channel_id: data.channelId }, 'notification channel removed')
+    return { success: true }
+  })
+
+// ============================================
+// Board → project routing (issue trackers)
+// ============================================
+
+/**
+ * The event a routing rule listens to.
+ *
+ * Issue creation moved off `post.created` deliberately: feedback arrives
+ * unsorted, and an issue per arrival is an issue per piece of noise. A rule
+ * names the statuses that mean "we have triaged this", and the issue is
+ * created when the post reaches one of them.
+ */
+const ROUTING_EVENT_TYPE = 'post.status_changed'
+
+/**
+ * Routing owns this integration's mappings entirely.
+ *
+ * Every row on a tracker integration is either a complete board→project rule
+ * or something that would still route posts somewhere else — the filterless
+ * row that predates routing above all, which matches every board and falls
+ * back to the instance-wide project. So a save retires everything that is not
+ * a rule, rather than adding rules beside it and hoping the old row is
+ * harmless. It is not: the resolver matches it first and independently, and
+ * every post would fan out twice.
+ */
+async function retireNonRules(integrationId: IntegrationId): Promise<number> {
+  const stored = await db
+    .select({
+      targetKey: integrationEventMappings.targetKey,
+      actionConfig: integrationEventMappings.actionConfig,
+      filters: integrationEventMappings.filters,
+    })
+    .from(integrationEventMappings)
+    .where(eq(integrationEventMappings.integrationId, integrationId))
+
+  const keys = targetKeysToRetire(stored)
+  if (keys.length === 0) return 0
+
+  await db
+    .delete(integrationEventMappings)
+    .where(
+      and(
+        eq(integrationEventMappings.integrationId, integrationId),
+        inArray(integrationEventMappings.targetKey, keys)
+      )
+    )
+  return keys.length
+}
+
+const boardRoutingRuleSchema = z.object({
+  integrationId: z.string(),
+  boardId: z.string().min(1),
+  projectId: z.string().min(1),
+  triggerStatusIds: z.array(z.string().min(1)).min(1),
+})
+
+const removeBoardRoutingRuleSchema = z.object({
+  integrationId: z.string(),
+  boardId: z.string().min(1),
+})
+
+const listBoardRoutingRulesSchema = z.object({ integrationId: z.string() })
+
+export type SaveBoardRoutingRuleInput = z.infer<typeof boardRoutingRuleSchema>
+export type RemoveBoardRoutingRuleInput = z.infer<typeof removeBoardRoutingRuleSchema>
+
+/** The board→project rules stored for one tracker integration. */
+export const fetchBoardRoutingRulesFn = createServerFn({ method: 'GET' })
+  .validator(listBoardRoutingRulesSchema)
+  .handler(async ({ data }): Promise<BoardRoutingRule[]> => {
+    await requireAuth({ permission: PERMISSIONS.INTEGRATION_MANAGE })
+
+    const stored = await db
+      .select({
+        targetKey: integrationEventMappings.targetKey,
+        actionConfig: integrationEventMappings.actionConfig,
+        filters: integrationEventMappings.filters,
+      })
+      .from(integrationEventMappings)
+      .where(
+        and(
+          eq(integrationEventMappings.integrationId, data.integrationId as IntegrationId),
+          eq(integrationEventMappings.eventType, ROUTING_EVENT_TYPE)
+        )
+      )
+
+    return rulesFromMappings(stored)
+  })
+
+/**
+ * Record which project one board's issues go to.
+ *
+ * The row is keyed on the **board**, so `mapping_unique` makes "a board points
+ * at at most one project" a constraint rather than a convention, and saving
+ * one board's rule cannot touch another's. Keyed on the project instead, two
+ * boards sharing a project would share a row.
+ */
+export const saveBoardRoutingRuleFn = createServerFn({ method: 'POST' })
+  .validator(boardRoutingRuleSchema)
+  .handler(async ({ data }) => {
+    log.debug({ board_id: data.boardId, project_id: data.projectId }, 'save board routing rule')
+    await requireAuth({ permission: PERMISSIONS.INTEGRATION_MANAGE })
+
+    const integrationId = data.integrationId as IntegrationId
+
+    await db
+      .insert(integrationEventMappings)
+      .values({
+        integrationId,
+        eventType: ROUTING_EVENT_TYPE,
+        actionType: 'send_message' as const,
+        targetKey: data.boardId,
+        actionConfig: { channelId: data.projectId },
+        filters: { boardIds: [data.boardId], statusIds: data.triggerStatusIds },
+        enabled: true,
+      })
+      .onConflictDoUpdate({
+        target: [
+          integrationEventMappings.integrationId,
+          integrationEventMappings.eventType,
+          integrationEventMappings.actionType,
+          integrationEventMappings.targetKey,
+        ],
+        set: {
+          enabled: sql`excluded.enabled`,
+          actionConfig: sql`excluded.action_config`,
+          filters: sql`excluded.filters`,
+          updatedAt: new Date(),
+        },
+      })
+
+    const retired = await retireNonRules(integrationId)
+
+    // The resolver caches mappings for five minutes. Without this, a changed
+    // rule looks like it saved and keeps routing to the old project, which is
+    // indistinguishable from a bug for as long as it lasts.
+    const { cacheDel, CACHE_KEYS } = await import('@/lib/server/cache')
+    await cacheDel(CACHE_KEYS.INTEGRATION_MAPPINGS)
+    log.info({ board_id: data.boardId, project_id: data.projectId, retired }, 'board routing saved')
+    return { success: true }
+  })
+
+/** Stop creating issues for one board. Its posts then create none at all. */
+export const removeBoardRoutingRuleFn = createServerFn({ method: 'POST' })
+  .validator(removeBoardRoutingRuleSchema)
+  .handler(async ({ data }) => {
+    log.debug({ board_id: data.boardId }, 'remove board routing rule')
+    await requireAuth({ permission: PERMISSIONS.INTEGRATION_MANAGE })
+
+    await db
+      .delete(integrationEventMappings)
+      .where(
+        and(
+          eq(integrationEventMappings.integrationId, data.integrationId as IntegrationId),
+          eq(integrationEventMappings.eventType, ROUTING_EVENT_TYPE),
+          eq(integrationEventMappings.targetKey, data.boardId)
+        )
+      )
+
+    const { cacheDel, CACHE_KEYS } = await import('@/lib/server/cache')
+    await cacheDel(CACHE_KEYS.INTEGRATION_MAPPINGS)
+    log.info({ board_id: data.boardId }, 'board routing removed')
     return { success: true }
   })
