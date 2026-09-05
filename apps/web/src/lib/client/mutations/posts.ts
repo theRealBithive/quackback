@@ -26,6 +26,7 @@ import { votedPostsKeys } from '@/lib/client/hooks/use-portal-posts-query'
 import { adminQueries } from '@/lib/client/queries/admin'
 import type { PostDetails } from '@/lib/shared/types'
 import type { PostListItem, InboxPostListResult, PostTag } from '@/lib/shared/db-types'
+import { patchInboxListCache, type InboxRowsPatch } from '@/lib/client/mutations/inbox-list-cache'
 import type { PrincipalId, PostId, PostStatusId, PostTagId, BoardId } from '@quackback/ids'
 import type { CreatePostInput } from '@/lib/shared/types'
 
@@ -114,25 +115,37 @@ function invalidateRoadmapForStatus(
   })
 }
 
+/**
+ * Rewrite the rows of every cached inbox list.
+ *
+ * `inboxKeys.lists()` is a key prefix that the facet counts also live under, so
+ * this goes through `patchInboxListCache` rather than reaching for `pages`
+ * directly — see the note there.
+ */
+function patchPostLists(
+  queryClient: ReturnType<typeof useQueryClient>,
+  patchRows: InboxRowsPatch
+): void {
+  queryClient.setQueriesData<InfiniteData<InboxPostListResult>>(
+    { queryKey: inboxKeys.lists() },
+    (old) => patchInboxListCache(old, patchRows)
+  )
+}
+
 /** Update a post in all list caches */
 function updatePostInLists(
   queryClient: ReturnType<typeof useQueryClient>,
   postId: PostId,
   updater: (post: PostListItem) => PostListItem
 ): void {
-  queryClient.setQueriesData<InfiniteData<InboxPostListResult>>(
-    { queryKey: inboxKeys.lists() },
-    (old) => {
-      if (!old) return old
-      return {
-        ...old,
-        pages: old.pages.map((page) => ({
-          ...page,
-          items: page.items.map((post) => (post.id === postId ? updater(post) : post)),
-        })),
-      }
-    }
+  patchPostLists(queryClient, (items) =>
+    items.map((post) => (post.id === postId ? updater(post) : post))
   )
+}
+
+/** Drop a post from all list caches */
+function removePostFromLists(queryClient: ReturnType<typeof useQueryClient>, postId: PostId): void {
+  patchPostLists(queryClient, (items) => items.filter((post) => post.id !== postId))
 }
 
 // ============================================================================
@@ -631,19 +644,7 @@ export function useDeletePost() {
       deletePostFn({ data: { id: postId, cascadeChoices } }),
     onSuccess: (_data, { postId }) => {
       // Remove from all list caches
-      queryClient.setQueriesData<InfiniteData<InboxPostListResult>>(
-        { queryKey: inboxKeys.lists() },
-        (old) => {
-          if (!old) return old
-          return {
-            ...old,
-            pages: old.pages.map((page) => ({
-              ...page,
-              items: page.items.filter((post) => post.id !== postId),
-            })),
-          }
-        }
-      )
+      removePostFromLists(queryClient, postId)
       // Remove detail cache
       queryClient.removeQueries({ queryKey: inboxKeys.detail(postId) })
       // Invalidate lists and roadmap
@@ -665,19 +666,7 @@ export function useRestorePost() {
     mutationFn: (postId: PostId) => restorePostFn({ data: { id: postId } }),
     onSuccess: (_data, postId) => {
       // Remove from current (deleted) list cache
-      queryClient.setQueriesData<InfiniteData<InboxPostListResult>>(
-        { queryKey: inboxKeys.lists() },
-        (old) => {
-          if (!old) return old
-          return {
-            ...old,
-            pages: old.pages.map((page) => ({
-              ...page,
-              items: page.items.filter((post) => post.id !== postId),
-            })),
-          }
-        }
-      )
+      removePostFromLists(queryClient, postId)
       // Remove detail cache
       queryClient.removeQueries({ queryKey: inboxKeys.detail(postId) })
       // Invalidate all lists and roadmap (restored posts may reappear in roadmaps)

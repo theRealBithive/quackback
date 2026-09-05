@@ -85,6 +85,13 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/lib/server/events/__tests__/issue-move-wiring.test.ts',
         ],
       },
+      {
+        file: 'apps/web/src/lib/client/mutations/inbox-list-cache.ts',
+        suites: [
+          'apps/web/src/lib/client/mutations/__tests__/inbox-list-cache.test.ts',
+          'apps/web/src/lib/client/mutations/__tests__/inbox-list-cache-collision.test.tsx',
+        ],
+      },
     ])
   })
 
