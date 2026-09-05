@@ -5,6 +5,48 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
+## 1x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
+
+An entry declares a whole file, and the gate fails on any survivor in it. A change that
+adds three lines to an upstream file therefore has to pin **every** branch that file
+already had, including ones its own diff never touched.
+
+Measured on `post.board.ts`: declaring it produced nine survivors. Six were real and are
+now killed — one of them, `db.query.posts.findFirst({ where: ... })` losing its `where`,
+is the same class of bug as an integration lookup returning _an_ integration instead of
+_the_ one. Two more sit on branches a foreign key and an open transaction make
+unreachable, so no input reaches them. The last is `db.query.boards.findFirst({ where: ...
+})` for the board the post came _from_: dropping the `where` returns a different board and
+really does change the payload, but which row an unordered query hands back is not
+something a test may rely on, and the board is fetched for its `name`, so the lookup
+cannot be removed either. It is upstream code the change did not touch.
+
+That one mutant blocks the entry for the whole file, because declaring it would assert
+"these suites hold this file" — and they do not. So the file goes back to being reported
+by name as ungraded, and six verified kills sit in the suite without the gate knowing.
+
+**A per-file `except` list, addressed by line text the way `equivalents` already is, would
+let a change declare the part it owns** and leave the untouched remainder named in the
+report. Without it the incentive runs the wrong way: the cheapest way to keep a gate green
+is to not declare the file, which is the outcome the manifest exists to prevent.
+
+The tests stay either way — writing them turned up two existing tests that never entered
+the branch they named (see the entry below on hand-typed TypeIDs).
+
+## 1x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
+
+`changeBoard('post_01jqzz000000000000000000', ...)` does not reach the not-found branch: the
+suffix is 24 characters, the TypeID parser wants 26, and it throws `Invalid length` long
+before the lookup. Two tests named `raises nothing when the post does not exist` and
+`raises nothing when the target board does not exist` were asserting a bare
+`.rejects.toThrow()`, so both passed on the parser's complaint and neither had ever
+executed the code they were named for.
+
+Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and absent,
+and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
+that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
+read as untested until proven otherwise.
+
 ## 1x — A mutation survivor is reported by line, and a line can hold several mutants
 
 The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that

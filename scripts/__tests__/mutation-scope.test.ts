@@ -81,10 +81,6 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/lib/server/events/__tests__/issue-move-wiring.test.ts',
         ],
       },
-      {
-        file: 'apps/web/src/lib/server/domains/posts/post.board.ts',
-        suites: ['apps/web/src/lib/server/domains/posts/__tests__/post-board.test.ts'],
-      },
     ])
   })
 

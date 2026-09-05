@@ -22,6 +22,15 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import { createDbTestFixture, testDb } from '@/lib/server/__tests__/db-test-fixture'
 import { boards, posts, principal, events, eq, and } from '@/lib/server/db'
+import { generateId } from '@quackback/ids'
+
+/**
+ * A well-formed id that is not in the database. A hand-typed one is not: the
+ * TypeID parser rejects it for its length before `changeBoard` ever looks it
+ * up, and a bare `.rejects.toThrow()` reads that as the branch it meant to
+ * test. Two tests below did exactly that until this was measured.
+ */
+const absent = (prefix: 'post' | 'board') => generateId(prefix)
 
 vi.mock('@/lib/server/db', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/db')>()),
@@ -78,7 +87,12 @@ async function seed(): Promise<Seed> {
 
 async function boardChangedEvents(postId: string) {
   return testDb
-    .select({ payload: events.payload, entityId: events.entityId, actorType: events.actorType })
+    .select({
+      payload: events.payload,
+      entityId: events.entityId,
+      actorType: events.actorType,
+      context: events.context,
+    })
     .from(events)
     .where(and(eq(events.type, 'post.board_changed'), eq(events.entityId, postId)))
 }
@@ -133,11 +147,13 @@ describe.skipIf(!fixture.available)('changeBoard', () => {
   it('raises nothing when the target board does not exist (V16)', async () => {
     const s = await seed()
 
+    const missingBoard = absent('board')
+
     await expect(
-      changeBoard(s.postId as never, 'board_01jqzz000000000000000000' as never, {
+      changeBoard(s.postId as never, missingBoard as never, {
         principalId: s.actorPrincipalId as never,
       })
-    ).rejects.toThrow()
+    ).rejects.toThrow(missingBoard)
 
     expect(await boardChangedEvents(s.postId)).toEqual([])
   })
@@ -145,13 +161,51 @@ describe.skipIf(!fixture.available)('changeBoard', () => {
   it('raises nothing when the post does not exist (V16)', async () => {
     const s = await seed()
 
+    const missingPost = absent('post')
+
     await expect(
-      changeBoard('post_01jqzz000000000000000000' as never, s.toBoardId as never, {
+      changeBoard(missingPost as never, s.toBoardId as never, {
         principalId: s.actorPrincipalId as never,
       })
-    ).rejects.toThrow()
+    ).rejects.toThrow(missingPost)
 
     expect(await boardChangedEvents(s.postId)).toEqual([])
+  })
+
+  it('refuses a post id that names nothing, even when a post sits on the target board', async () => {
+    // `changeBoard` acts on the post it was given, never on whichever post the
+    // database hands back first. The only post in the table is put on the
+    // destination board, so a lookup that ignored the id would find a post
+    // already where it was asked to go and quietly report success.
+    const s = await seed()
+    await testDb
+      .update(posts)
+      .set({ boardId: s.toBoardId as never })
+      .where(eq(posts.id, s.postId as never))
+
+    const missingPost = absent('post')
+
+    await expect(
+      changeBoard(missingPost as never, s.toBoardId as never, {
+        principalId: s.actorPrincipalId as never,
+      })
+    ).rejects.toThrow(missingPost)
+
+    expect(await boardChangedEvents(s.postId)).toEqual([])
+  })
+
+  it('records that the move came from the admin plane', async () => {
+    // The audit trail has to tell an admin moving a post apart from anything a
+    // portal visitor or an integration did; `context.source` is that field, and
+    // a reaction that trusted an unmarked event would trust all three alike.
+    const s = await seed()
+
+    await changeBoard(s.postId as never, s.toBoardId as never, {
+      principalId: s.actorPrincipalId as never,
+    })
+
+    const [raised] = await boardChangedEvents(s.postId)
+    expect(raised.context).toMatchObject({ source: 'admin' })
   })
 
   it('names the actor on the event, so a later reaction can tell who moved it', async () => {
