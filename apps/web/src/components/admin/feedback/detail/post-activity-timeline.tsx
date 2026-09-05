@@ -144,6 +144,29 @@ const ACTIVITY_CONFIG: Partial<Record<ActivityType, ActivityDisplayConfig>> = {
       )
     },
   },
+  'external.issue_moved': {
+    icon: LinkIcon,
+    label: (m) => {
+      const to = m.toProjectId as string | undefined
+      const reference = m.externalId as string | undefined
+      const issue = reference ? `Issue #${reference}` : 'The linked issue'
+      return to ? `${issue} moved to project ${to}` : `${issue} moved to another project`
+    },
+    detail: (m) => {
+      const url = m.externalUrl as string | undefined
+      if (!url) return null
+      return (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-muted-foreground underline underline-offset-2"
+        >
+          View issue
+        </a>
+      )
+    },
+  },
   'status.changed': {
     icon: ChatBubbleLeftIcon,
     label: (_, a) => `${actorLabel(a)} changed status`,

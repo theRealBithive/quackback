@@ -11,6 +11,14 @@ export const postStatusChanged = decl(
   { webhook: true, notification: 'status_change', activity: A },
   S
 )
+/**
+ * Not in the legacy EVENT_TYPES union, and deliberately so: `WEBHOOK_EVENTS`
+ * derives from that list, so joining it would add a new event customers can
+ * subscribe to — a product decision, not part of routing an issue. It is
+ * emitted natively via emit() from `changeBoard` instead, the way the
+ * admin-plane events are.
+ */
+export const postBoardChanged = decl('post.board_changed', 'post', { activity: A }, S)
 export const postUpdated = decl('post.updated', 'post', { webhook: true, activity: A }, S)
 export const postDeleted = decl('post.deleted', 'post', { webhook: true, activity: A }, S)
 export const postRestored = decl('post.restored', 'post', { webhook: true, activity: A }, S)

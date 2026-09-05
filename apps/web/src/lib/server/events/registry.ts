@@ -36,6 +36,12 @@ const lazyHooks: Record<string, () => Promise<HookHandler>> = {
     import('./handlers/remote-status-push').then((m) => m.remoteStatusPushHook),
   // EVENTING-V2 WO-8e: workflow triggers ride the outbox → relay → this hook.
   workflow: () => import('./handlers/workflow').then((m) => m.workflowHook),
+  // A board is a product, so a post moving board moves its issue to that
+  // product's GitLab project. The handler lives with the provider rather than
+  // behind a capability on IntegrationDefinition: there is one implementer and
+  // one caller, and the sink name says who owns it.
+  gitlab_issue_move: () =>
+    import('@/integrations/gitlab/server/issue-move').then((m) => m.gitlabIssueMoveHook),
 }
 
 /**

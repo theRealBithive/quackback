@@ -177,6 +177,153 @@ All four CI shards passed with coverage on 4 vCPU. So the local failures are loa
 out took a second full 3-minute shard run as a control. That is the cost of the
 flakiness: no single run means anything, so every measurement needs a twin.
 
+## 2x — Local `typecheck` reports 815 pre-existing errors
+
+`bun run typecheck` yields 815 `error TS` on a **clean** tree, almost all in
+`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
+your own change added an error can only be established by stashing, counting the errors,
+restoring and counting again.
+
+Stashing is the wrong tool when a long background job is reading the working tree, and it
+answers a coarser question than the one you have. Grepping the error list for the files
+the change touches is exact and costs one run:
+
+```bash
+bun run typecheck 2>&1 | grep -E "error TS" > /tmp/tc.txt
+git diff --name-only <base>...HEAD | sed 's|^apps/web/||' \
+  | while read -r f; do grep -F "$f" /tmp/tc.txt; done
+```
+
+It is also worth running even when nothing looks type-shaped: it is what caught a test
+mocking `getValidAccessToken` as resolving `null`, where the source returns `''` and never
+a null. The mock typechecked as an error and the test asserted a state the source cannot
+produce — no suite and no mutation run would have said so.
+
+Either pull the codegen step into the `typecheck` script or document which command has to
+run first.
+
+## 1x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
+
+An entry declares a whole file, and the gate fails on any survivor in it. A change that
+adds three lines to an upstream file therefore has to pin **every** branch that file
+already had, including ones its own diff never touched.
+
+Measured on `post.board.ts`: declaring it produced nine survivors. Six were real and are
+now killed — one of them, `db.query.posts.findFirst({ where: ... })` losing its `where`,
+is the same class of bug as an integration lookup returning _an_ integration instead of
+_the_ one. Two more sit on branches a foreign key and an open transaction make
+unreachable, so no input reaches them. The last is `db.query.boards.findFirst({ where: ...
+})` for the board the post came _from_: dropping the `where` returns a different board and
+really does change the payload, but which row an unordered query hands back is not
+something a test may rely on, and the board is fetched for its `name`, so the lookup
+cannot be removed either. It is upstream code the change did not touch.
+
+That one mutant blocks the entry for the whole file, because declaring it would assert
+"these suites hold this file" — and they do not. So the file goes back to being reported
+by name as ungraded, and six verified kills sit in the suite without the gate knowing.
+
+**A per-file `except` list, addressed by line text the way `equivalents` already is, would
+let a change declare the part it owns** and leave the untouched remainder named in the
+report. Without it the incentive runs the wrong way: the cheapest way to keep a gate green
+is to not declare the file, which is the outcome the manifest exists to prevent.
+
+The tests stay either way — writing them turned up two existing tests that never entered
+the branch they named (see the entry below on hand-typed TypeIDs).
+
+## 1x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
+
+`changeBoard('post_01jqzz000000000000000000', ...)` does not reach the not-found branch: the
+suffix is 24 characters, the TypeID parser wants 26, and it throws `Invalid length` long
+before the lookup. Two tests named `raises nothing when the post does not exist` and
+`raises nothing when the target board does not exist` were asserting a bare
+`.rejects.toThrow()`, so both passed on the parser's complaint and neither had ever
+executed the code they were named for.
+
+Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and absent,
+and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
+that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
+read as untested until proven otherwise.
+
+## 1x — A mutation survivor is reported by line, and a line can hold several mutants
+
+The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that
+holds more than one mutable sub-expression that does not say which one, and the two
+readings lead to opposite conclusions. Both of these cost a mutate-run-restore cycle in
+one session:
+
+- `issue-move.ts:54` reads as a type assertion (`{ instanceUrl?: string }`, erased at
+  runtime and therefore genuinely equivalent). It was the argument to
+  `db.query.integrations.findFirst({ where: ... })` — a real gap, where dropping the
+  `where` returns _an_ integration instead of _the_ one.
+- `issue-move.resolver.ts:47` reads as the ternary on the next line. It was the arrow
+  body inside `.find((r) => r.boardId === boardId)` on line 47 itself.
+
+The column is in the detail section further up the report, but the summary is what you act
+on, and reading the source line at that number is the natural next move — which is exactly
+what misleads. **Print the trimmed source line beside each survivor**, the way an
+`equivalents` record already addresses its line by text. It costs one `readFileSync` in
+`mutation-policy.ts` and removes the ambiguity at the point of use.
+
+Until then: never mutate from the summary alone. Take the `file:line:col` out of the
+detail block, and confirm the mutant by applying it by hand and watching the suite go red.
+
+## 1x — The coverage config lives in the root config, so a run from apps/web measures nothing
+
+`vitest.config.ts` at the repo root carries the `coverage` block;
+`apps/web/vitest.config.ts` does not. Run the documented coverage command from
+`apps/web` — the natural place, since that is where the suites are — and vitest
+writes **no report at all**, with no error.
+
+`scripts/diff-coverage-check.ts` then reads every `coverage-final.json` under
+`coverage/`, finds the one a _previous_ run left there, and grades the diff
+against it. The output is entirely plausible: a file count, a line count, and a
+list of "added lines that no test executed" — which are simply every line
+added since that stale report was written. Two cycles went into chasing those
+as real holes.
+
+Two things would have caught it: the report's own age, and the fact that new
+source files appeared under "out of scope, although they look like source" —
+a file the run had definitely executed cannot be out of scope. The second one
+is the tell worth remembering.
+
+The invocation that works, from the repo **root**, with `apps/web/` on the
+paths:
+
+```bash
+rm -rf coverage/local   # a stale report is graded silently
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportsDirectory=coverage/local apps/web/src/<the suites>
+```
+
+Worth fixing in the gate rather than in memory: refuse a report older than the
+newest file it is being asked to grade.
+
+## 1x — There are two DB test fixtures, and the wrong one is the one that gets copied
+
+Three new database suites here were written against
+`lib/server/jobs/__tests__/harness.ts`, because the nearest existing example in
+the same directory (`events/__tests__/process-integration.test.ts`) uses it.
+That harness is for **lease** suites only: a lease exists so work can outlive
+the transaction that claimed it, so those suites commit for real, open four
+connections each, and clean up with `DELETE ... WHERE` on a database every
+worktree on the machine shares.
+
+The right tool for everything else is `lib/server/__tests__/db-test-fixture.ts`
+— one connection, a transaction rolled back after every test, and a `probe` that
+skips the suite on a stale schema instead of failing it mid-test. There is a
+README beside it that says exactly this. It was not found, because the search
+started from a neighbouring test file rather than from the directory that owns
+the fixture.
+
+Cost: three suites written twice, plus a stretch of chasing 10-second hook
+timeouts in unrelated portal suites on the suspicion that the extra connections
+had caused them. (They had not — `apps/web/src/lib/server/functions` produces
+between one and three of those on `origin/main` too, measured over two runs.)
+
+What would have prevented it: the harness's own header says it is for lease
+suites, but nothing says where to go instead. One line in it pointing at
+`db-test-fixture.ts` and its README would have been enough.
+
 ## 1x — postgres.js encodes a JSON _string_ parameter into jsonb a second time
 
 Seeding an `integrations` row for a migration-replay test, this looked obvious:
@@ -330,16 +477,6 @@ Nothing in the repo says so. Either fix the snapshot collision or remove the `db
 script entry and record the manual procedure in `packages/db/README` — otherwise everyone
 tries it again and loses the same round.
 
-## 1x — Local `typecheck` reports 815 pre-existing errors
-
-`bun run typecheck` yields 815 `error TS` on a **clean** tree, almost all in
-`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
-your own change added an error can only be established by stashing, counting the errors,
-restoring and counting again.
-
-Either pull the codegen step into the `typecheck` script or document which command has to
-run first.
-
 ## 1x — No documented path to a local test database
 
 The DB-backed suites need Postgres on `localhost:5432`, database `quackback_test`, migrated.
@@ -433,3 +570,24 @@ one chance to commit a stray manifest per change.
 the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
 does the intersection with the diff that used to be done by hand. Three runs
 paid for it.
+
+## 1x — The mutation gate had no database, so a third of its mutants were never run
+
+The `mutation` job in `ci.yml` carried no Postgres service. Every DB-backed suite in the
+manifest therefore skipped itself, Stryker found no test covering the code those suites
+hold, and reported their mutants as `NoCoverage`: **113 of 193** on the first run that
+graded a `.db.test.ts`. The gate failed on the count, which is the right outcome, but the
+message reads like a test problem and it was a runner problem.
+
+Worth knowing for the shape of the mistake, not just the fix: this exact hypothesis was
+written down earlier in the same session, then **retracted as disproved** — because the
+local reproduction had `DATABASE_URL` set and the run log said `Ran 47 tests`. The local
+evidence was real and the conclusion was still wrong, because the two environments differ
+in precisely the variable under test. A hypothesis about CI is not disproved by a local
+run unless the local run reproduces CI's environment.
+
+**Closed** by giving the job the pgvector service, `bun run db:migrate` and
+`REQUIRE_TEST_DB=1` — the last so a database that is missing or behind the migrations
+fails naming itself instead of reverting to the quiet skip. Documented in CLAUDE.md's
+mutation section, since "the job waits for `unit`" was the only prerequisite recorded
+there and it was not the only one.

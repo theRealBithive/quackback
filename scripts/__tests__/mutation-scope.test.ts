@@ -66,6 +66,25 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'apps/web/src/integrations/gitlab/server/post-source.ts',
         suites: ['apps/web/src/integrations/gitlab/server/__tests__/post-source.db.test.ts'],
       },
+      {
+        file: 'apps/web/src/lib/server/events/resolvers/issue-move-policy.ts',
+        suites: ['apps/web/src/lib/server/events/resolvers/__tests__/issue-move-policy.test.ts'],
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/issue-move.ts',
+        suites: ['apps/web/src/integrations/gitlab/server/__tests__/issue-move.db.test.ts'],
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/archive.ts',
+        suites: ['apps/web/src/integrations/gitlab/server/__tests__/archive.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/events/resolvers/issue-move.resolver.ts',
+        suites: [
+          'apps/web/src/lib/server/events/resolvers/__tests__/issue-move.resolver.db.test.ts',
+          'apps/web/src/lib/server/events/__tests__/issue-move-wiring.test.ts',
+        ],
+      },
     ])
   })
 
@@ -126,6 +145,97 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: '.select({ id: postExternalLinks.id })',
         replacement: '{}',
         why: expect.stringContaining('never read'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/archive.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (ctx.externalUrl) {',
+        replacement: 'true',
+        why: expect.stringContaining('the catch beside it absorbs'),
+      },
+      {
+        file: 'apps/web/src/lib/server/events/resolvers/issue-move.resolver.ts',
+        mutator: 'ConditionalExpression',
+        line: 'const rule = rulesFromMappings(rows).find((r) => r.boardId === boardId)',
+        replacement: 'true',
+        why: expect.stringContaining('no stored row makes the predicate decide'),
+      },
+      {
+        file: 'apps/web/src/lib/server/events/resolvers/issue-move.resolver.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (links.length === 0) return []',
+        replacement: 'false',
+        why: expect.stringContaining('Only the number of queries changes'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/issue-move.ts',
+        mutator: 'ObjectLiteral',
+        line: "const log = logger.child({ component: 'gitlab-issue-move' })",
+        replacement: '{}',
+        why: expect.stringContaining('component name is metadata'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/issue-move.ts',
+        mutator: 'StringLiteral',
+        line: "const log = logger.child({ component: 'gitlab-issue-move' })",
+        replacement: '""',
+        why: expect.stringContaining('component name is metadata'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/issue-move.ts',
+        mutator: 'ObjectLiteral',
+        line: "log.error({ err: error, link_id: linkId, to_project_id: toProjectId }, 'issue move threw')",
+        replacement: '{}',
+        why: expect.stringContaining('field set is metadata'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/issue-move.ts',
+        mutator: 'StringLiteral',
+        line: "log.error({ err: error, link_id: linkId, to_project_id: toProjectId }, 'issue move threw')",
+        replacement: '""',
+        why: expect.stringContaining('message is metadata'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/issue-move.ts',
+        mutator: 'ObjectLiteral',
+        line: "log.error({ link_id: linkId, to_project_id: toProjectId }, 'move answered without an iid')",
+        replacement: '{}',
+        why: expect.stringContaining('field set is metadata'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/issue-move.ts',
+        mutator: 'StringLiteral',
+        line: "log.error({ link_id: linkId, to_project_id: toProjectId }, 'move answered without an iid')",
+        replacement: '""',
+        why: expect.stringContaining('own error text, which a test does assert'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/issue-move.ts',
+        mutator: 'ObjectLiteral',
+        line: '{ link_id: linkId, from_project_id: fromProjectId, to_project_id: toProjectId },',
+        replacement: '{}',
+        why: expect.stringContaining('field set is metadata'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/issue-move.ts',
+        mutator: 'StringLiteral',
+        line: "'issue moved'",
+        replacement: '""',
+        why: expect.stringContaining('message is metadata'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/issue-move.ts',
+        mutator: 'ObjectLiteral',
+        line: '{ status_code: status, link_id: linkId, to_project_id: toProjectId, body },',
+        replacement: '{}',
+        why: expect.stringContaining('field set is metadata'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/issue-move.ts',
+        mutator: 'StringLiteral',
+        line: "'move refused'",
+        replacement: '""',
+        why: expect.stringContaining('message is metadata'),
       },
     ])
   })

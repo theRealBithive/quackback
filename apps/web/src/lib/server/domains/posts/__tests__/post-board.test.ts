@@ -10,6 +10,14 @@ const updateWhere = vi.fn(() => ({ returning: updateReturning }))
 const updateSet = vi.fn(() => ({ where: updateWhere }))
 const dbUpdate = vi.fn(() => ({ set: updateSet }))
 
+// The board update and the event it raises share one transaction, so the
+// update chain hangs off the tx handle rather than off `db` directly. The
+// mock runs the callback inline against a handle carrying the same chain,
+// which keeps every assertion below about `dbUpdate` meaning what it did.
+const runInTransaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+  fn({ update: dbUpdate })
+)
+
 vi.mock('@/lib/server/db', async () => {
   return {
     db: {
@@ -18,6 +26,7 @@ vi.mock('@/lib/server/db', async () => {
         boards: { findFirst: (...args: unknown[]) => mockBoardsFindFirst(...args) },
       },
       update: dbUpdate,
+      transaction: (fn: (tx: unknown) => Promise<unknown>) => runInTransaction(fn),
     },
     boards: { id: 'board_id', deletedAt: 'deleted_at' },
     eq: vi.fn((col: unknown, val: unknown) => ({ op: 'eq', col, val })),
@@ -30,6 +39,9 @@ vi.mock('@/lib/server/db', async () => {
 vi.mock('@/lib/server/domains/activity/activity.service', () => ({
   createActivity,
 }))
+
+const emit = vi.fn()
+vi.mock('@/lib/server/events/emit', () => ({ emit }))
 
 const actor = {
   principalId: 'principal_abc' as PrincipalId,
@@ -44,6 +56,8 @@ describe('changeBoard', () => {
     mockBoardsFindFirst.mockReset()
     updateReturning.mockReset()
     dbUpdate.mockClear()
+    emit.mockClear()
+    runInTransaction.mockClear()
   })
 
   it('throws POST_NOT_FOUND when post does not exist', async () => {
@@ -134,6 +148,39 @@ describe('changeBoard', () => {
         toBoardName: 'New Board',
       },
     })
+  })
+
+  it('raises post.board_changed in the same transaction as the update', async () => {
+    const updatedPost = { id: 'post_123', boardId: 'board_new', title: 'Test' }
+    mockPostsFindFirst.mockResolvedValue({ id: 'post_123', boardId: 'board_old' })
+    mockBoardsFindFirst
+      .mockResolvedValueOnce({ id: 'board_old', name: 'Old Board', slug: 'old' })
+      .mockResolvedValueOnce({ id: 'board_new', name: 'New Board', slug: 'new' })
+    updateReturning.mockResolvedValue([updatedPost])
+    const { changeBoard } = await import('../post.board')
+
+    await changeBoard('post_123' as PostId, 'board_new' as BoardId, actor)
+
+    expect(runInTransaction).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(emit.mock.calls[0][2]).toMatchObject({
+      payload: {
+        post: { id: 'post_123', boardId: 'board_new', boardSlug: 'new' },
+        fromBoardId: 'board_old',
+        toBoardId: 'board_new',
+      },
+      entityId: 'post_123',
+      actor: { type: 'user', id: actor.principalId },
+    })
+  })
+
+  it('raises nothing when the post is already on that board', async () => {
+    mockPostsFindFirst.mockResolvedValue({ id: 'post_123', boardId: 'board_same' })
+    const { changeBoard } = await import('../post.board')
+
+    await changeBoard('post_123' as PostId, 'board_same' as BoardId, actor)
+
+    expect(emit).not.toHaveBeenCalled()
   })
 
   it('does not call createActivity when DB update returns empty', async () => {
