@@ -1,5 +1,5 @@
 {
-  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing — the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
+  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing \u2014 the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
   "graded": [
     {
       "file": "scripts/audit-policy.ts",
@@ -16,9 +16,23 @@
     {
       "file": "apps/web/src/lib/server/integrations/external-link-scope.ts",
       "suites": ["apps/web/src/lib/server/integrations/__tests__/external-link-scope.test.ts"]
+    },
+    {
+      "file": "apps/web/src/integrations/gitlab/server/inbound.ts",
+      "suites": [
+        "apps/web/src/integrations/gitlab/server/__tests__/inbound.test.ts",
+        "apps/web/src/lib/server/integrations/__tests__/signature-matrix.test.ts"
+      ]
     }
   ],
   "equivalents": [
+    {
+      "file": "apps/web/src/integrations/gitlab/server/inbound.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (!state) return null",
+      "replacement": "false",
+      "why": "The guard exists to narrow `state` from `string | undefined` before it indexes the status map; it decides nothing the next line does not already decide. Without it an absent or empty state produces no mapped status, and `if (!externalStatus) return null` two lines down returns null for exactly the same inputs. No payload can tell the two apart, because there is none where the first guard returns and the second would not."
+    },
     {
       "file": "scripts/diff-coverage-policy.ts",
       "mutator": "EqualityOperator",
