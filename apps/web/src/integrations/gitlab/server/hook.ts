@@ -118,7 +118,14 @@ export const gitlabHook: HookHandler = {
       const data = (await response.json()) as { iid: number; web_url: string }
       log.info({ issue_iid: data.iid, project_id: projectId }, 'issue created')
 
-      return { success: true, externalId: String(data.iid), externalUrl: data.web_url }
+      // `iid` is per-project, so the project rides along: it is what lets an
+      // inbound webhook tell this issue from another project's same number.
+      return {
+        success: true,
+        externalId: String(data.iid),
+        externalScope: String(projectId),
+        externalUrl: data.web_url,
+      }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error'
       log.error({ err: error, project_id: projectId }, 'issue creation failed')

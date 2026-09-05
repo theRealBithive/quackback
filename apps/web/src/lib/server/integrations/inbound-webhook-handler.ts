@@ -35,6 +35,7 @@ import { PERMISSIONS } from '@/lib/shared/permissions'
 import { readTextBodyOr413, MAX_WEBHOOK_BODY_BYTES } from '@/lib/server/utils/read-body'
 import type { PostId, PostStatusId, PrincipalId, TicketId } from '@quackback/ids'
 import type { InboundCommentResult, InboundWebhookResult } from './inbound-types'
+import { selectLinksForScope } from './external-link-scope'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'inbound-webhook' })
@@ -197,20 +198,50 @@ function isUniqueViolation(error: unknown): boolean {
  * Team-only by design: the portal is public, and a note on the linked issue is
  * developer discussion that nobody chose to publish.
  */
+/**
+ * The post link an inbound webhook may act on.
+ *
+ * Matching on `(integrationType, externalId)` alone was safe only while an
+ * instance targeted one container: GitLab numbers issues per project, so once
+ * two boards route to two projects the same `#42` exists in both.
+ * `selectLinksForScope` is the rule that decides; this is the query around it.
+ *
+ * Ordered so the answer is stable. When several posts are linked to the same
+ * issue in the same container the first one still wins, exactly as before, but
+ * it is now the same one on every delivery instead of whatever the planner
+ * returned first.
+ */
+async function findLinkedPost(
+  integrationType: string,
+  result: { externalId: string; externalScope?: string }
+): Promise<typeof postExternalLinks.$inferSelect | undefined> {
+  const candidates = await db
+    .select()
+    .from(postExternalLinks)
+    .where(
+      and(
+        eq(postExternalLinks.integrationType, integrationType),
+        eq(postExternalLinks.externalId, result.externalId)
+      )
+    )
+    .orderBy(postExternalLinks.createdAt, postExternalLinks.id)
+
+  return selectLinksForScope(candidates, result.externalScope)[0]
+}
+
 async function applyInboundComment(
   integration: IntegrationRow,
   integrationType: string,
   result: InboundCommentResult
 ): Promise<void> {
-  const link = await db.query.postExternalLinks.findFirst({
-    where: and(
-      eq(postExternalLinks.integrationType, integrationType),
-      eq(postExternalLinks.externalId, result.externalId)
-    ),
-  })
+  const link = await findLinkedPost(integrationType, result)
   if (!link) {
     log.debug(
-      { integration_type: integrationType, external_id: result.externalId },
+      {
+        integration_type: integrationType,
+        external_id: result.externalId,
+        external_scope: result.externalScope,
+      },
       'no linked post for external id, ignoring comment'
     )
     return
@@ -291,16 +322,16 @@ async function applyPostStatusChange(
   result: InboundWebhookResult,
   deliveryKey: string
 ): Promise<void> {
-  // Reverse lookup: find the post linked to this external ID
-  const link = await db.query.postExternalLinks.findFirst({
-    where: and(
-      eq(postExternalLinks.integrationType, integrationType),
-      eq(postExternalLinks.externalId, result.externalId)
-    ),
-  })
+  // Reverse lookup: find the post linked to this external ID, inside the
+  // container the webhook reported.
+  const link = await findLinkedPost(integrationType, result)
   if (!link) {
     log.debug(
-      { integration_type: integrationType, external_id: result.externalId },
+      {
+        integration_type: integrationType,
+        external_id: result.externalId,
+        external_scope: result.externalScope,
+      },
       'no linked post for external id, ignoring'
     )
     return
@@ -394,10 +425,14 @@ async function applyTicketStatusChange(
   result: InboundWebhookResult,
   deliveryKey: string
 ): Promise<void> {
-  const links = await db
+  // Every link on this issue number, then only those in the container the
+  // webhook reported. Several survive on purpose — one external issue can back
+  // several tickets — but they now all belong to the same container.
+  const candidates = await db
     .select({
       id: ticketExternalLinks.id,
       ticketId: ticketExternalLinks.ticketId,
+      externalScope: ticketExternalLinks.externalScope,
       externalDisplayId: ticketExternalLinks.externalDisplayId,
       externalUrl: ticketExternalLinks.externalUrl,
     })
@@ -408,9 +443,15 @@ async function applyTicketStatusChange(
         eq(ticketExternalLinks.externalId, result.externalId)
       )
     )
+    .orderBy(ticketExternalLinks.createdAt, ticketExternalLinks.id)
+  const links = selectLinksForScope(candidates, result.externalScope)
   if (links.length === 0) {
     log.debug(
-      { integration_type: integrationType, external_id: result.externalId },
+      {
+        integration_type: integrationType,
+        external_id: result.externalId,
+        external_scope: result.externalScope,
+      },
       'no linked ticket for external id, ignoring'
     )
     return
@@ -422,9 +463,9 @@ async function applyTicketStatusChange(
     .update(ticketExternalLinks)
     .set({ remoteState: result.externalStatus.slice(0, 64), remoteStateAt: new Date() })
     .where(
-      and(
-        eq(ticketExternalLinks.integrationType, integrationType),
-        eq(ticketExternalLinks.externalId, result.externalId)
+      inArray(
+        ticketExternalLinks.id,
+        links.map((l) => l.id)
       )
     )
     .catch(() => {})

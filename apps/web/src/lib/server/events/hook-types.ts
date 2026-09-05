@@ -18,6 +18,13 @@ export interface HookResult {
   externalId?: string
   /** Human-friendly display label (e.g. "QUA-24", "#142"). Falls back to externalId in UI. */
   externalDisplayId?: string
+  /**
+   * The container the item was created in — a GitLab project id, a GitHub
+   * repository. Recorded on the link so an inbound webhook can tell two
+   * identically numbered issues from different containers apart. Omitted by
+   * providers whose external id is already globally unique.
+   */
+  externalScope?: string
   /** External URL (Linear issue URL, etc.) */
   externalUrl?: string
   /** Error message if failed */

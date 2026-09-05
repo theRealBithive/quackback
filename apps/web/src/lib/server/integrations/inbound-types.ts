@@ -12,6 +12,15 @@
 export interface InboundWebhookResult {
   /** The external issue ID that changed status */
   externalId: string
+  /**
+   * The container the issue lives in — a GitLab project id, a GitHub
+   * repository. An issue id is unique only inside it, so this is what lets the
+   * reverse lookup tell two identically numbered issues apart once an instance
+   * targets more than one container. Undefined when the provider names none;
+   * the lookup then falls back to today's behaviour. See
+   * `external-link-scope.ts`.
+   */
+  externalScope?: string
   /** The new status name from the external platform */
   externalStatus: string
   /** Event type for logging (e.g. 'issue.updated', 'taskStatusUpdated') */
@@ -37,6 +46,8 @@ export interface InboundWebhookResult {
 export interface InboundCommentResult {
   /** The external ISSUE id — matches `post_external_links.externalId`. */
   externalId: string
+  /** The container the issue lives in — see `InboundWebhookResult.externalScope`. */
+  externalScope?: string
   /** Provider-stable id of the comment itself; the redelivery dedupe handle. */
   externalCommentId: string
   /** Display name of whoever wrote it on the provider side. Never an email. */

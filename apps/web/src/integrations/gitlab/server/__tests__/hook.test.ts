@@ -105,6 +105,9 @@ describe('gitlabHook', () => {
     expect(result).toEqual({
       success: true,
       externalId: '9',
+      // The project the issue was created in. Recorded on the link so an
+      // inbound webhook can tell this #9 from another project's #9.
+      externalScope: '42',
       externalUrl: 'https://gitlab.com/acme/app/-/issues/9',
     })
     expect(fetchMock).toHaveBeenCalledWith(

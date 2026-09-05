@@ -44,6 +44,17 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         suites: ['scripts/__tests__/mutation-policy.test.ts'],
       },
       {
+        file: 'apps/web/src/lib/server/integrations/external-link-scope.ts',
+        suites: ['apps/web/src/lib/server/integrations/__tests__/external-link-scope.test.ts'],
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/inbound.ts',
+        suites: [
+          'apps/web/src/integrations/gitlab/server/__tests__/inbound.test.ts',
+          'apps/web/src/lib/server/integrations/__tests__/signature-matrix.test.ts',
+        ],
+      },
+      {
         file: 'apps/web/src/lib/server/integrations/board-routing-policy.ts',
         suites: ['apps/web/src/lib/server/integrations/__tests__/board-routing-policy.test.ts'],
       },
@@ -70,6 +81,13 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
 describe('the mutations excused as equivalent (B6)', () => {
   it('excuses exactly these mutations, each with a reason', () => {
     expect(manifest().equivalents).toEqual([
+      {
+        file: 'apps/web/src/integrations/gitlab/server/inbound.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (!state) return null',
+        replacement: 'false',
+        why: expect.stringContaining('the next line does not already decide'),
+      },
       {
         file: 'scripts/diff-coverage-policy.ts',
         mutator: 'EqualityOperator',

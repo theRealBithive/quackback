@@ -231,6 +231,7 @@ async function persistExternalLink(data: HookJobData, result: HookResult): Promi
       integrationId: integration.id as IntegrationId,
       integrationType: data.hookType,
       externalId: result.externalId!,
+      externalScope: result.externalScope ?? null,
       externalDisplayId: result.externalDisplayId ?? null,
       externalUrl: result.externalUrl ?? null,
       origin: 'event', // created by an automatic event delivery (WO-14 provenance)
