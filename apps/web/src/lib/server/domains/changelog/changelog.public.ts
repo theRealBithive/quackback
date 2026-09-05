@@ -208,11 +208,19 @@ export async function listPublicChangelogs(
       ? (cursorEntry.displayDate ?? cursorEntry.publishedAt)
       : null
     if (cursorEffective) {
+      // The cursor timestamp is compared against `effectiveDisplayDate`, which
+      // is a raw `coalesce(...)` expression rather than a column — so drizzle
+      // has no column mapper for the other side and hands postgres.js a `Date`,
+      // which it cannot encode (`The "string" argument must be of type
+      // string ... Received an instance of Date`). Send it as text and let
+      // Postgres cast, which is what a column comparison would have done. Until
+      // this was fixed, every "Load more" on the public changelog threw.
+      const cursorTimestamp = sql`${cursorEffective.toISOString()}::timestamptz`
       conditions.push(
         or(
-          lt(effectiveDisplayDate, cursorEffective),
+          sql`${effectiveDisplayDate} < ${cursorTimestamp}`,
           and(
-            sql`${effectiveDisplayDate} = ${cursorEffective}`,
+            sql`${effectiveDisplayDate} = ${cursorTimestamp}`,
             lt(changelogEntries.id, cursor as ChangelogId)
           )
         )!

@@ -6,7 +6,7 @@ import type { ChangelogId } from '@quackback/ids'
 // per-test 5s timeout, which it otherwise blew under a saturated parallel run.
 import { getPublicChangelogById, listPublicChangelogs } from '../changelog.public'
 import { deleteChangelog } from '../changelog.service'
-import { isNull, eq, lt } from '@/lib/server/db'
+import { isNull, eq, or, sql } from '@/lib/server/db'
 
 const mockEntryFindFirst = vi.fn()
 const mockEntryFindMany = vi.fn()
@@ -165,12 +165,23 @@ describe('listPublicChangelogs', () => {
     expect(cursorEqCalls.length).toBe(1)
 
     // The pagination filter was applied on the effective display date
-    // (coalesce(display_date, published_at)), so the user doesn't fall
-    // back to the first page.
-    const ltEffectiveDateCalls = vi
-      .mocked(lt)
-      .mock.calls.filter((args) => (args[0] as { kind?: string })?.kind === 'sql')
-    expect(ltEffectiveDateCalls.length).toBeGreaterThanOrEqual(1)
+    // (coalesce(display_date, published_at)), so the user doesn't fall back to
+    // the first page.
+    //
+    // Asserted through the `sql` template rather than through `lt`: the
+    // comparison had to move into a raw fragment because `lt` against a raw
+    // `coalesce(...)` expression has no column mapper, so drizzle handed
+    // postgres.js a `Date` it cannot encode and every "Load more" threw. The
+    // guarantee is unchanged and is held for real, against Postgres, in
+    // `changelog-public-pagination.db.test.ts`; this is the mock-level trace
+    // that the keyset comparison is still built at all.
+    const comparisonFragments = vi
+      .mocked(sql)
+      .mock.calls.filter((args) =>
+        (args[0] as unknown as string[]).some((part) => part.includes('<'))
+      )
+    expect(comparisonFragments.length).toBeGreaterThanOrEqual(1)
+    expect(vi.mocked(or)).toHaveBeenCalled()
   })
 })
 
