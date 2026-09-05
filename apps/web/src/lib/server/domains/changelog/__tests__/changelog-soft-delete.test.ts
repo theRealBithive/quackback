@@ -68,11 +68,17 @@ vi.mock('@/lib/server/db', () => ({
   },
   boards: {
     id: 'boards.id',
+    name: 'boards.name',
     slug: 'boards.slug',
     access: 'boards.access',
     deletedAt: 'boards.deletedAt',
   },
+  changelogEntryBoards: {
+    changelogEntryId: 'changelog_entry_boards.changelog_entry_id',
+    boardId: 'changelog_entry_boards.board_id',
+  },
   postStatuses: { id: 'id' },
+  asc: vi.fn((col) => ({ kind: 'asc', col })),
   eq: vi.fn((col, val) => ({ kind: 'eq', col, val })),
   and: vi.fn((...args: unknown[]) => ({ kind: 'and', args })),
   or: vi.fn((...args: unknown[]) => ({ kind: 'or', args })),
@@ -91,13 +97,21 @@ vi.mock('@/lib/server/db', () => ({
   ),
 }))
 
-// Chainable mock for `db.select().from().innerJoin()...where()` — resolves
-// with the rows you provide when `.where()` is awaited.
+// Chainable mock for `db.select().from()...` — awaitable at any depth, so a
+// query that stops at `.where()` and one that goes on to `.orderBy()` both
+// resolve to the same rows. Awaitable-anywhere rather than terminal-method
+// specific, so adding a clause to a production query does not silently turn
+// this suite into a collection crash.
 function selectChainResolving(rows: unknown[]): unknown {
   const chain: Record<string, unknown> = {}
-  chain.from = () => chain
-  chain.innerJoin = () => chain
-  chain.where = () => Promise.resolve(rows)
+  const self = () => chain
+  chain.from = self
+  chain.innerJoin = self
+  chain.leftJoin = self
+  chain.where = self
+  chain.orderBy = self
+  chain.then = (onOk: (v: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+    Promise.resolve(rows).then(onOk, onErr)
   return chain
 }
 

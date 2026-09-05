@@ -4,6 +4,7 @@
 
 import type { TiptapContent } from '@/lib/server/db'
 import type {
+  BoardId,
   ChangelogId,
   ChangelogCategoryId,
   PrincipalId,
@@ -13,6 +14,13 @@ import type {
 import type { PublishState } from '@/lib/shared/schemas/changelog'
 
 export type { PublishState } from '@/lib/shared/schemas/changelog'
+
+/** Product (board) summary attached to an entry (admin + public projections). */
+export interface ChangelogBoardSummary {
+  id: BoardId
+  name: string
+  slug: string
+}
 
 /** Category summary attached to an entry (admin + public projections). */
 export interface ChangelogCategorySummary {
@@ -36,6 +44,12 @@ export interface CreateChangelogInput {
   linkedPostIds?: PostId[]
   /** IDs of categories (labels) to attach to this changelog entry */
   categoryIds?: ChangelogCategoryId[]
+  /**
+   * IDs of the products (boards) this entry is about. Omitted or [] means the
+   * entry is a cross-product announcement and shows under every product filter
+   * — not that it is unassigned and hidden.
+   */
+  boardIds?: BoardId[]
   /** Publish state */
   publishState: PublishState
   displayDate?: Date | null
@@ -67,6 +81,8 @@ export interface UpdateChangelogInput {
   linkedPostIds?: PostId[]
   /** IDs of categories to attach (replaces existing links) */
   categoryIds?: ChangelogCategoryId[]
+  /** See {@link CreateChangelogInput.boardIds}. Replaces the existing set. */
+  boardIds?: BoardId[]
   /** Publish state (if changing) */
   publishState?: PublishState
   displayDate?: Date | null
@@ -117,6 +133,8 @@ export interface ChangelogEntryWithDetails {
   linkedPosts: ChangelogLinkedPost[]
   /** Attached categories (labels) */
   categories: ChangelogCategorySummary[]
+  /** Products this entry is about ([] = cross-product announcement) */
+  boards: ChangelogBoardSummary[]
   /** Computed status based on publishedAt */
   status: 'draft' | 'scheduled' | 'published'
   /** In-app view count. Email open/click tracking is out of scope. */
@@ -177,6 +195,8 @@ export interface PublicChangelogEntry {
   featuredImageUrl: string | null
   linkedPosts: PublicChangelogLinkedPost[]
   categories: ChangelogCategorySummary[]
+  /** Products this entry is about ([] = cross-product announcement) */
+  boards: ChangelogBoardSummary[]
 }
 
 /**

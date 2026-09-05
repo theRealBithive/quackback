@@ -22,6 +22,7 @@ import {
 import type { BoardId, ChangelogId, PrincipalId, PostId, PostStatusId } from '@quackback/ids'
 import { computeStatus } from './changelog.service'
 import { getCategoriesForEntries } from './changelog-category.service'
+import { getBoardsForEntries } from './changelog-board.service'
 import { contentJsonForClient } from '@/lib/server/content/storage-read-urls'
 import { resignStoredAssetUrl } from '@/lib/server/storage/s3'
 import type {
@@ -149,13 +150,17 @@ export async function listChangelogs(params: ListChangelogParams): Promise<Chang
     statuses.forEach((s) => statusMap.set(s.id, { name: s.name, color: s.color }))
   }
 
-  // Categories (labels) for all entries.
+  // Categories (labels) and products (boards) for all entries. The admin view
+  // shows every product an entry carries — there is no audience filter here,
+  // because reaching this list already required the changelog permission.
   const categoriesMap = await getCategoriesForEntries(entryIds)
+  const boardsMap = await getBoardsForEntries(entryIds)
 
   // Transform to output format
   const result: ChangelogEntryWithDetails[] = items.map((entry) => {
     const entryLinkedPosts = linkedPostsMap.get(entry.id) ?? []
     const entryCategories = categoriesMap.get(entry.id) ?? []
+    const entryBoards = boardsMap.get(entry.id) ?? []
     return {
       id: entry.id,
       title: entry.title,
@@ -179,6 +184,7 @@ export async function listChangelogs(params: ListChangelogParams): Promise<Chang
         status: lp.post.statusId ? (statusMap.get(lp.post.statusId) ?? null) : null,
       })),
       categories: entryCategories.map((c) => ({ id: c.id, name: c.name, color: c.color })),
+      boards: entryBoards,
       status: computeStatus(entry.publishedAt),
     }
   })

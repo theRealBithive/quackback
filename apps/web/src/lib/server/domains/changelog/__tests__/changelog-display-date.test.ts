@@ -29,11 +29,35 @@ vi.mock('@/lib/server/db', async (importOriginal) => ({
       },
     }),
     delete: () => ({ where: vi.fn().mockResolvedValue(undefined) }),
+    // The products lookup in getChangelogById. Awaitable at any depth so a
+    // clause added to that query does not turn this suite into a crash.
+    select: () => {
+      const chain: Record<string, unknown> = {}
+      const self = () => chain
+      chain.from = self
+      chain.innerJoin = self
+      chain.where = self
+      chain.orderBy = self
+      chain.then = (onOk: (v: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+        Promise.resolve([]).then(onOk, onErr)
+      return chain
+    },
   },
   eq: vi.fn(),
   and: vi.fn(),
+  asc: vi.fn(),
   isNull: vi.fn(),
   inArray: vi.fn(),
+  changelogEntryBoards: {
+    changelogEntryId: 'changelog_entry_boards.changelog_entry_id',
+    boardId: 'changelog_entry_boards.board_id',
+  },
+  boards: {
+    id: 'boards.id',
+    name: 'boards.name',
+    slug: 'boards.slug',
+    deletedAt: 'boards.deletedAt',
+  },
 }))
 
 vi.mock('@/lib/server/content/rehost-images', () => ({

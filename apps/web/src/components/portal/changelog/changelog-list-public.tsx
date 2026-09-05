@@ -6,13 +6,47 @@ import { ChangelogEntryCard } from './changelog-entry-card'
 import { EmptyState } from '@/components/shared/empty-state'
 import { cn } from '@/lib/shared/utils'
 import { publicChangelogQueries, changelogCategoryQueries } from '@/lib/client/queries/changelog'
+import { ChangelogBoardFilter } from './changelog-board-filter'
 import { DocumentTextIcon } from '@heroicons/react/24/outline'
 import type { ChangelogCategoryId } from '@quackback/ids'
 
-export function ChangelogListPublic() {
+interface ChangelogListPublicProps {
+  /**
+   * Products to narrow to, from the URL. Applied server-side, unlike the
+   * category chips below: the product filter has to agree with the cursor, and
+   * filtering a fetched page would hand back short pages and drop matches at
+   * every page boundary.
+   */
+  boardIds?: string[]
+}
+
+/**
+ * Which "nothing here" the reader is looking at. A product filter that matches
+ * nothing reads as a broken page unless the message says a filter is on.
+ */
+function emptyStateTitle(
+  activeCategoryId: ChangelogCategoryId | null,
+  boardIds: string[] | undefined
+) {
+  if (activeCategoryId) {
+    return {
+      id: 'portal.changelog.emptyFiltered.title',
+      defaultMessage: 'No updates in this category yet',
+    }
+  }
+  if (boardIds?.length) {
+    return {
+      id: 'portal.changelog.emptyProduct.title',
+      defaultMessage: 'No updates for this product yet',
+    }
+  }
+  return { id: 'portal.changelog.empty.title', defaultMessage: 'No updates yet' }
+}
+
+export function ChangelogListPublic({ boardIds }: ChangelogListPublicProps = {}) {
   const intl = useIntl()
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery(
-    publicChangelogQueries.list()
+    publicChangelogQueries.list(boardIds)
   )
   const { data: categories = [] } = useQuery(changelogCategoryQueries.list())
   const [activeCategoryId, setActiveCategoryId] = useState<ChangelogCategoryId | null>(null)
@@ -32,9 +66,12 @@ export function ChangelogListPublic() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <div className="text-muted-foreground">
-          <FormattedMessage id="portal.changelog.loading" defaultMessage="Loading changelog..." />
+      <div>
+        <ChangelogBoardFilter selected={boardIds} />
+        <div className="flex items-center justify-center py-16">
+          <div className="text-muted-foreground">
+            <FormattedMessage id="portal.changelog.loading" defaultMessage="Loading changelog..." />
+          </div>
         </div>
       </div>
     )
@@ -42,6 +79,7 @@ export function ChangelogListPublic() {
 
   return (
     <div>
+      <ChangelogBoardFilter selected={boardIds} />
       {categoriesInUse.length > 0 && (
         <div className="mb-8 flex flex-wrap items-center gap-1.5">
           <button
@@ -80,14 +118,7 @@ export function ChangelogListPublic() {
       {entries.length === 0 ? (
         <EmptyState
           icon={DocumentTextIcon}
-          title={intl.formatMessage(
-            activeCategoryId
-              ? {
-                  id: 'portal.changelog.emptyFiltered.title',
-                  defaultMessage: 'No updates in this category yet',
-                }
-              : { id: 'portal.changelog.empty.title', defaultMessage: 'No updates yet' }
-          )}
+          title={intl.formatMessage(emptyStateTitle(activeCategoryId, boardIds))}
           description={intl.formatMessage({
             id: 'portal.changelog.empty.description',
             defaultMessage: 'Check back soon for the latest product updates and shipped features.',

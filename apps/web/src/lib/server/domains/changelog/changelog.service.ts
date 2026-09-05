@@ -39,6 +39,7 @@ import {
 } from '@/lib/server/events/dispatch'
 import { scheduleDispatch, cancelScheduledDispatch } from '@/lib/server/events/scheduler'
 import { setEntryCategories, getCategoriesForEntries } from './changelog-category.service'
+import { setEntryBoards, getBoardsForEntries } from './changelog-board.service'
 import { embedChangelogEntryOnPublish } from './changelog-embedding.service'
 import { logger } from '@/lib/server/logger'
 
@@ -132,6 +133,12 @@ export async function createChangelog(
   // Link categories if provided
   if (input.categoryIds && input.categoryIds.length > 0) {
     await setEntryCategories(entry.id, input.categoryIds)
+  }
+
+  // Assign products (boards) if provided. An empty list is the same as an
+  // absent one here: a new entry has no assignment to clear.
+  if (input.boardIds && input.boardIds.length > 0) {
+    await setEntryBoards(entry.id, input.boardIds)
   }
 
   // Dispatch event or schedule delayed job based on publish state. `notify`
@@ -254,6 +261,13 @@ export async function updateChangelog(
   // Update linked categories if provided (full replace)
   if (input.categoryIds !== undefined) {
     await setEntryCategories(id, input.categoryIds)
+  }
+
+  // Update assigned products if provided (full replace). Unlike create, an
+  // empty list here is meaningful: it is how an editor takes an entry off a
+  // product and makes it a cross-product announcement again.
+  if (input.boardIds !== undefined) {
+    await setEntryBoards(id, input.boardIds)
   }
 
   // Handle event dispatch / scheduling when publish state changes
@@ -402,7 +416,8 @@ export async function getChangelogById(id: ChangelogId): Promise<ChangelogEntryW
     })
   )
 
-  // Categories (labels) attached to this entry.
+  // Products (boards) this entry is about, and the categories (labels) on it.
+  const boards = (await getBoardsForEntries([id])).get(id) ?? []
   const categoriesMap = await getCategoriesForEntries([id])
   const categories = (categoriesMap.get(id) ?? []).map((c) => ({
     id: c.id,
@@ -428,6 +443,7 @@ export async function getChangelogById(id: ChangelogId): Promise<ChangelogEntryW
     author,
     linkedPosts,
     categories,
+    boards,
     status: computeStatus(entry.publishedAt),
   }
 }

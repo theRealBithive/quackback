@@ -142,11 +142,17 @@ function applySqlFilter<T extends ReturnType<typeof candidateRow>>(rows: T[]): T
  * Chainable mock for `db.select(...).from(...).innerJoin(...).innerJoin(...).where(...)`
  * — resolves with the rows you provide when `.where(...)` is awaited.
  */
+// Awaitable at any depth: the linked-post query ends on `.where()`, the
+// products query on `.orderBy()`, and this suite cares about neither.
 function chainResolving(rows: unknown[]): unknown {
   const chain: Record<string, unknown> = {}
-  chain.from = () => chain
-  chain.innerJoin = () => chain
-  chain.where = () => Promise.resolve(rows)
+  const self = () => chain
+  chain.from = self
+  chain.innerJoin = self
+  chain.where = self
+  chain.orderBy = self
+  chain.then = (onOk: (v: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+    Promise.resolve(rows).then(onOk, onErr)
   return chain
 }
 
@@ -162,6 +168,9 @@ function entriesListChain(rows: unknown[]): unknown {
 beforeEach(() => {
   vi.clearAllMocks()
   mockStatusesFindMany.mockResolvedValue([])
+  // Default for every select the tests do not stub explicitly — the products
+  // lookup among them. `mockReturnValueOnce` still takes precedence.
+  mockSelect.mockReturnValue(chainResolving([]))
 })
 
 describe('getPublicChangelogById — effective display date', () => {

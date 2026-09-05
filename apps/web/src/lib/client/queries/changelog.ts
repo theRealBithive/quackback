@@ -30,7 +30,9 @@ export const changelogKeys = {
   detail: (id: ChangelogId) => [...changelogKeys.details(), id] as const,
   topViewed: () => [...changelogKeys.all, 'top-viewed'] as const,
   public: () => [...changelogKeys.all, 'public'] as const,
-  publicList: () => [...changelogKeys.public(), 'list'] as const,
+  /** Filters are part of the key: two product selections are two lists. */
+  publicList: (filters: { boardIds?: string[] } = {}) =>
+    [...changelogKeys.public(), 'list', filters] as const,
   publicDetail: (id: ChangelogId) => [...changelogKeys.public(), 'detail', id] as const,
   categories: () => [...changelogKeys.all, 'categories'] as const,
   settings: () => [...changelogKeys.all, 'settings'] as const,
@@ -103,14 +105,20 @@ export const changelogQueries = {
  * Public changelog queries
  */
 export const publicChangelogQueries = {
-  list: () =>
+  /**
+   * @param boardIds - Products to narrow to; omitted or empty is the whole
+   *   changelog. Ids the reader may not see are dropped server-side, so a
+   *   pasted link never reports whether a board exists.
+   */
+  list: (boardIds?: string[]) =>
     infiniteQueryOptions({
-      queryKey: changelogKeys.publicList(),
+      queryKey: changelogKeys.publicList(boardIds?.length ? { boardIds } : {}),
       queryFn: ({ pageParam }) =>
         listPublicChangelogsFn({
           data: {
             cursor: pageParam,
             limit: 10,
+            ...(boardIds?.length ? { boardIds } : {}),
           },
         }),
       initialPageParam: undefined as string | undefined,

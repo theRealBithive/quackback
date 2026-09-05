@@ -22,6 +22,7 @@ import { ChangelogMetadataSidebarContent } from './changelog-metadata-sidebar-co
 import { toPublishState, type PublishState } from '@/lib/shared/schemas/changelog'
 import { Route } from '@/routes/admin/changelog'
 import {
+  type BoardId,
   type ChangelogId,
   type PostId,
   type ChangelogCategoryId,
@@ -42,6 +43,7 @@ function ChangelogModalContent({ entryId, onClose }: ChangelogModalContentProps)
   const [contentJson, setContentJson] = useState<JSONContent | null>(null)
   const [linkedPostIds, setLinkedPostIds] = useState<PostId[]>([])
   const [categoryIds, setCategoryIds] = useState<ChangelogCategoryId[]>([])
+  const [boardIds, setBoardIds] = useState<BoardId[]>([])
   const [notify, setNotify] = useState(true)
   const [segmentIds, setSegmentIds] = useState<SegmentId[]>([])
   const [segmentIdsTouched, setSegmentIdsTouched] = useState(false)
@@ -79,6 +81,7 @@ function ChangelogModalContent({ entryId, onClose }: ChangelogModalContentProps)
       setContentJson(entry.contentJson as JSONContent | null)
       setLinkedPostIds(entry.linkedPosts.map((p) => p.id))
       setCategoryIds(entry.categories.map((c) => c.id))
+      setBoardIds(entry.boards.map((b) => b.id))
       setPublishState(toPublishState(entry.status, entry.publishedAt))
       setDisplayDateOverride(entry.displayDate ? new Date(entry.displayDate) : undefined)
       setDisplayDateTouched(false)
@@ -135,6 +138,7 @@ function ChangelogModalContent({ entryId, onClose }: ChangelogModalContentProps)
         contentJson: contentJson as TiptapContent | null,
         linkedPostIds,
         categoryIds,
+        boardIds,
         publishState,
         notify,
         ...(displayDatePayload !== undefined && { displayDate: displayDatePayload }),
@@ -211,6 +215,8 @@ function ChangelogModalContent({ entryId, onClose }: ChangelogModalContentProps)
             onLinkedPostsChange={setLinkedPostIds}
             categoryIds={categoryIds}
             onCategoriesChange={setCategoryIds}
+            boardIds={boardIds}
+            onBoardsChange={setBoardIds}
             notify={notify}
             onNotifyChange={setNotify}
             segmentIds={segmentIds}
@@ -251,6 +257,8 @@ function ChangelogModalContent({ entryId, onClose }: ChangelogModalContentProps)
                   onLinkedPostsChange={setLinkedPostIds}
                   categoryIds={categoryIds}
                   onCategoriesChange={setCategoryIds}
+                  boardIds={boardIds}
+                  onBoardsChange={setBoardIds}
                   notify={notify}
                   onNotifyChange={setNotify}
                   segmentIds={segmentIds}

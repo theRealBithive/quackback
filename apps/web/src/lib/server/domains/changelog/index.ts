@@ -14,6 +14,8 @@ export type {
   ChangelogEntryWithDetails,
   ChangelogListResult,
   ChangelogAuthor,
+  ChangelogBoardSummary,
+  ChangelogCategorySummary,
   ChangelogLinkedPost,
   PublicChangelogEntry,
   PublicChangelogLinkedPost,

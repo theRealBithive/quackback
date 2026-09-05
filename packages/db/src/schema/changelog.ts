@@ -7,11 +7,13 @@ import {
   uniqueIndex,
   jsonb,
   foreignKey,
+  primaryKey,
   customType,
 } from 'drizzle-orm/pg-core'
 import { relations, sql } from 'drizzle-orm'
 import { typeIdWithDefault, typeIdColumn, typeIdColumnNullable } from '@quackback/ids/drizzle'
 import { principal } from './auth'
+import { boards } from './boards'
 import { posts } from './posts'
 import type { TiptapContent } from '../types'
 
@@ -94,6 +96,37 @@ export const changelogEntryPosts = pgTable(
   ]
 )
 
+// Which products (boards) a changelog entry is about. M:N, because a release
+// routinely spans products. An entry with **no** row here is a cross-product
+// announcement, not an unassigned one — the public filter shows it under every
+// product (see changelog-board-filter.ts). Composite PK, no surrogate id,
+// mirroring the entry <-> category link table.
+export const changelogEntryBoards = pgTable(
+  'changelog_entry_boards',
+  {
+    changelogEntryId: typeIdColumn('changelog')('changelog_entry_id').notNull(),
+    boardId: typeIdColumn('board')('board_id').notNull(),
+  },
+  // Constraint names and composite-PK column order match migration 0275.
+  (table) => [
+    primaryKey({
+      name: 'changelog_entry_boards_pk',
+      columns: [table.boardId, table.changelogEntryId],
+    }),
+    foreignKey({
+      name: 'changelog_entry_boards_entry_fk',
+      columns: [table.changelogEntryId],
+      foreignColumns: [changelogEntries.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'changelog_entry_boards_board_fk',
+      columns: [table.boardId],
+      foreignColumns: [boards.id],
+    }).onDelete('cascade'),
+    index('changelog_entry_boards_entry_idx').on(table.changelogEntryId),
+  ]
+)
+
 export const changelogEntriesRelations = relations(changelogEntries, ({ one, many }) => ({
   author: one(principal, {
     fields: [changelogEntries.principalId],
@@ -101,6 +134,7 @@ export const changelogEntriesRelations = relations(changelogEntries, ({ one, man
     relationName: 'changelogAuthor',
   }),
   linkedPosts: many(changelogEntryPosts),
+  boardLinks: many(changelogEntryBoards),
 }))
 
 export const changelogEntryPostsRelations = relations(changelogEntryPosts, ({ one }) => ({
@@ -111,5 +145,16 @@ export const changelogEntryPostsRelations = relations(changelogEntryPosts, ({ on
   post: one(posts, {
     fields: [changelogEntryPosts.postId],
     references: [posts.id],
+  }),
+}))
+
+export const changelogEntryBoardsRelations = relations(changelogEntryBoards, ({ one }) => ({
+  changelogEntry: one(changelogEntries, {
+    fields: [changelogEntryBoards.changelogEntryId],
+    references: [changelogEntries.id],
+  }),
+  board: one(boards, {
+    fields: [changelogEntryBoards.boardId],
+    references: [boards.id],
   }),
 }))

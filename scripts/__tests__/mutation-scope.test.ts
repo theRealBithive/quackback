@@ -108,6 +108,16 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/components/admin/feedback/detail/__tests__/use-metadata-handlers.test.tsx',
         ],
       },
+      {
+        file: 'apps/web/src/lib/server/domains/changelog/changelog-board-filter.ts',
+        suites: [
+          'apps/web/src/lib/server/domains/changelog/__tests__/changelog-board-filter.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/domains/changelog/changelog-board.service.ts',
+        suites: ['apps/web/src/lib/server/domains/changelog/__tests__/changelog-board.db.test.ts'],
+      },
     ])
   })
 
