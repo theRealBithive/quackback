@@ -43,6 +43,18 @@ interface GitLabNotePayload {
   issue?: { iid?: number; confidential?: boolean }
 }
 
+/**
+ * Whether GitLab's `changes` block reports the issue's state as having moved.
+ *
+ * `state_id` is what the payloads in hand carry; `state` is accepted as well
+ * because the question is whether the state moved, and the spelling GitLab
+ * answers it in is not ours to pin.
+ */
+function namesAStateChange(changes?: Record<string, unknown>): boolean {
+  if (!changes) return false
+  return 'state_id' in changes || 'state' in changes
+}
+
 export const gitlabInboundHandler: InboundWebhookHandler = {
   async verifySignature(request: Request, _body: string, secret: string): Promise<true | Response> {
     // GitLab uses a shared secret token in the X-Gitlab-Token header
@@ -71,6 +83,7 @@ export const gitlabInboundHandler: InboundWebhookHandler = {
         action?: string
         state?: string
       }
+      changes?: Record<string, unknown>
     }
 
     if (payload.object_kind !== 'issue') return null
@@ -78,6 +91,12 @@ export const gitlabInboundHandler: InboundWebhookHandler = {
 
     const { action, state, iid } = payload.object_attributes
     if (action !== 'update' && action !== 'close' && action !== 'reopen') return null
+    // `update` is every edit GitLab reports — description, title, labels,
+    // assignee — and it carries the issue's *unchanged* state alongside.
+    // Reading that as a state change moves the post whenever someone edits the
+    // issue. `changes` holds only the attributes that actually moved, which is
+    // what GitLab's own documentation says to inspect.
+    if (action === 'update' && !namesAStateChange(payload.changes)) return null
     if (!state) return null
 
     // Map GitLab states: opened, closed

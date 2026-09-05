@@ -32,9 +32,28 @@
  *       long as no link that does record one carries the same issue number;
  *       where one does, V14 decides.
  *
+ *   V16 A message from GitLab changes a post's status only when the issue's
+ *       state actually changed. An edit to text, title, labels or assignee
+ *       leaves the post where it is.
+ *   V17 Closing and reopening keep working, whichever action GitLab labels
+ *       them with.
+ *
  * V13-V15 are the plan's V8-V10; they arrived with per-board project routing,
  * which is what made two projects — and therefore colliding issue numbers —
  * reachable at all.
+ *
+ * V16 supersedes part of V12, deliberately. V12 was written as a regression
+ * guard for the comment work — "status sync keeps behaving exactly as it does
+ * now" — and it was right while there was one project and issues were linked
+ * by hand. Per-board routing changed who touches a linked issue: it is now
+ * worked in GitLab, and GitLab reports `action: "update"` with the *unchanged*
+ * `state` for every edit. Reading that as a state change moves the post.
+ * Measured on a real payload from `eu-con/onlineelvis`: a Renovate dashboard
+ * rewriting its own description parsed as `externalStatus: "Open"`, and would
+ * have pulled a post in progress back to whatever "Open" maps to.
+ *
+ * V12 still holds for everything else it was written for: close, reopen, note
+ * events, and the project a state change reports.
  *
  * This file covers the parsing half: V1 (which id identifies the issue), V2,
  * V3, V4, V6, V7, the V12 regression, and the reporting project V13 rests on.
@@ -43,6 +62,7 @@
  *
  * The payload shape is taken from a real GitLab 19.3 "Note Hook" delivery.
  */
+import fc from 'fast-check'
 import { describe, it, expect } from 'vitest'
 import { gitlabInboundHandler } from '../inbound'
 
@@ -335,13 +355,80 @@ describe('gitlabInboundHandler.parseStatusChange rejects what it cannot trust', 
     expect(await parse(body, {}, {})).toBeNull()
   })
 
-  it('reads a plain update, not only close and reopen', async () => {
+  it('ignores an update that does not say the state moved (V16)', async () => {
+    // This test asserted the opposite until V16. It was not wrong then — an
+    // `update` carrying `state` was the only way a bulk edit reported a close
+    // while issues were linked by hand. It is wrong now: every edit to a
+    // linked issue carries the unchanged state, so accepting it moves the post
+    // whenever someone fixes a typo.
     const body = JSON.stringify({
       object_kind: 'issue',
       object_attributes: { iid: 686, action: 'update', state: 'closed' },
     })
 
+    expect(await parse(body, {}, {})).toBeNull()
+  })
+
+  it('reads an update that does say the state moved (V17)', async () => {
+    // GitLab labels a close as `action: "close"`, so this path is the belt to
+    // that braces: whatever else it labels a state change as, a `changes` block
+    // naming the state is one.
+    const body = JSON.stringify({
+      object_kind: 'issue',
+      object_attributes: { iid: 686, action: 'update', state: 'closed' },
+      changes: { state_id: { previous: 1, current: 2 } },
+    })
+
     expect((await parse(body, {}, {}))?.externalStatus).toBe('Closed')
+  })
+
+  it('accepts either spelling of the state in the changes block (V17)', async () => {
+    // `state_id` is what the payloads in hand carry. `state` is accepted too
+    // because the question being asked is "did the state move", and the shape
+    // GitLab answers it in is not ours to pin.
+    const body = JSON.stringify({
+      object_kind: 'issue',
+      object_attributes: { iid: 686, action: 'update', state: 'closed' },
+      changes: { state: { previous: 'opened', current: 'closed' } },
+    })
+
+    expect((await parse(body, {}, {}))?.externalStatus).toBe('Closed')
+  })
+
+  it('lets no other changed attribute stand in for a state change (V16)', async () => {
+    // Non-interference: whatever else an edit touched, it is not a state
+    // change. Stronger than listing the fields a Renovate rewrite happens to
+    // carry, and it is what a check written as "changes is non-empty" fails on.
+    const OTHER = [
+      'description',
+      'title',
+      'labels',
+      'assignee_ids',
+      'milestone_id',
+      'due_date',
+      'updated_at',
+      'last_edited_at',
+      'updated_by_id',
+      'relative_position',
+    ]
+    // Awaited: `fc.assert` over an async property returns a promise, and a
+    // forgotten `await` here makes the whole property pass without running.
+    await fc.assert(
+      fc.asyncProperty(
+        fc.uniqueArray(fc.constantFrom(...OTHER), { minLength: 1, maxLength: OTHER.length }),
+        fc.constantFrom('opened', 'closed'),
+        async (keys, state) => {
+          const changes = Object.fromEntries(keys.map((k) => [k, { previous: 'a', current: 'b' }]))
+          const body = JSON.stringify({
+            object_kind: 'issue',
+            object_attributes: { iid: 686, action: 'update', state },
+            changes,
+          })
+
+          expect(await parse(body, {}, {})).toBeNull()
+        }
+      )
+    )
   })
 
   it('ignores an action that is not a state change', async () => {
@@ -354,9 +441,13 @@ describe('gitlabInboundHandler.parseStatusChange rejects what it cannot trust', 
   })
 
   it('ignores a state GitLab has no mapping for', async () => {
+    // The `changes` block is load-bearing here since V16: without it this
+    // would return null because no state moved, and would stop proving
+    // anything about the state map it was written for.
     const body = JSON.stringify({
       object_kind: 'issue',
       object_attributes: { iid: 686, action: 'update', state: 'locked' },
+      changes: { state_id: { previous: 1, current: 3 } },
     })
 
     expect(await parse(body, {}, {})).toBeNull()
