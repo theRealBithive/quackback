@@ -5,6 +5,32 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
+## 1x — There are two DB test fixtures, and the wrong one is the one that gets copied
+
+Three new database suites here were written against
+`lib/server/jobs/__tests__/harness.ts`, because the nearest existing example in
+the same directory (`events/__tests__/process-integration.test.ts`) uses it.
+That harness is for **lease** suites only: a lease exists so work can outlive
+the transaction that claimed it, so those suites commit for real, open four
+connections each, and clean up with `DELETE ... WHERE` on a database every
+worktree on the machine shares.
+
+The right tool for everything else is `lib/server/__tests__/db-test-fixture.ts`
+— one connection, a transaction rolled back after every test, and a `probe` that
+skips the suite on a stale schema instead of failing it mid-test. There is a
+README beside it that says exactly this. It was not found, because the search
+started from a neighbouring test file rather than from the directory that owns
+the fixture.
+
+Cost: three suites written twice, plus a stretch of chasing 10-second hook
+timeouts in unrelated portal suites on the suspicion that the extra connections
+had caused them. (They had not — `apps/web/src/lib/server/functions` produces
+between one and three of those on `origin/main` too, measured over two runs.)
+
+What would have prevented it: the harness's own header says it is for lease
+suites, but nothing says where to go instead. One line in it pointing at
+`db-test-fixture.ts` and its README would have been enough.
+
 ## 4x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
 Measured while checking whether the hand-rolled mutation script can be replaced.
