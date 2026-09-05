@@ -23,10 +23,21 @@
  *   V11 A failure while importing a note never makes GitLab see an error, and
  *       never interferes with the status sync sharing the same webhook.
  *   V12 Status sync keeps behaving exactly as it does now.
+ *   V13 A note reaches only the post whose issue lives in the project the note
+ *       came from — never a post of another product, even when the two issue
+ *       numbers are identical.
+ *   V14 A note that cannot be attributed to exactly one post is ignored
+ *       quietly. Nothing is guessed.
+ *   V15 Links made before projects were recorded keep working unchanged.
+ *
+ * V13-V15 are the plan's V8-V10; they arrived with per-board project routing,
+ * which is what made two projects — and therefore colliding issue numbers —
+ * reachable at all.
  *
  * This file covers the parsing half: V1 (which id identifies the issue), V2,
- * V3, V4, V6, V7 and the V12 regression. V5 and V8-V11 live with the ingest
- * path in lib/server/integrations/__tests__/inbound-comment.test.ts.
+ * V3, V4, V6, V7, the V12 regression, and the reporting project V13 rests on.
+ * V5 and V8-V11 live with the ingest path in
+ * lib/server/integrations/__tests__/inbound-comment.test.ts, as do V13-V15.
  *
  * The payload shape is taken from a real GitLab 19.3 "Note Hook" delivery.
  */
@@ -45,6 +56,8 @@ interface NoteOverrides {
   authorName?: string
   authorEmail?: string
   confidential?: boolean
+  projectId?: number | null
+  projectObject?: boolean
 }
 
 /** A GitLab "Note Hook" body, shaped like the real delivery. */
@@ -59,7 +72,14 @@ function noteWebhook(overrides: NoteOverrides = {}): string {
       username: 'Maximilian',
       email: overrides.authorEmail ?? 'private@example.com',
     },
-    project_id: 11,
+    ...(overrides.projectId === null
+      ? {}
+      : overrides.projectObject === false
+        ? { project_id: overrides.projectId ?? 11 }
+        : {
+            project_id: overrides.projectId ?? 11,
+            project: { id: overrides.projectId ?? 11, path_with_namespace: 'g/p' },
+          }),
     object_attributes: {
       id: overrides.noteId ?? 24694,
       note: overrides.note ?? 'Wont fix',
@@ -99,6 +119,25 @@ describe('gitlabInboundHandler.parseComment', () => {
     const result = await parseComment(noteWebhook(), {}, {})
 
     expect(result?.externalId).toBe('686')
+  })
+
+  it('names the project the note came from, so the lookup can tell products apart (V13)', async () => {
+    const result = await parseComment(noteWebhook({ projectId: 202 }), {}, {})
+
+    expect(result?.externalScope).toBe('202')
+  })
+
+  it('reads the project id from the flat field when GitLab sends no project object (V13)', async () => {
+    const result = await parseComment(noteWebhook({ projectId: 202, projectObject: false }), {}, {})
+
+    expect(result?.externalScope).toBe('202')
+  })
+
+  it('names no project when the payload carries none, rather than inventing one (V15)', async () => {
+    const result = await parseComment(noteWebhook({ projectId: null }), {}, {})
+
+    expect(result).not.toBeNull()
+    expect(result?.externalScope).toBeUndefined()
   })
 
   it('identifies the note itself by its own id, for the duplicate check (V5)', async () => {
@@ -185,9 +224,10 @@ describe('gitlabInboundHandler.parseComment', () => {
 })
 
 describe('gitlabInboundHandler.parseStatusChange stays as it was (V12)', () => {
-  function issueWebhook(action: string, state: string, iid = 686): string {
+  function issueWebhook(action: string, state: string, iid = 686, projectId = 11): string {
     return JSON.stringify({
       object_kind: 'issue',
+      project: { id: projectId, path_with_namespace: 'g/p' },
       object_attributes: { iid, action, state },
     })
   }
@@ -201,9 +241,32 @@ describe('gitlabInboundHandler.parseStatusChange stays as it was (V12)', () => {
 
     expect(result).toEqual({
       externalId: '686',
+      externalScope: '11',
       externalStatus: 'Closed',
       eventType: 'issue.state_changed',
     })
+  })
+
+  it('names the project the state change came from (V13)', async () => {
+    const result = await gitlabInboundHandler.parseStatusChange(
+      issueWebhook('close', 'closed', 686, 202),
+      {},
+      {}
+    )
+
+    expect(result?.externalScope).toBe('202')
+  })
+
+  it('names no project when the payload carries none (V15)', async () => {
+    const bare = JSON.stringify({
+      object_kind: 'issue',
+      object_attributes: { iid: 686, action: 'close', state: 'closed' },
+    })
+
+    const result = await gitlabInboundHandler.parseStatusChange(bare, {}, {})
+
+    expect(result?.externalId).toBe('686')
+    expect(result?.externalScope).toBeUndefined()
   })
 
   it('still maps a reopened issue to Open', async () => {

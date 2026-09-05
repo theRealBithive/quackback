@@ -20,6 +20,12 @@ export const postExternalLinks = pgTable(
     integrationId: typeIdColumnNullable('integration')('integration_id'),
     integrationType: varchar('integration_type', { length: 50 }).notNull(),
     externalId: text('external_id').notNull(),
+    /** The container the external item lives in — a GitLab project id, a GitHub
+     *  repository, a Jira project key. An issue id is unique only inside it, so
+     *  this is what keeps two boards routing to two projects from colliding on
+     *  the same number. NULL on links made before the column existed and on
+     *  providers that report no container. */
+    externalScope: varchar('external_scope', { length: 200 }),
     /** Human-friendly display label (e.g. "QUA-24", "#142"). Falls back to externalId when null. */
     externalDisplayId: text('external_display_id'),
     externalUrl: text('external_url'),
@@ -53,6 +59,12 @@ export const postExternalLinks = pgTable(
       table.postId
     ),
     index('post_external_links_post_status_idx').on(table.postId, table.status),
+    // The reverse lookup an inbound webhook performs.
+    index('post_external_links_type_external_scope_idx').on(
+      table.integrationType,
+      table.externalId,
+      table.externalScope
+    ),
   ]
 )
 
@@ -85,6 +97,12 @@ export const ticketExternalLinks = pgTable(
     integrationId: typeIdColumnNullable('integration')('integration_id'),
     integrationType: varchar('integration_type', { length: 50 }).notNull(),
     externalId: text('external_id').notNull(),
+    /** The container the external item lives in — a GitLab project id, a GitHub
+     *  repository, a Jira project key. An issue id is unique only inside it, so
+     *  this is what keeps two boards routing to two projects from colliding on
+     *  the same number. NULL on links made before the column existed and on
+     *  providers that report no container. */
+    externalScope: varchar('external_scope', { length: 200 }),
     /** Human-friendly display label (e.g. "acme/widgets#142"). Falls back to externalId when null. */
     externalDisplayId: text('external_display_id'),
     externalUrl: text('external_url'),
@@ -119,6 +137,12 @@ export const ticketExternalLinks = pgTable(
     ),
     index('ticket_external_links_type_external_id_idx').on(table.integrationType, table.externalId),
     index('ticket_external_links_ticket_status_idx').on(table.ticketId, table.status),
+    // The reverse lookup an inbound webhook performs.
+    index('ticket_external_links_type_external_scope_idx').on(
+      table.integrationType,
+      table.externalId,
+      table.externalScope
+    ),
   ]
 )
 

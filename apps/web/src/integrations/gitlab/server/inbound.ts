@@ -11,9 +11,26 @@ import type {
   InboundWebhookResult,
 } from '@/lib/server/integrations/inbound-types'
 
+/** The project a hook body came from, as the numeric id GitLab uses everywhere
+ *  else — the value `integrations.config.channelId` stores and the one that
+ *  survives a project being renamed. Both hook shapes carry it, the Note Hook
+ *  as a flat `project_id` and both as a nested `project.id`; a body carrying
+ *  neither yields undefined rather than a guess. */
+function reportedProjectId(payload: {
+  project?: { id?: number | string }
+  project_id?: number | string
+}): string | undefined {
+  const id = payload.project?.id ?? payload.project_id
+  if (typeof id === 'number') return String(id)
+  if (typeof id === 'string' && id !== '') return id
+  return undefined
+}
+
 /** The slice of a GitLab "Note Hook" body this handler reads. */
 interface GitLabNotePayload {
   object_kind?: string
+  project?: { id?: number | string }
+  project_id?: number | string
   user?: { name?: string }
   object_attributes?: {
     id?: number
@@ -47,6 +64,8 @@ export const gitlabInboundHandler: InboundWebhookHandler = {
   async parseStatusChange(body: string): Promise<InboundWebhookResult | null> {
     const payload = JSON.parse(body) as {
       object_kind?: string
+      project?: { id?: number | string }
+      project_id?: number | string
       object_attributes?: {
         iid?: number
         action?: string
@@ -72,6 +91,7 @@ export const gitlabInboundHandler: InboundWebhookHandler = {
 
     return {
       externalId: String(iid),
+      externalScope: reportedProjectId(payload),
       externalStatus,
       eventType: 'issue.state_changed',
     }
@@ -114,6 +134,7 @@ export const gitlabInboundHandler: InboundWebhookHandler = {
 
     return {
       externalId: String(issueIid),
+      externalScope: reportedProjectId(payload),
       externalCommentId: String(note.id),
       authorName,
       body: text,

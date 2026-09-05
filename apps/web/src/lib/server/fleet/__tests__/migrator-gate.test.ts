@@ -348,6 +348,7 @@ describe('replayGateVerdict', () => {
       '0271_widget_installed_sdk_version',
       '0272_kb_url_id',
       '0273_post_comments_external_ref',
+      '0274_external_link_scope',
     ])
     const verdict = replayGateVerdict(before, verdictsFor(replaySetFor(before)), false)
     expect(verdict.ok).toBe(false)

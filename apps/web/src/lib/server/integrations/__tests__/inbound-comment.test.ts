@@ -13,6 +13,12 @@
  *   V9  A note for an issue no post is linked to is ignored quietly.
  *   V11 A failure while importing a note never makes GitLab see an error, and
  *       never interferes with the status sync sharing the same webhook.
+ *   V13 A note reaches only the post whose issue lives in the project the note
+ *       came from — never a post of another product, even when the two issue
+ *       numbers are identical.
+ *   V14 A note that cannot be attributed to exactly one post is ignored
+ *       quietly. Nothing is guessed.
+ *   V15 Links made before projects were recorded keep working unchanged.
  *
  * Runs inside the fixture transaction, which is always rolled back.
  *
@@ -119,21 +125,35 @@ async function seedPost(access: BoardAccess = DEFAULT_BOARD_ACCESS): Promise<Pos
   return post.id as PostId
 }
 
-async function linkPostToIssue(postId: PostId, issueIid: string): Promise<void> {
+async function linkPostToIssue(
+  postId: PostId,
+  issueIid: string,
+  externalScope: string | null = null
+): Promise<void> {
   await testDb.insert(postExternalLinks).values({
     postId,
     integrationType: 'gitlab',
     externalId: issueIid,
+    externalScope,
     externalDisplayId: `#${issueIid}`,
     externalUrl: `https://gitlab.example.com/g/p/-/issues/${issueIid}`,
   })
 }
 
 function noteBody(
-  overrides: { issueIid?: number; noteId?: number; note?: string; internal?: boolean } = {}
+  overrides: {
+    issueIid?: number
+    noteId?: number
+    note?: string
+    internal?: boolean
+    projectId?: number
+  } = {}
 ): string {
   return JSON.stringify({
     object_kind: 'note',
+    ...(overrides.projectId === undefined
+      ? {}
+      : { project_id: overrides.projectId, project: { id: overrides.projectId } }),
     user: { id: 2, name: 'Maximilian Kindshofer', email: AUTHOR_EMAIL },
     object_attributes: {
       id: overrides.noteId ?? 24694,
@@ -190,6 +210,75 @@ describe.skipIf(!fixture.available)('inbound webhook comment branch (real DB, ro
     const comments = await commentsOn(postId)
     expect(comments).toHaveLength(1)
     expect(comments[0].content).toContain('Wont fix')
+  })
+
+  it('writes onto the post in the reporting project, not the other product with the same issue number (V13)', async () => {
+    // The collision this whole column exists for: GitLab numbers issues per
+    // project, so #686 exists in the Datenschutz project and in the ASBS one.
+    // Before the project was recorded, the lookup matched on the number alone
+    // and a note from either project landed on whichever row came back first.
+    await seedSettings()
+    const servicePrincipalId = await seedServicePrincipal()
+    await seedGitLabIntegration(servicePrincipalId)
+    const datenschutzPostId = await seedPost()
+    const asbsPostId = await seedPost()
+    await linkPostToIssue(datenschutzPostId, '686', '101')
+    await linkPostToIssue(asbsPostId, '686', '202')
+
+    const response = await handleInboundWebhook(
+      gitlabRequest(noteBody({ projectId: 202 })),
+      'gitlab'
+    )
+    expect(response.status).toBe(200)
+
+    expect(await commentsOn(asbsPostId)).toHaveLength(1)
+    expect(await commentsOn(datenschutzPostId)).toHaveLength(0)
+  })
+
+  it('ignores a note from a project nothing here is linked to (V14)', async () => {
+    await seedSettings()
+    const servicePrincipalId = await seedServicePrincipal()
+    await seedGitLabIntegration(servicePrincipalId)
+    const postId = await seedPost()
+    await linkPostToIssue(postId, '686', '101')
+
+    const response = await handleInboundWebhook(
+      gitlabRequest(noteBody({ projectId: 999 })),
+      'gitlab'
+    )
+    expect(response.status).toBe(200)
+
+    expect(await commentsOn(postId)).toHaveLength(0)
+  })
+
+  it('still writes onto a link made before projects were recorded (V15)', async () => {
+    await seedSettings()
+    const servicePrincipalId = await seedServicePrincipal()
+    await seedGitLabIntegration(servicePrincipalId)
+    const postId = await seedPost()
+    await linkPostToIssue(postId, '686', null)
+
+    await handleInboundWebhook(gitlabRequest(noteBody({ projectId: 202 })), 'gitlab')
+
+    expect(await commentsOn(postId)).toHaveLength(1)
+  })
+
+  it('writes nowhere when an unrecorded link and a foreign project both claim the number (V14)', async () => {
+    // The unscoped link might be the right one, but a link that names a
+    // different project proves #686 is not unique here. Picking either would
+    // be a guess, and a wrong guess is a cross-product leak.
+    await seedSettings()
+    const servicePrincipalId = await seedServicePrincipal()
+    await seedGitLabIntegration(servicePrincipalId)
+    const legacyPostId = await seedPost()
+    const otherPostId = await seedPost()
+    await linkPostToIssue(legacyPostId, '686', null)
+    await linkPostToIssue(otherPostId, '686', '303')
+
+    await handleInboundWebhook(gitlabRequest(noteBody({ projectId: 202 })), 'gitlab')
+
+    expect(await commentsOn(legacyPostId)).toHaveLength(0)
+    expect(await commentsOn(otherPostId)).toHaveLength(0)
   })
 
   it('lands team-only, never on the public portal (V1)', async () => {
