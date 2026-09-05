@@ -13,10 +13,19 @@
  * Everything here is pure. The server functions around it do the writing.
  */
 
-/** One stored mapping row, reduced to what these rules read. */
+/**
+ * One stored mapping row, reduced to what these rules read.
+ *
+ * `actionConfig` is jsonb, so `channelId` is whatever was written there — the
+ * column's own type allows a number or a boolean. It is read as `unknown` and
+ * narrowed once, rather than trusted.
+ */
 export interface StoredMappingWithConfig {
   targetKey: string
-  actionConfig: { channelId?: string } | null
+  // The index signature is what lets the stored `EventMappingActionConfig`
+  // pass: a target type with none but optional properties is a "weak type",
+  // and TypeScript refuses a value that shares no property name with it.
+  actionConfig: { channelId?: unknown; [key: string]: unknown } | null
   filters: { boardIds?: string[]; statusIds?: string[] } | null
 }
 
@@ -41,9 +50,14 @@ export interface BoardRoutingRule {
  * and picking one would be a guess that lands a product's feedback in another
  * product's tracker.
  */
+function projectIdOf(row: StoredMappingWithConfig): string | null {
+  const stored = row.actionConfig?.channelId
+  if (typeof stored !== 'string' || stored.length === 0) return null
+  return stored
+}
+
 function isCompleteRule(row: StoredMappingWithConfig): boolean {
-  const projectId = row.actionConfig?.channelId
-  if (!projectId) return false
+  if (projectIdOf(row) === null) return false
   if (!row.filters?.statusIds?.length) return false
   const boardIds = row.filters.boardIds
   if (boardIds?.length !== 1) return false
@@ -73,11 +87,13 @@ export function targetKeysToRetire(stored: StoredMappingWithConfig[]): string[] 
 export function rulesFromMappings(stored: StoredMappingWithConfig[]): BoardRoutingRule[] {
   const rules: BoardRoutingRule[] = []
   for (const row of stored) {
+    const projectId = projectIdOf(row)
+    if (projectId === null) continue
     if (!isCompleteRule(row)) continue
     rules.push({
       boardId: row.targetKey,
-      projectId: row.actionConfig!.channelId!,
-      triggerStatusIds: row.filters!.statusIds!,
+      projectId,
+      triggerStatusIds: row.filters?.statusIds ?? [],
     })
   }
   return rules

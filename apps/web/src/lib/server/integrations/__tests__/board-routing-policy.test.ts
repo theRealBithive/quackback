@@ -233,6 +233,21 @@ describe('a row is retired unless it is a complete rule', () => {
     expect(targetKeysToRetire([noProject])).toEqual(['board-asbs'])
   })
 
+  it('retires a row whose project is not a string, which jsonb allows', () => {
+    // action_config is jsonb. Nothing this code writes puts a number there,
+    // and a row that has one is not a rule we can act on — routing to project
+    // 222 and to project "222" are not obviously the same thing to GitLab, and
+    // guessing is how a product's feedback lands in another product's tracker.
+    const numericProject: StoredMappingWithConfig = {
+      targetKey: 'board-asbs',
+      actionConfig: { channelId: 222 },
+      filters: { boardIds: ['board-asbs'], statusIds: ['status-triaged'] },
+    }
+
+    expect(targetKeysToRetire([numericProject])).toEqual(['board-asbs'])
+    expect(rulesFromMappings([numericProject])).toEqual([])
+  })
+
   it('retires a row whose key and board filter disagree', () => {
     const inconsistent: StoredMappingWithConfig = {
       targetKey: 'board-asbs',
