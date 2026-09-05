@@ -151,6 +151,35 @@ All four CI shards passed with coverage on 4 vCPU. So the local failures are loa
 out took a second full 3-minute shard run as a control. That is the cost of the
 flakiness: no single run means anything, so every measurement needs a twin.
 
+## 1x — postgres.js encodes a JSON _string_ parameter into jsonb a second time
+
+Seeding an `integrations` row for a migration-replay test, this looked obvious:
+
+```ts
+sql.unsafe(`INSERT INTO integrations (..., config) VALUES ($1, ..., $2::jsonb)`, [
+  id,
+  JSON.stringify({ channelId: '101' }),
+])
+```
+
+What lands in the column is `"{\"channelId\":\"101\"}"` — `jsonb_typeof` says
+`string`, not `object`, so `config ->> 'channelId'` is **null**. The driver
+JSON-encodes the value it is given, and the value it was given was already JSON.
+Nothing errors: the insert succeeds, the row is there, and only the `->>` comes
+back empty.
+
+The failure surfaces a long way from the cause. Here the migration under test
+matched no row, the test went red on the wrong assertion, and the first
+hypothesis was that the migration's `DO` block had not executed at all — psql ran
+the same file correctly, which pointed at the execution path rather than at the
+seed. It cost a debug script to see `jsonb_typeof = string`.
+
+Pass the object (`[{ channelId: '101' }]`) and let the driver encode it once, or
+write the literal into the SQL, which is what the test does now — a constant does
+not need a placeholder, and the literal is the version that reads correctly at a
+glance. Worth checking wherever a test seeds a jsonb column, because the wrong
+version is silent and looks right.
+
 ## 1x — Generating a vitest config has two traps, both of which look like a hang
 
 The mutation gate writes the runner's config per run, and both mistakes cost a
