@@ -16,27 +16,15 @@
  *   V4  An issue is created only once the post reaches one of the triggering
  *       statuses recorded for its board. A post merely arriving creates none.
  *   V7  Renaming a status does not change which posts create an issue.
- *
- * `DATABASE_URL` points every worktree on this machine at one shared
- * `quackback_test`, and `integrations.integration_type` is globally unique — so
- * every row here is minted under a type nobody else uses and dropped again.
  */
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
-import { fromUuid, toUuid } from '@quackback/ids'
-import { testDb, testSql, closeHarness } from '@/lib/server/jobs/__tests__/harness'
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
+import { createDbTestFixture, testDb } from '@/lib/server/__tests__/db-test-fixture'
+import { boards, posts, postStatuses, principal, integrations } from '@/lib/server/db'
+import { integrationEventMappings } from '@/lib/server/db'
 
 vi.mock('@/lib/server/db', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/db')>()),
-  db: new Proxy(
-    {},
-    {
-      get(_t, prop) {
-        const handle = testDb()
-        const value = Reflect.get(handle as object, prop, handle)
-        return typeof value === 'function' ? value.bind(handle) : value
-      },
-    }
-  ),
+  db: (await import('@/lib/server/__tests__/db-test-fixture')).testDb,
 }))
 
 // The mapping cache would hand one test's rows to the next.
@@ -59,67 +47,83 @@ vi.mock('@/lib/server/integrations/encryption', () => ({
 import { integrationResolver } from '../resolvers/integration.resolver'
 import type { DomainEvent } from '../envelope'
 
-/** Unique per run: the integrations table allows one row per type instance-wide. */
-const INTEGRATION_TYPE = `routing-probe-${Math.random().toString(36).slice(2, 10)}`
+const fixture = await createDbTestFixture({
+  probe: async (db) => void (await db.select({ id: posts.statusId }).from(posts).limit(0)),
+})
+
+const TRIAGED = 'triaged'
 
 interface Seed {
-  integrationId: string
   boards: Record<string, string>
   statuses: Record<string, string>
-  postId: (board: string, status: string) => Promise<string>
+  post: (board: string, status: string) => Promise<string>
 }
 
 async function seed(): Promise<Seed> {
-  const sql = testSql()
-  const [integration] = await sql`
-    insert into integrations (id, integration_type, status, config, secrets)
-    values (gen_random_uuid(), ${INTEGRATION_TYPE}, 'active', '{}'::jsonb, 'sealed-blob')
-    returning id`
-  const [principal] = await sql`
-    insert into principal (id, created_at) values (gen_random_uuid(), now()) returning id`
+  const tag = `routing-${Math.random().toString(36).slice(2, 8)}`
 
-  const boards: Record<string, string> = {}
+  const [integration] = await testDb
+    .insert(integrations)
+    .values({ integrationType: tag, status: 'active', config: {}, secrets: 'sealed-blob' })
+    .returning({ id: integrations.id })
+
+  // `principal.created_at` is not null and has no default in the schema.
+  const [author] = await testDb
+    .insert(principal)
+    .values({ createdAt: new Date() })
+    .returning({ id: principal.id })
+
+  const boardIds: Record<string, string> = {}
   for (const name of ['datenschutz', 'asbs', 'gwg', 'unrouted']) {
-    const slug = `${INTEGRATION_TYPE}-${name}`
-    const [row] = await sql`
-      insert into boards (id, slug, name) values (gen_random_uuid(), ${slug}, ${name})
-      returning id`
-    boards[name] = fromUuid('board', row.id)
+    const [row] = await testDb
+      .insert(boards)
+      .values({ slug: `${tag}-${name}`, name })
+      .returning({ id: boards.id })
+    boardIds[name] = row.id
   }
 
-  const statuses: Record<string, string> = {}
-  for (const name of ['new', 'triaged']) {
-    const slug = `${INTEGRATION_TYPE}-${name}`
-    const [row] = await sql`
-      insert into post_statuses (id, name, slug) values (gen_random_uuid(), ${name}, ${slug})
-      returning id`
-    statuses[name] = fromUuid('post_status', row.id)
+  const statusIds: Record<string, string> = {}
+  for (const name of ['new', TRIAGED]) {
+    const [row] = await testDb
+      .insert(postStatuses)
+      .values({ name, slug: `${tag}-${name}` })
+      .returning({ id: postStatuses.id })
+    statusIds[name] = row.id
+  }
+
+  for (const [board, projectId] of [
+    ['datenschutz', '111'],
+    ['asbs', '222'],
+    ['gwg', '333'],
+  ] as const) {
+    await testDb.insert(integrationEventMappings).values({
+      integrationId: integration.id,
+      eventType: 'post.status_changed',
+      actionType: 'send_message',
+      targetKey: boardIds[board],
+      actionConfig: { channelId: projectId },
+      filters: { boardIds: [boardIds[board]], statusIds: [statusIds[TRIAGED]] },
+      enabled: true,
+    })
   }
 
   return {
-    integrationId: integration.id,
-    boards,
-    statuses,
-    async postId(board: string, status: string) {
-      const [row] = await sql`
-        insert into posts (id, board_id, title, content, principal_id, status_id)
-        values (gen_random_uuid(), ${toUuid(boards[board])}, 'probe', 'probe', ${principal.id},
-                ${toUuid(statuses[status])})
-        returning id`
-      return fromUuid('post', row.id)
+    boards: boardIds,
+    statuses: statusIds,
+    async post(board: string, status: string) {
+      const [row] = await testDb
+        .insert(posts)
+        .values({
+          boardId: boardIds[board] as never,
+          title: 'probe',
+          content: 'probe',
+          principalId: author.id as never,
+          statusId: statusIds[status] as never,
+        })
+        .returning({ id: posts.id })
+      return row.id
     },
   }
-}
-
-/** One board→project rule, exactly as the write path stores it. */
-async function addRule(s: Seed, board: string, projectId: string, status: string): Promise<void> {
-  await testSql()`
-    insert into integration_event_mappings
-      (id, integration_id, event_type, action_type, target_key, action_config, filters, enabled)
-    values (gen_random_uuid(), ${s.integrationId}, 'post.status_changed', 'send_message',
-            ${s.boards[board]}, ${testSql().json({ channelId: projectId })},
-            ${testSql().json({ boardIds: [s.boards[board]], statusIds: [s.statuses[status]] })},
-            true)`
 }
 
 function statusChangedEvent(postId: string, boardId: string, newStatus: string): DomainEvent {
@@ -141,27 +145,18 @@ function projectsOf(targets: { target: unknown }[]): string[] {
   return targets.map((t) => (t.target as { channelId: string }).channelId)
 }
 
-let s: Seed
+describe.skipIf(!fixture.available)('the resolver reads the status from the post row', () => {
+  let s: Seed
 
-beforeAll(async () => {
-  s = await seed()
-  await addRule(s, 'datenschutz', '111', 'triaged')
-  await addRule(s, 'asbs', '222', 'triaged')
-  await addRule(s, 'gwg', '333', 'triaged')
-})
+  beforeEach(async () => {
+    await fixture.begin()
+    s = await seed()
+  })
+  afterEach(fixture.rollback)
+  afterAll(fixture.close)
 
-afterAll(async () => {
-  const sql = testSql()
-  await sql`delete from integrations where integration_type = ${INTEGRATION_TYPE}`
-  await sql`delete from posts where board_id in (select id from boards where slug like ${INTEGRATION_TYPE + '%'})`
-  await sql`delete from boards where slug like ${INTEGRATION_TYPE + '%'}`
-  await sql`delete from post_statuses where slug like ${INTEGRATION_TYPE + '%'}`
-  await closeHarness()
-})
-
-describe('the resolver reads the status from the post row', () => {
   it('routes a triaged post to its own board project and no other (V1)', async () => {
-    const postId = await s.postId('asbs', 'triaged')
+    const postId = await s.post('asbs', TRIAGED)
 
     const targets = await integrationResolver.resolve(
       statusChangedEvent(postId, s.boards.asbs, 'Triaged')
@@ -171,7 +166,7 @@ describe('the resolver reads the status from the post row', () => {
   })
 
   it('routes nothing for a post that has not reached a triggering status (V4)', async () => {
-    const postId = await s.postId('gwg', 'new')
+    const postId = await s.post('gwg', 'new')
 
     const targets = await integrationResolver.resolve(
       statusChangedEvent(postId, s.boards.gwg, 'New')
@@ -181,7 +176,7 @@ describe('the resolver reads the status from the post row', () => {
   })
 
   it('routes nothing for a board with no rule of its own (V2)', async () => {
-    const postId = await s.postId('unrouted', 'triaged')
+    const postId = await s.post('unrouted', TRIAGED)
 
     const targets = await integrationResolver.resolve(
       statusChangedEvent(postId, s.boards.unrouted, 'Triaged')
@@ -191,7 +186,7 @@ describe('the resolver reads the status from the post row', () => {
   })
 
   it('hands the hook the decrypted access token, not the sealed blob', async () => {
-    const postId = await s.postId('asbs', 'triaged')
+    const postId = await s.post('asbs', TRIAGED)
 
     const targets = await integrationResolver.resolve(
       statusChangedEvent(postId, s.boards.asbs, 'Triaged')
@@ -201,7 +196,7 @@ describe('the resolver reads the status from the post row', () => {
   })
 
   it('ignores the status name the event carries, whatever it says (V7)', async () => {
-    const postId = await s.postId('datenschutz', 'triaged')
+    const postId = await s.post('datenschutz', TRIAGED)
 
     // The row says triaged; the payload is renamed under the resolver's feet.
     // Routing must follow the row.
