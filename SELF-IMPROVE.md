@@ -139,6 +139,53 @@ here** — the count drifts with every upstream sync, so a written-down figure
 ages into a false alarm. The grep-by-touched-file recipe above does not have
 this problem, which is the argument for using it instead of counting at all.
 
+## 4x — Test suites are flaky under parallel load
+
+`principals/__tests__/seat-usage.db.test.ts` and
+`tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
+the ~120 fixture-backed suites run together, and pass when run alone. Measured
+over nine full runs of that set: 3 failures in 6 runs on one branch, 1 in 3 on an
+unmodified tree — different files, same shape. `seat-usage` asserts
+`after.members === before.members + 2` against a database-wide count and saw +4,
+so something outside its own rolled-back transaction commits rows while it runs.
+
+The cost is not the flake itself, it is that it makes any change to shared test
+infrastructure unfalsifiable: proving a fixture change innocent took six 75-second
+full-set runs plus a stash-and-compare, because a single red run says nothing.
+Either make the whole-DB counts workspace-scoped, or serialise the suites that
+count globally.
+
+Hit again while measuring what coverage costs a shard. Locally, shard 1/4 with
+coverage failed 4 tests and without coverage failed 1 — which reads as "coverage
+broke the suite" until you notice the one failure is in both runs
+(`singletons-not-shared.test.ts`, a 20s timeout) and the other three are
+`channel-accounts/__tests__/channel-account.service.test.ts`, a real-DB suite,
+two of them with `Cannot access '__vite_ssr_import_4__' before initialization`.
+All four CI shards passed with coverage on 4 vCPU. So the local failures are load
+— this laptop runs vitest 11-way with Postgres on the same box — but ruling that
+out took a second full 3-minute shard run as a control. That is the cost of the
+flakiness: no single run means anything, so every measurement needs a twin.
+
+Hit a third time, and this one is not a DB suite at all:
+`lib/client/mutations/__tests__/settings.test.ts` times out (`Test timed out in
+20000ms`) whenever it runs inside a wider selection, and passes alone. The reason
+is visible once measured: alone it needs 16.7s of test time against the 20s
+`testTimeout` in `vitest.config.ts`, so it has 3s of headroom and any contention
+eats it. It cost two full runs plus a stash-and-compare to prove it was not the
+change under test — the same twin-measurement tax as above, now for a suite that
+touches no database. A suite that close to the timeout is a failure waiting for a
+busy machine; the fix is to find what takes 16s in there, not to raise the limit.
+
+Hit a fourth time, in the one run a final report actually rests on: the whole
+suite, 1429 files. `settings.test.ts` timed out again and took
+`policy/module-state/__tests__/module-state.test.ts` with it — that suite walks
+the source tree, needed 32s under the load of a full run, and lives under the
+same 20s ceiling. Both pass in seconds when the two of them run alone. So a full
+local run now ends with three red lines none of which mean anything until a
+control run has been done, and two of the three are known by name. Either pin a
+per-suite `testTimeout` for these two or make the scanner cache its walk; the
+alternative is that every full run ends in a diagnosis.
+
 ## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
 
 Three wasted turns diagnosing an env-leakage question, all of them spent on the
@@ -179,43 +226,6 @@ line there is no way to spread `coverageConfigDefaults.exclude`, so a
 for a gate that grades coverage, test files counting as source is exactly the
 kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
 whole coverage block in `vitest.config.ts`, where the defaults can be spread.
-
-## 3x — Test suites are flaky under parallel load
-
-`principals/__tests__/seat-usage.db.test.ts` and
-`tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
-the ~120 fixture-backed suites run together, and pass when run alone. Measured
-over nine full runs of that set: 3 failures in 6 runs on one branch, 1 in 3 on an
-unmodified tree — different files, same shape. `seat-usage` asserts
-`after.members === before.members + 2` against a database-wide count and saw +4,
-so something outside its own rolled-back transaction commits rows while it runs.
-
-The cost is not the flake itself, it is that it makes any change to shared test
-infrastructure unfalsifiable: proving a fixture change innocent took six 75-second
-full-set runs plus a stash-and-compare, because a single red run says nothing.
-Either make the whole-DB counts workspace-scoped, or serialise the suites that
-count globally.
-
-Hit again while measuring what coverage costs a shard. Locally, shard 1/4 with
-coverage failed 4 tests and without coverage failed 1 — which reads as "coverage
-broke the suite" until you notice the one failure is in both runs
-(`singletons-not-shared.test.ts`, a 20s timeout) and the other three are
-`channel-accounts/__tests__/channel-account.service.test.ts`, a real-DB suite,
-two of them with `Cannot access '__vite_ssr_import_4__' before initialization`.
-All four CI shards passed with coverage on 4 vCPU. So the local failures are load
-— this laptop runs vitest 11-way with Postgres on the same box — but ruling that
-out took a second full 3-minute shard run as a control. That is the cost of the
-flakiness: no single run means anything, so every measurement needs a twin.
-
-Hit a third time, and this one is not a DB suite at all:
-`lib/client/mutations/__tests__/settings.test.ts` times out (`Test timed out in
-20000ms`) whenever it runs inside a wider selection, and passes alone. The reason
-is visible once measured: alone it needs 16.7s of test time against the 20s
-`testTimeout` in `vitest.config.ts`, so it has 3s of headroom and any contention
-eats it. It cost two full runs plus a stash-and-compare to prove it was not the
-change under test — the same twin-measurement tax as above, now for a suite that
-touches no database. A suite that close to the timeout is a failure waiting for a
-busy machine; the fix is to find what takes 16s in there, not to raise the limit.
 
 ## 3x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -346,6 +356,33 @@ same run had just run. Re-running the identical suites from the repo root
 turned that into `12 executed, 0 never executed`. The tell held: a file the run
 definitely executed was listed under "out of scope, although they look like
 source". Read that line before reading the holes.
+
+## 1x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+
+`lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
+`error:03000098:digital envelope routines::invalid digest`. It is not the repo:
+the same `createSign('RSA-SHA1')` throws in a bare `node -e` outside the
+checkout, because the system OpenSSL refuses to _produce_ a SHA-1 signature
+under the DEFAULT crypto policy. Verification is not blocked — measured, a
+`createVerify('RSA-SHA1')` runs and returns `false` — so it is only the fixture
+the test signs for itself that cannot be made here. The production path is fine
+and CI signs it happily, which is why nobody had noticed.
+
+The red line is not the cost. `coverage.reportOnFailure` defaults to **false**,
+so a full run with _any_ failing test writes no `coverage-final.json` at all, and
+`diff-coverage-check.ts` then reads an empty `coverage/` and grades nothing. Ten
+minutes of full-suite wall clock produced no number, quietly, under a log that
+opens with `Coverage enabled with v8`. Locally the flag is not optional:
+
+```bash
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportOnFailure=true --coverage.reportsDirectory=coverage/local
+```
+
+Two fixes, both small: sign the SignatureVersion 1 fixture once and check it in,
+so the test verifies instead of signing; and put `reportOnFailure: true` in the
+root config's `coverage` block, so a red suite still yields the report that says
+which lines the change left uncovered — which is exactly when it is wanted.
 
 ## 1x — Hand-rolled `db` stubs break on a query they never mentioned, and a drizzle `SQL` cannot be printed
 
