@@ -40,6 +40,7 @@ const server = vi.hoisted(() => ({
   updatePostTagsFn: vi.fn(),
   deletePostFn: vi.fn(),
   restorePostFn: vi.fn(),
+  toggleVoteFn: vi.fn(),
   createCommentFn: vi.fn(),
 }))
 
@@ -59,7 +60,7 @@ vi.mock('@/lib/server/functions/posts', () => ({
 }))
 
 vi.mock('@/lib/server/functions/public-posts', () => ({
-  toggleVoteFn: vi.fn(),
+  toggleVoteFn: server.toggleVoteFn,
 }))
 
 vi.mock('@/lib/server/functions/comments', () => ({
@@ -74,6 +75,7 @@ import {
   useUpdatePostOwner,
   useDeletePost,
   useRestorePost,
+  useVotePost,
 } from '../posts'
 import { useAddComment } from '../comments'
 import { inboxKeys } from '@/lib/client/hooks/use-inbox-query'
@@ -100,6 +102,7 @@ function row(id: PostId, overrides: Partial<PostListItem> = {}): PostListItem {
     statusId: null,
     ownerPrincipalId: null,
     commentCount: 0,
+    voteCount: 2,
     tags: [],
     ...overrides,
   } as unknown as PostListItem
@@ -127,6 +130,8 @@ function seededClient(): QueryClient {
     title: 'A post',
     statusId: null,
     ownerPrincipalId: null,
+    voteCount: 2,
+    hasVoted: false,
     tags: [],
     comments: [],
   })
@@ -153,6 +158,7 @@ beforeEach(() => {
   server.updatePostTagsFn.mockResolvedValue({ id: POST_ID })
   server.deletePostFn.mockResolvedValue({ id: POST_ID })
   server.restorePostFn.mockResolvedValue({ id: POST_ID })
+  server.toggleVoteFn.mockResolvedValue({ voteCount: 3, voted: true })
   server.createCommentFn.mockResolvedValue({
     comment: { id: 'post_comment_1', createdAt: new Date('2026-09-05T00:00:00.000Z') },
   })
@@ -267,6 +273,23 @@ describe('delete and restore (V6)', () => {
 
     expect(listRows(client).map((p) => p.id)).toEqual([OTHER_POST_ID])
     expect(client.getQueryData(inboxKeys.facetCounts({}))).toBe(before)
+  })
+})
+
+describe('a vote cast from the inbox (V2)', () => {
+  // The vote is the one mutation that patches the lists twice — optimistically
+  // in `onMutate` and again with the server's count in `onSuccess`. Both went
+  // through the same undefined `pages`, so both are held here.
+  it('reaches the server and leaves the counts alone', async () => {
+    const client = seededClient()
+    const before = client.getQueryData(inboxKeys.facetCounts({}))
+    const { result } = renderHook(() => useVotePost(), { wrapper: wrapper(client) })
+
+    await result.current.mutateAsync(POST_ID)
+
+    expect(server.toggleVoteFn).toHaveBeenCalledWith({ data: { postId: POST_ID } })
+    expect(client.getQueryData(inboxKeys.facetCounts({}))).toBe(before)
+    expect(listRows(client).find((p) => p.id === POST_ID)?.voteCount).toBe(3)
   })
 })
 
