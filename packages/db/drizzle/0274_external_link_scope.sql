@@ -11,19 +11,29 @@ ALTER TABLE "ticket_external_links" ADD COLUMN IF NOT EXISTS "external_scope" va
 -- nowhere else for it to point. Recorded as the numeric id the config
 -- stores, which is also what the provider reports on its webhooks and what
 -- survives a project being renamed.
-UPDATE "post_external_links" AS l
-SET "external_scope" = i."config" ->> 'channelId'
-FROM "integrations" AS i
-WHERE l."integration_id" = i."id"
-  AND l."external_scope" IS NULL
-  AND i."config" ->> 'channelId' IS NOT NULL;
+--
+-- The UPDATEs sit in a DO block so a fleet replay is a no-op, in the shape
+-- 0269 established. Each write fires only while the column is still null; a
+-- link that already carries a scope makes the WHERE match nothing. A bare
+-- UPDATE at the tip would collapse the gap-heal window.
 
-UPDATE "ticket_external_links" AS l
-SET "external_scope" = i."config" ->> 'channelId'
-FROM "integrations" AS i
-WHERE l."integration_id" = i."id"
-  AND l."external_scope" IS NULL
-  AND i."config" ->> 'channelId' IS NOT NULL;
+-- @replay: guarded-by external_scope still being null; a link that already carries one is left untouched
+DO $$
+BEGIN
+  UPDATE "post_external_links" AS l
+  SET "external_scope" = i."config" ->> 'channelId'
+  FROM "integrations" AS i
+  WHERE l."integration_id" = i."id"
+    AND l."external_scope" IS NULL
+    AND i."config" ->> 'channelId' IS NOT NULL;
+
+  UPDATE "ticket_external_links" AS l
+  SET "external_scope" = i."config" ->> 'channelId'
+  FROM "integrations" AS i
+  WHERE l."integration_id" = i."id"
+    AND l."external_scope" IS NULL
+    AND i."config" ->> 'channelId' IS NOT NULL;
+END $$;
 
 -- The reverse lookup an inbound webhook performs.
 CREATE INDEX IF NOT EXISTS "post_external_links_type_external_scope_idx"
