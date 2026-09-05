@@ -18,57 +18,66 @@ import {
 } from '@/components/admin/settings/integrations/status-sync-config'
 import { TicketStatusSyncConfig } from '@/components/admin/settings/integrations/ticket-status-sync-config'
 import { fetchExternalStatusesFn } from '@/lib/server/functions/external-statuses'
+import { fetchBoardsFn } from '@/lib/server/functions/boards'
+import { fetchStatusesFn } from '@/lib/server/functions/statuses'
+import {
+  fetchBoardRoutingRulesFn,
+  saveBoardRoutingRuleFn,
+  removeBoardRoutingRuleFn,
+} from '@/lib/server/functions/integrations'
 import { fetchGitLabProjectsFn, type GitLabProject } from '@/integrations/gitlab/server/functions'
 
-interface EventMapping {
-  id: string
-  eventType: string
-  enabled: boolean
-}
+const NO_PROJECT = '__none__'
 
 interface GitLabConfigProps {
   integrationId: string
   initialConfig: { channelId?: string }
-  initialEventMappings: EventMapping[]
   enabled: boolean
 }
 
-const EVENT_CONFIG = [
-  {
-    id: 'post.created' as const,
-    label: 'New feedback submitted',
-    description: 'Create GitLab issues when users submit new feedback',
-  },
-]
+interface Board {
+  id: string
+  name: string
+}
 
-export function GitLabConfig({
-  integrationId,
-  initialConfig,
-  initialEventMappings,
-  enabled,
-}: GitLabConfigProps) {
+interface Status {
+  id: string
+  name: string
+}
+
+interface Rule {
+  boardId: string
+  projectId: string
+  triggerStatusIds: string[]
+}
+
+/**
+ * Board → GitLab project.
+ *
+ * Deliberately not the shared notification-channel router: that one is built
+ * around "one channel, many boards", and this is the other way round. A board
+ * points at one project, and a board with no rule creates no issue at all —
+ * there is no catch-all project, so a board left unset is a decision, which is
+ * why every board is listed here whether it has a rule or not.
+ */
+export function GitLabConfig({ integrationId, initialConfig, enabled }: GitLabConfigProps) {
   const updateMutation = useUpdateIntegration()
   const [projects, setProjects] = useState<GitLabProject[]>([])
+  const [boards, setBoards] = useState<Board[]>([])
+  const [statuses, setStatuses] = useState<Status[]>([])
+  const [rules, setRules] = useState<Rule[]>([])
   const [loadingProjects, setLoadingProjects] = useState(false)
   const [projectError, setProjectError] = useState<string | null>(null)
-  const [selectedProject, setSelectedProject] = useState(initialConfig.channelId || '')
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [savingBoardId, setSavingBoardId] = useState<string | null>(null)
   const [externalStatuses, setExternalStatuses] = useState<ExternalStatus[]>([])
   const [integrationEnabled, setIntegrationEnabled] = useState(enabled)
-  const [eventSettings, setEventSettings] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(
-      EVENT_CONFIG.map((event) => [
-        event.id,
-        initialEventMappings.find((m) => m.eventType === event.id)?.enabled ?? false,
-      ])
-    )
-  )
 
   const fetchProjects = useCallback(async () => {
     setLoadingProjects(true)
     setProjectError(null)
     try {
-      const result = await fetchGitLabProjectsFn()
-      setProjects(result)
+      setProjects(await fetchGitLabProjectsFn())
     } catch {
       setProjectError('Failed to load projects. Please try again.')
     } finally {
@@ -76,43 +85,72 @@ export function GitLabConfig({
     }
   }, [])
 
-  const fetchStatuses = useCallback(async () => {
-    try {
-      const statuses = await fetchExternalStatusesFn({ data: { integrationType: 'gitlab' } })
-      setExternalStatuses(statuses)
-    } catch {
-      // Non-critical — status mapping just won't show options
-    }
-  }, [])
+  const reloadRules = useCallback(async () => {
+    setRules(await fetchBoardRoutingRulesFn({ data: { integrationId } }))
+  }, [integrationId])
 
   useEffect(() => {
     fetchProjects()
-    fetchStatuses()
-  }, [fetchProjects, fetchStatuses])
+    reloadRules()
+    fetchBoardsFn().then((rows) => setBoards(rows.map((b) => ({ id: b.id, name: b.name }))))
+    fetchStatusesFn().then((rows) => setStatuses(rows.map((s) => ({ id: s.id, name: s.name }))))
+    fetchExternalStatusesFn({ data: { integrationType: 'gitlab' } })
+      .then(setExternalStatuses)
+      .catch(() => {
+        // Non-critical — status mapping just won't show options.
+      })
+  }, [fetchProjects, reloadRules])
 
   const handleEnabledChange = (checked: boolean) => {
     setIntegrationEnabled(checked)
     updateMutation.mutate({ id: integrationId, enabled: checked })
   }
 
-  const handleProjectChange = (projectId: string) => {
-    setSelectedProject(projectId)
-    updateMutation.mutate({ id: integrationId, config: { channelId: projectId } })
+  const ruleFor = (boardId: string) => rules.find((r) => r.boardId === boardId)
+
+  const defaultTriggerStatusIds = () => {
+    const first = statuses[0]
+    return first ? [first.id] : []
   }
 
-  const handleEventToggle = (eventId: string, checked: boolean) => {
-    const newSettings = { ...eventSettings, [eventId]: checked }
-    setEventSettings(newSettings)
-    updateMutation.mutate({
-      id: integrationId,
-      eventMappings: Object.entries(newSettings).map(([eventType, enabled]) => ({
-        eventType,
-        enabled,
-      })),
-    })
+  async function writeRule(boardId: string, projectId: string, triggerStatusIds: string[]) {
+    setSavingBoardId(boardId)
+    setSaveError(null)
+    try {
+      if (projectId === NO_PROJECT) {
+        await removeBoardRoutingRuleFn({ data: { integrationId, boardId } })
+      } else if (triggerStatusIds.length === 0) {
+        setSaveError('Pick at least one status that should create the issue.')
+        return
+      } else {
+        await saveBoardRoutingRuleFn({
+          data: { integrationId, boardId, projectId, triggerStatusIds },
+        })
+      }
+      await reloadRules()
+    } catch {
+      setSaveError('Failed to save the routing rule. Please try again.')
+    } finally {
+      setSavingBoardId(null)
+    }
   }
 
-  const saving = updateMutation.isPending
+  const handleProjectChange = (boardId: string, projectId: string) => {
+    const existing = ruleFor(boardId)
+    const triggerStatusIds = existing?.triggerStatusIds ?? defaultTriggerStatusIds()
+    writeRule(boardId, projectId, triggerStatusIds)
+  }
+
+  const handleStatusToggle = (boardId: string, statusId: string, checked: boolean) => {
+    const existing = ruleFor(boardId)
+    if (!existing) return
+    const next = checked
+      ? [...existing.triggerStatusIds, statusId]
+      : existing.triggerStatusIds.filter((id) => id !== statusId)
+    writeRule(boardId, existing.projectId, next)
+  }
+
+  const legacyProjectStillSet = Boolean(initialConfig.channelId) && rules.length === 0
 
   return (
     <div className="space-y-6">
@@ -129,13 +167,19 @@ export function GitLabConfig({
           id="enabled-toggle"
           checked={integrationEnabled}
           onCheckedChange={handleEnabledChange}
-          disabled={saving}
+          disabled={updateMutation.isPending}
         />
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <Label htmlFor="project-select">GitLab Project</Label>
+          <div>
+            <Label className="text-base font-medium">Board → GitLab project</Label>
+            <p className="text-xs text-muted-foreground">
+              An issue is created when a post on this board reaches one of the statuses below. A
+              board with no project creates no issues.
+            </p>
+          </div>
           <Button
             variant="ghost"
             size="sm"
@@ -147,73 +191,68 @@ export function GitLabConfig({
             Refresh
           </Button>
         </div>
-        {projectError ? (
-          <p className="text-sm text-destructive">{projectError}</p>
-        ) : (
-          <Select
-            value={selectedProject}
-            onValueChange={handleProjectChange}
-            disabled={loadingProjects || saving || !integrationEnabled}
-          >
-            <SelectTrigger id="project-select" className="w-full">
-              {loadingProjects ? (
-                <div className="flex items-center gap-2">
-                  <ArrowPathIcon className="h-4 w-4 animate-spin" />
-                  <span>Loading projects...</span>
-                </div>
-              ) : (
-                <SelectValue placeholder="Select a project" />
-              )}
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map((project) => (
-                <SelectItem key={project.id} value={String(project.id)}>
-                  {project.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+        {projectError && <p className="text-sm text-destructive">{projectError}</p>}
+        {saveError && <p className="text-sm text-destructive">{saveError}</p>}
+
+        {legacyProjectStillSet && (
+          <p className="rounded-md border border-border/50 bg-muted/40 p-3 text-xs text-muted-foreground">
+            This integration still has a single project set from before per-board routing. It is no
+            longer used for new issues, and it is removed the first time you save a rule here.
+          </p>
         )}
-        <p className="text-xs text-muted-foreground">
-          Issues will be created in this project when new feedback is submitted.
-        </p>
-      </div>
 
-      <div className="space-y-3">
-        <Label className="text-base font-medium">Events</Label>
-        <p className="text-xs text-muted-foreground">Choose which events trigger GitLab actions</p>
-        <div className="space-y-3 pt-2">
-          {EVENT_CONFIG.map((event) => (
-            <div
-              key={event.id}
-              className="flex items-center justify-between rounded-lg border border-border/50 p-3"
-            >
-              <div>
-                <div className="font-medium text-sm">{event.label}</div>
-                <div className="text-xs text-muted-foreground">{event.description}</div>
+        <div className="space-y-3">
+          {boards.map((board) => {
+            const rule = ruleFor(board.id)
+            return (
+              <div key={board.id} className="rounded-lg border border-border/50 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-medium text-sm">{board.name}</div>
+                  <Select
+                    value={rule?.projectId ?? NO_PROJECT}
+                    onValueChange={(projectId) => handleProjectChange(board.id, projectId)}
+                    disabled={loadingProjects || !integrationEnabled || savingBoardId === board.id}
+                  >
+                    <SelectTrigger className="w-64" aria-label={`GitLab project for ${board.name}`}>
+                      <SelectValue placeholder="Not connected" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_PROJECT}>Not connected</SelectItem>
+                      {projects.map((project) => (
+                        <SelectItem key={project.id} value={String(project.id)}>
+                          {project.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {rule && (
+                  <div className="flex flex-wrap gap-3 pt-1">
+                    {statuses.map((status) => (
+                      <label
+                        key={status.id}
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={rule.triggerStatusIds.includes(status.id)}
+                          onChange={(e) =>
+                            handleStatusToggle(board.id, status.id, e.target.checked)
+                          }
+                          disabled={!integrationEnabled || savingBoardId === board.id}
+                        />
+                        {status.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
-              <Switch
-                checked={eventSettings[event.id] ?? false}
-                onCheckedChange={(checked) => handleEventToggle(event.id, checked)}
-                disabled={saving || !integrationEnabled}
-              />
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
-
-      {saving && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <ArrowPathIcon className="h-4 w-4 animate-spin" />
-          <span>Saving...</span>
-        </div>
-      )}
-
-      {updateMutation.isError && (
-        <div className="text-sm text-destructive">
-          {updateMutation.error?.message || 'Failed to save changes'}
-        </div>
-      )}
 
       <StatusSyncConfig
         integrationId={integrationId}

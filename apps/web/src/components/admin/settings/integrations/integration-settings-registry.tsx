@@ -511,7 +511,8 @@ export const INTEGRATION_SETTINGS: Record<string, IntegrationSettingsEntry> = {
           the URL you configured.
         </p>,
         <p key="3">
-          Select a project to create issues in, then choose which events should trigger new issues.
+          Point each board at the GitLab project its issues belong in, and choose which statuses
+          create the issue. A board with no project creates none.
         </p>,
       ],
     },
@@ -519,7 +520,6 @@ export const INTEGRATION_SETTINGS: Record<string, IntegrationSettingsEntry> = {
       <GitLabConfig
         integrationId={integration.id}
         initialConfig={(integration.config ?? {}) as { channelId?: string }}
-        initialEventMappings={integration.eventMappings}
         enabled={isConnected}
       />
     ),

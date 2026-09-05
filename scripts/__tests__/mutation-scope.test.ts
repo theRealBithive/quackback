@@ -58,6 +58,14 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/lib/server/integrations/__tests__/signature-matrix.test.ts',
         ],
       },
+      {
+        file: 'apps/web/src/lib/server/integrations/board-routing-policy.ts',
+        suites: ['apps/web/src/lib/server/integrations/__tests__/board-routing-policy.test.ts'],
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/post-source.ts',
+        suites: ['apps/web/src/integrations/gitlab/server/__tests__/post-source.db.test.ts'],
+      },
     ])
   })
 
@@ -97,6 +105,27 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: 'if (best === undefined || best < count) executions.set(line, count)',
         replacement: 'best <= count',
         why: expect.stringContaining('equal value'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/post-source.ts',
+        mutator: 'ObjectLiteral',
+        line: "const log = logger.child({ component: 'gitlab-post-source' })",
+        replacement: '{}',
+        why: expect.stringContaining('metadata on a log line'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/post-source.ts',
+        mutator: 'StringLiteral',
+        line: "const log = logger.child({ component: 'gitlab-post-source' })",
+        replacement: '""',
+        why: expect.stringContaining('log metadata'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/post-source.ts',
+        mutator: 'ObjectLiteral',
+        line: '.select({ id: postExternalLinks.id })',
+        replacement: '{}',
+        why: expect.stringContaining('never read'),
       },
     ])
   })

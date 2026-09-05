@@ -5,13 +5,18 @@
  * per-integration access token, and emits one target per channel. Behavior +
  * target shape are preserved; only the event access (payload vs data) changes.
  */
-import { db, integrations, integrationEventMappings, eq, and } from '@/lib/server/db'
+import { db, integrations, integrationEventMappings, posts, eq, and } from '@/lib/server/db'
 import { cacheGet, cacheSet, CACHE_KEYS } from '@/lib/server/cache'
 import { decryptSecrets } from '@/lib/server/integrations/encryption'
 import { buildHookContext } from '../hook-context'
 import { logger } from '@/lib/server/logger'
 import { getEventDefinition } from '../catalogue'
 import { boardIdsFromEvent } from './webhook.resolver'
+import {
+  boardFilterAllows,
+  statusFilterAllows,
+  type MappingFilters,
+} from '@/lib/server/integrations/board-routing-policy'
 import type { SinkResolver } from './registry'
 import type { DomainEvent } from '../envelope'
 import type { HookTarget } from '../hook-types'
@@ -51,15 +56,20 @@ async function loadMappings(): Promise<CachedMapping[]> {
 
 /**
  * Pure target construction (unit-testable): filter mappings for this event type,
- * apply the board filter, dedupe by (integrationType, channelId), decrypt the
- * token via the injected `decrypt`. Mirrors getIntegrationTargets exactly.
+ * apply the board and status filters, dedupe by (integrationType, channelId),
+ * decrypt the token via the injected `decrypt`.
+ *
+ * `statusId` is the post's current status id, or undefined for an event that
+ * has no post status. Mappings that declare no `statusIds` ignore it, so every
+ * provider that predates per-board routing behaves exactly as before.
  */
 export function buildIntegrationTargets(
   mappings: CachedMapping[],
   eventType: string,
   boardIds: string[],
   rootUrl: string,
-  decrypt: (blob: string) => { accessToken?: string }
+  decrypt: (blob: string) => { accessToken?: string },
+  statusId?: string
 ): HookTarget[] {
   const targets: HookTarget[] = []
   const seen = new Set<string>()
@@ -67,14 +77,9 @@ export function buildIntegrationTargets(
   for (const m of mappings) {
     if (m.eventType !== eventType) continue
 
-    const filters = m.filters as { boardIds?: string[] } | null
-    if (
-      filters?.boardIds?.length &&
-      boardIds.length > 0 &&
-      !boardIds.some((id) => filters.boardIds!.includes(id))
-    ) {
-      continue
-    }
+    const filters = m.filters as MappingFilters | null
+    if (!boardFilterAllows(filters, boardIds)) continue
+    if (!statusFilterAllows(filters, statusId)) continue
 
     const integrationConfig = (m.integrationConfig as Record<string, unknown>) || {}
     const actionConfig = (m.actionConfig as Record<string, unknown>) || {}
@@ -127,6 +132,27 @@ export function buildIntegrationTargets(
   return targets
 }
 
+/**
+ * The post's current status id, read from the row.
+ *
+ * Deliberately not from the payload: `post.status_changed` carries the status
+ * *name* (`newStatus`), and a rule that matched on a name would stop working
+ * the moment someone renames a status in the admin UI — silently, because
+ * nothing fails, issues just stop being created (V7).
+ *
+ * Only called when some mapping actually declares `statusIds`, so an instance
+ * with no per-board routing keeps dispatching without an extra query.
+ */
+async function currentStatusId(event: DomainEvent): Promise<string | undefined> {
+  if (event.entityType !== 'post') return undefined
+  const [post] = await db
+    .select({ statusId: posts.statusId })
+    .from(posts)
+    .where(eq(posts.id, event.entityId as never))
+    .limit(1)
+  return post?.statusId ?? undefined
+}
+
 /** Private comments never reach external integrations. */
 function isPrivateComment(event: DomainEvent): boolean {
   if (
@@ -155,12 +181,21 @@ export const integrationResolver: SinkResolver = {
     if (relevant.length === 0) return []
     const context = await buildHookContext()
     if (!context) throw new Error('Failed to build integration hook context')
+    // Only read the status when some rule actually filters on one. An instance
+    // with no per-board routing then dispatches without an extra query, which
+    // is also what keeps every suite that stubs the mappings but not the
+    // database working.
+    const anyRuleFiltersByStatus = relevant.some(
+      (m) => ((m.filters as MappingFilters | null)?.statusIds?.length ?? 0) > 0
+    )
+    const statusId = anyRuleFiltersByStatus ? await currentStatusId(event) : undefined
     return buildIntegrationTargets(
       relevant,
       event.type,
       boardIdsFromEvent(event),
       context.portalBaseUrl,
-      (blob) => decryptSecrets<{ accessToken?: string }>(blob)
+      (blob) => decryptSecrets<{ accessToken?: string }>(blob),
+      statusId
     )
   },
 }

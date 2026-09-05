@@ -6,7 +6,8 @@
 import type { HookHandler, HookResult } from '@/lib/server/events/hook-types'
 import type { EventData } from '@/lib/server/events/types'
 import { isRetryableError } from '@/lib/server/events/hook-utils'
-import { buildGitLabIssue } from '@/integrations/gitlab/server/message'
+import { buildGitLabIssue, buildIssueContent } from '@/integrations/gitlab/server/message'
+import { loadIssueSource, hasActiveGitLabLink } from '@/integrations/gitlab/server/post-source'
 import { gitlabApiBase } from '@/integrations/gitlab/server/url'
 import { gitlabFetch } from '@/integrations/gitlab/server/fetch'
 import { logger } from '@/lib/server/logger'
@@ -24,11 +25,37 @@ export interface GitLabConfig {
   instanceUrl?: string
 }
 
+/**
+ * The issue body for this event, or null when there is nothing to create.
+ *
+ * `post.created` carries the post in its payload. `post.status_changed` — the
+ * trigger since per-board routing — names only the post, its title and its
+ * board, so the body and the author are read from the row. Widening that
+ * payload instead was rejected: it goes out to customers' webhooks, so its
+ * shape is a public contract.
+ */
+async function issueContentFor(
+  event: EventData,
+  rootUrl: string
+): Promise<{ title: string; description: string } | null> {
+  if (event.type === 'post.created') return buildGitLabIssue(event, rootUrl)
+
+  const postId = (event.data as { post?: { id?: string } } | undefined)?.post?.id
+  if (!postId) return null
+
+  const source = await loadIssueSource(postId)
+  if (!source) return null
+  return buildIssueContent(source, rootUrl)
+}
+
 export const gitlabHook: HookHandler = {
   async run(event: EventData, target: unknown, config: unknown): Promise<HookResult> {
-    if (event.type !== 'post.created') {
+    if (event.type !== 'post.created' && event.type !== 'post.status_changed') {
       return { success: true }
     }
+
+    const postId = (event.data as { post?: { id?: string } } | undefined)?.post?.id
+    if (!postId) return { success: true }
 
     const { channelId: projectId } = target as GitLabTarget
     const { accessToken, rootUrl, instanceUrl } = config as GitLabConfig
@@ -36,7 +63,18 @@ export const gitlabHook: HookHandler = {
 
     log.debug({ event_type: event.type, project_id: projectId }, 'processing event')
 
-    const { title, description } = buildGitLabIssue(event, rootUrl)
+    // Before the API call, never after it. `persistExternalLink` dedupes on
+    // (externalId, integrationType, postId) and a second issue has a different
+    // external id, so a late check finds no conflict and leaves two issues in
+    // the tracker for one post.
+    if (await hasActiveGitLabLink(postId)) {
+      log.info({ post_id: postId, project_id: projectId }, 'post already has an issue, skipping')
+      return { success: true }
+    }
+
+    const content = await issueContentFor(event, rootUrl)
+    if (!content) return { success: true }
+    const { title, description } = content
 
     try {
       const response = await gitlabFetch(
