@@ -1758,6 +1758,13 @@
       "when": 1785700000031,
       "tag": "0273_post_comments_external_ref",
       "breakpoints": true
+    },
+    {
+      "idx": 251,
+      "version": "7",
+      "when": 1785700000032,
+      "tag": "0274_external_link_scope",
+      "breakpoints": true
     }
   ]
 }

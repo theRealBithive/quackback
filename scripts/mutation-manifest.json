@@ -16,9 +16,27 @@
     {
       "file": "apps/web/src/integrations/gitlab/server/url.ts",
       "suites": ["apps/web/src/integrations/gitlab/server/__tests__/url.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/integrations/external-link-scope.ts",
+      "suites": ["apps/web/src/lib/server/integrations/__tests__/external-link-scope.test.ts"]
+    },
+    {
+      "file": "apps/web/src/integrations/gitlab/server/inbound.ts",
+      "suites": [
+        "apps/web/src/integrations/gitlab/server/__tests__/inbound.test.ts",
+        "apps/web/src/lib/server/integrations/__tests__/signature-matrix.test.ts"
+      ]
     }
   ],
   "equivalents": [
+    {
+      "file": "apps/web/src/integrations/gitlab/server/inbound.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (!state) return null",
+      "replacement": "false",
+      "why": "The guard exists to narrow `state` from `string | undefined` before it indexes the status map; it decides nothing the next line does not already decide. Without it an absent or empty state produces no mapped status, and `if (!externalStatus) return null` two lines down returns null for exactly the same inputs. No payload can tell the two apart, because there is none where the first guard returns and the second would not."
+    },
     {
       "file": "scripts/diff-coverage-policy.ts",
       "mutator": "EqualityOperator",
