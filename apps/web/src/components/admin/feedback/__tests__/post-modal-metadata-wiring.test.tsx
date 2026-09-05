@@ -16,6 +16,8 @@
  *      just at some of them.
  *   V2 A rejected change leaves no unhandled rejection behind: the handler
  *      settles either way instead of passing the failure to the browser.
+ *   V4 Whatever the failure carries — an Error, a bare string, blanks, nothing
+ *      at all — the message shown is never empty and names what failed.
  *
  * The modal is 641 lines of Suspense, editor and router state, so everything
  * around the sidebar is stubbed. What is deliberately NOT stubbed is the path
@@ -31,6 +33,9 @@ import type { PostStatusId, PostTagId } from '@quackback/ids'
 const server = vi.hoisted(() => ({
   changePostStatusFn: vi.fn(),
   updatePostTagsFn: vi.fn(),
+  updatePostFn: vi.fn(),
+  restorePostFn: vi.fn(),
+  deletePostFn: vi.fn(),
 }))
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 const queries = vi.hoisted(() => ({ useQuery: vi.fn(), useSuspenseQuery: vi.fn() }))
@@ -46,14 +51,14 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
 vi.mock('@/lib/server/functions/posts', () => ({
   changePostStatusFn: server.changePostStatusFn,
   changePostBoardFn: vi.fn(),
-  updatePostFn: vi.fn(),
+  updatePostFn: server.updatePostFn,
   setPostOwnerFn: vi.fn(),
   setPostEtaFn: vi.fn(),
   updatePostTagsFn: server.updatePostTagsFn,
   createPostFn: vi.fn(),
   toggleCommentsLockFn: vi.fn(),
-  deletePostFn: vi.fn(),
-  restorePostFn: vi.fn(),
+  deletePostFn: server.deletePostFn,
+  restorePostFn: server.restorePostFn,
   proxyVoteFn: vi.fn(),
   removeVoteFn: vi.fn(),
 }))
@@ -76,7 +81,9 @@ vi.mock('@/components/public/post-detail/metadata-sidebar', () => ({
     </div>
   ),
   MetadataSidebarSkeleton: () => <div />,
-  ManagePostActions: () => <div />,
+  ManagePostActions: (props: { actions: { onRestore: () => Promise<void> } }) => (
+    <button onClick={() => props.actions.onRestore()}>restore post</button>
+  ),
 }))
 
 vi.mock('@/components/public/post-detail/comments-section', () => ({
@@ -99,7 +106,9 @@ vi.mock('@/components/admin/feedback/customer-context-panel', () => ({
   CustomerContextPanel: () => <div />,
 }))
 vi.mock('@/components/public/post-detail/delete-post-dialog', () => ({
-  DeletePostDialog: () => <div />,
+  DeletePostDialog: (props: { onConfirm: (choices: never[]) => Promise<void> }) => (
+    <button onClick={() => props.onConfirm([])}>delete post</button>
+  ),
 }))
 vi.mock('@/components/ui/rich-text-editor', () => ({ RichTextEditor: () => <div /> }))
 vi.mock('@/components/ui/scroll-area', () => ({
@@ -111,7 +120,11 @@ vi.mock('@/components/shared/url-modal-shell', () => ({
 vi.mock('@/components/shared/modal-header', () => ({
   ModalHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
-vi.mock('@/components/shared/modal-footer', () => ({ ModalFooter: () => <div /> }))
+vi.mock('@/components/shared/modal-footer', () => ({
+  ModalFooter: (props: { onSubmit: () => void }) => (
+    <button onClick={props.onSubmit}>save changes</button>
+  ),
+}))
 vi.mock('@/components/shared/inline-moderation-actions', () => ({
   InlineModerationActions: () => <div />,
 }))
@@ -204,4 +217,25 @@ describe('the sidebar of the feedback modal (V1, V2)', () => {
 
     expect(toast.error).toHaveBeenCalledWith('the server said no')
   })
+})
+
+describe('the other controls of the modal, when the failure says nothing (V4)', () => {
+  // Same defect as the sidebar's, in the actions around it: an Error can carry
+  // an empty message, and showing it raises a toast the user cannot read.
+  const SILENT = [
+    { control: 'save changes', serverFn: server.updatePostFn, fallback: 'Failed to update post' },
+    { control: 'restore post', serverFn: server.restorePostFn, fallback: 'Failed to restore post' },
+    { control: 'delete post', serverFn: server.deletePostFn, fallback: 'Failed to delete post' },
+  ]
+
+  for (const { control, serverFn, fallback } of SILENT) {
+    it(`falls back to its own words when "${control}" fails silently`, async () => {
+      serverFn.mockRejectedValue(new Error('   '))
+      shownModal()
+
+      await userEvent.click(screen.getByText(control))
+
+      expect(toast.error).toHaveBeenCalledWith(fallback)
+    })
+  }
 })

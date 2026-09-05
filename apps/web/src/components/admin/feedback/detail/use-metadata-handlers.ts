@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { BoardId, PostId, PostStatusId, PostTagId, PrincipalId } from '@quackback/ids'
 import type { PostTag } from '@/lib/shared/db-types'
+import { failureMessage } from '@/lib/client/failure-message'
 import { inboxKeys } from '@/lib/client/hooks/use-inbox-query'
 import { setPostEtaFn } from '@/lib/server/functions/posts'
 import {
@@ -11,18 +12,6 @@ import {
   useUpdatePostOwner,
   useUpdatePostTags,
 } from '@/lib/client/mutations'
-
-/**
- * What to show the user when a change failed.
- *
- * An `Error` can carry an empty message, and a rejected server function does
- * not have to reject with an `Error` at all — both used to reach the toast as
- * a message saying nothing.
- */
-function failureMessage(err: unknown, fallback: string): string {
-  if (err instanceof Error && err.message.trim()) return err.message
-  return fallback
-}
 
 export interface MetadataHandlers {
   isUpdating: boolean

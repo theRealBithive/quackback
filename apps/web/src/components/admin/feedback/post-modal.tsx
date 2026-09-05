@@ -20,6 +20,7 @@ import { postOwnerQueries } from '@/lib/client/queries/post-owner'
 import { mergeSuggestionQueries } from '@/lib/client/queries/signals'
 import { usePermission } from '@/lib/client/hooks/use-permission'
 import { PERMISSIONS } from '@/lib/shared/permissions'
+import { failureMessage } from '@/lib/client/failure-message'
 import { inboxKeys } from '@/lib/client/hooks/use-inbox-query'
 import {
   MetadataSidebar,
@@ -217,7 +218,7 @@ function PostModalContent({
       toast.success('Post updated')
       onClose()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update post')
+      toast.error(failureMessage(err, 'Failed to update post'))
     }
   }
 
@@ -248,7 +249,7 @@ function PostModalContent({
         toast.success('Post restored')
         onClose()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Failed to restore post')
+        toast.error(failureMessage(err, 'Failed to restore post'))
       }
     },
     isDeleted: !!post.deletedAt,
@@ -539,7 +540,7 @@ function PostModalContent({
             setShowDeleteDialog(false)
             onClose()
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to delete post')
+            toast.error(failureMessage(err, 'Failed to delete post'))
           }
         }}
       />

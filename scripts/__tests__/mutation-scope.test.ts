@@ -93,6 +93,12 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         ],
       },
       {
+        file: 'apps/web/src/lib/client/failure-message.ts',
+        suites: [
+          'apps/web/src/components/admin/feedback/detail/__tests__/use-metadata-handlers.test.tsx',
+        ],
+      },
+      {
         file: 'apps/web/src/components/admin/feedback/detail/use-metadata-handlers.ts',
         suites: [
           'apps/web/src/components/admin/feedback/detail/__tests__/use-metadata-handlers.test.tsx',
