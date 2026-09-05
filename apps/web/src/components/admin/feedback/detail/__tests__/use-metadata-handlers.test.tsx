@@ -17,13 +17,18 @@
  *      settles either way instead of passing the failure to the browser.
  *   V3 The sidebar never stays stuck in its working state — after a change it
  *      is usable again, whether the change went through or not.
- *   V4 Whatever the failure carries — an Error, a bare string, nothing at all —
- *      the message shown is never empty and names what failed.
+ *   V4 Whatever the failure carries — an Error, a bare string, blanks, nothing
+ *      at all — the message shown is never empty and names what failed.
+ *   V5 The change that is sent is the change that was made: the control puts
+ *      the picked value on this post, and nothing else on its way out.
+ *   V6 After a change goes through, the post shows it without a reload.
  *
- * (A fifth guarantee, "a change that goes through gains no confirmation it did
- * not have before", was dropped by decision. Status now confirms like board,
- * owner and ETA already did; tags stay quiet, because that control fires once
- * per ticked box.)
+ * (An earlier guarantee, "a change that goes through gains no confirmation it
+ * did not have before", was dropped by decision. Status now confirms like
+ * board, owner and ETA already did; tags stay quiet, because that control
+ * fires once per ticked box. V5 and V6 were added afterwards: the mutation
+ * gate showed that nothing here held the payload or the refresh, so a handler
+ * could have sent an empty change and every test would still have passed.)
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
@@ -31,6 +36,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import fc from 'fast-check'
 import type { BoardId, PostId, PostStatusId, PostTagId, PrincipalId } from '@quackback/ids'
 import type { PostTag } from '@/lib/shared/db-types'
+import { inboxKeys } from '@/lib/client/hooks/use-inbox-query'
 
 const server = vi.hoisted(() => ({
   changePostStatusFn: vi.fn(),
@@ -68,6 +74,7 @@ const STATUS_ID = 'post_status_planned' as PostStatusId
 const TAG_ID = 'post_tag_bug' as PostTagId
 const BOARD_ID = 'board_1' as BoardId
 const OWNER_ID = 'principal_owner1' as PrincipalId
+const ETA = '2026-10-01T00:00:00.000Z'
 
 /**
  * One control of the sidebar: how it is operated, which server call it makes,
@@ -77,6 +84,10 @@ interface Control {
   name: string
   serverFn: (typeof server)[keyof typeof server]
   operate: (handlers: MetadataHandlers) => Promise<void>
+  /** What the server has to be handed when that control is operated. */
+  sent: unknown
+  /** What it says when the change goes through, or nothing when it stays quiet. */
+  confirms: string | null
   fallback: string
 }
 
@@ -85,30 +96,40 @@ const CONTROLS: Control[] = [
     name: 'status',
     serverFn: server.changePostStatusFn,
     operate: (handlers) => handlers.handleStatusChange(STATUS_ID),
+    sent: { data: { id: POST_ID, statusId: STATUS_ID } },
+    confirms: 'Status updated',
     fallback: 'Failed to update status',
   },
   {
     name: 'tags',
     serverFn: server.updatePostTagsFn,
     operate: (handlers) => handlers.handleTagsChange([TAG_ID]),
+    sent: { data: { id: POST_ID, tagIds: [TAG_ID] } },
+    confirms: null,
     fallback: 'Failed to update tags',
   },
   {
     name: 'board',
     serverFn: server.changePostBoardFn,
     operate: (handlers) => handlers.handleBoardChange(BOARD_ID),
+    sent: { data: { id: POST_ID, boardId: BOARD_ID } },
+    confirms: 'Board updated',
     fallback: 'Failed to update board',
   },
   {
     name: 'owner',
     serverFn: server.setPostOwnerFn,
     operate: (handlers) => handlers.handleOwnerChange(OWNER_ID),
+    sent: { data: { id: POST_ID, ownerId: OWNER_ID } },
+    confirms: 'Owner assigned',
     fallback: 'Failed to update owner',
   },
   {
     name: 'ETA',
     serverFn: server.setPostEtaFn,
-    operate: (handlers) => handlers.handleEtaChange('2026-10-01T00:00:00.000Z'),
+    operate: (handlers) => handlers.handleEtaChange(ETA),
+    sent: { data: { id: POST_ID, eta: ETA } },
+    confirms: 'ETA updated',
     fallback: 'Failed to update ETA',
   },
 ]
@@ -121,11 +142,13 @@ function mounted() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return renderHook(() => useMetadataHandlers({ postId: POST_ID, allTags: allTags() }), {
+  const refreshed = vi.spyOn(client, 'invalidateQueries')
+  const rendered = renderHook(() => useMetadataHandlers({ postId: POST_ID, allTags: allTags() }), {
     wrapper: ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     ),
   })
+  return { ...rendered, refreshed }
 }
 
 beforeEach(() => {
@@ -184,42 +207,72 @@ describe('the working state of the sidebar (V3)', () => {
     })
   }
 
-  it('reports itself as working while a change is in flight', async () => {
-    let release: (value: unknown) => void = () => {}
-    server.changePostStatusFn.mockReturnValue(
-      new Promise((resolve) => {
-        release = resolve
-      })
-    )
+  it('is idle before anything was changed', () => {
     const { result } = mounted()
-
-    let inFlight: Promise<void> = Promise.resolve()
-    await act(async () => {
-      inFlight = result.current.handleStatusChange(STATUS_ID)
-    })
-
-    expect(result.current.isUpdating).toBe(true)
-
-    await act(async () => {
-      release({ id: POST_ID })
-      await inFlight
-    })
 
     expect(result.current.isUpdating).toBe(false)
   })
+
+  for (const control of CONTROLS) {
+    it(`reports itself as working while ${control.name} is in flight`, async () => {
+      let release: (value: unknown) => void = () => {}
+      control.serverFn.mockReturnValue(
+        new Promise((resolve) => {
+          release = resolve
+        })
+      )
+      const { result } = mounted()
+
+      let inFlight: Promise<void> = Promise.resolve()
+      await act(async () => {
+        inFlight = control.operate(result.current)
+      })
+
+      expect(result.current.isUpdating).toBe(true)
+
+      await act(async () => {
+        release({ id: POST_ID })
+        await inFlight
+      })
+
+      expect(result.current.isUpdating).toBe(false)
+    })
+  }
 })
 
-describe('what a change confirms when it goes through (V1)', () => {
-  it('confirms a status change', async () => {
-    const { result } = mounted()
+describe('the change that is sent (V5)', () => {
+  for (const control of CONTROLS) {
+    it(`puts the picked ${control.name} on this post and nothing else`, async () => {
+      const { result } = mounted()
 
-    await act(async () => {
-      await result.current.handleStatusChange(STATUS_ID)
+      await act(async () => {
+        await control.operate(result.current)
+      })
+
+      expect(control.serverFn).toHaveBeenCalledWith(control.sent)
     })
+  }
+})
 
-    expect(toast.success).toHaveBeenCalledWith('Status updated')
-    expect(toast.error).not.toHaveBeenCalled()
-  })
+describe('what a change says when it goes through (V1)', () => {
+  for (const control of CONTROLS) {
+    const says = control.confirms
+    const title = says ? `confirms a ${control.name} change` : `stays quiet about ${control.name}`
+    it(title, async () => {
+      const { result } = mounted()
+
+      await act(async () => {
+        await control.operate(result.current)
+      })
+
+      if (says) {
+        expect(toast.success).toHaveBeenCalledWith(says)
+      } else {
+        expect(toast.success).not.toHaveBeenCalled()
+      }
+      expect(toast.error).not.toHaveBeenCalled()
+    })
+  }
 
   it('says whether an owner was assigned or unassigned', async () => {
     const { result } = mounted()
@@ -237,30 +290,33 @@ describe('what a change confirms when it goes through (V1)', () => {
     const { result } = mounted()
 
     await act(async () => {
-      await result.current.handleEtaChange('2026-10-01T00:00:00.000Z')
+      await result.current.handleEtaChange(ETA)
       await result.current.handleEtaChange(null)
     })
 
     expect(toast.success).toHaveBeenNthCalledWith(1, 'ETA updated')
     expect(toast.success).toHaveBeenNthCalledWith(2, 'ETA cleared')
   })
+})
 
-  it('stays quiet when a tag was ticked, because that fires once per box', async () => {
-    const { result } = mounted()
+describe('what the post shows afterwards (V6)', () => {
+  it('refreshes this post after its ETA changed, and not the whole cache', async () => {
+    const { result, refreshed } = mounted()
 
     await act(async () => {
-      await result.current.handleTagsChange([TAG_ID])
+      await result.current.handleEtaChange(ETA)
     })
 
-    expect(toast.success).not.toHaveBeenCalled()
-    expect(server.updatePostTagsFn).toHaveBeenCalled()
+    expect(refreshed).toHaveBeenCalledWith({ queryKey: inboxKeys.detail(POST_ID) })
   })
 })
 
 describe('whatever the failure carries (V4)', () => {
   it('always shows a message that says something', async () => {
+    const blanks = fc.array(fc.constantFrom(' ', '\t', '\n'), { minLength: 1 })
     const thrown = fc.oneof(
       fc.string().map((message) => new Error(message)),
+      blanks.map((chars) => new Error(chars.join(''))),
       fc.string(),
       fc.constant(undefined),
       fc.constant(null),
