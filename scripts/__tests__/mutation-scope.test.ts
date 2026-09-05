@@ -92,6 +92,12 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/lib/client/mutations/__tests__/inbox-list-cache-collision.test.tsx',
         ],
       },
+      {
+        file: 'apps/web/src/components/admin/feedback/detail/use-metadata-handlers.ts',
+        suites: [
+          'apps/web/src/components/admin/feedback/detail/__tests__/use-metadata-handlers.test.tsx',
+        ],
+      },
     ])
   })
 
