@@ -29,7 +29,14 @@ vi.mock('../fetch', () => ({ gitlabFetch }))
 
 import { closeGitLabIssue } from '../archive'
 
-const MOVED_URL = 'https://gitlab.example.com/group/asbs/-/issues/7'
+/**
+ * The address form GitLab 18.10 and newer emit. This said `/-/issues/7` until
+ * the supported floor was pinned at 18.10, which is the release that moved
+ * issues to `/-/work_items/`. The fixture is corrected rather than the parser
+ * loosened: a link created by a supported instance carries this shape, and the
+ * older one is now unresolvable on purpose — pinned in its own test below.
+ */
+const MOVED_URL = 'https://gitlab.example.com/group/asbs/-/work_items/7'
 
 function ctx(overrides: Record<string, unknown> = {}) {
   return {
@@ -99,6 +106,22 @@ describe('closeGitLabIssue', () => {
     await closeGitLabIssue(ctx({ externalScope: '' }) as never)
 
     expect(calledUrl()).toContain('/projects/group%2Fasbs/')
+  })
+
+  it('cannot place a scope-less link stored before the 18.10 address change', async () => {
+    // The cost of the supported floor, asserted where it is felt. Such a link
+    // has no scope to fall back on and an address no supported instance emits,
+    // so the close fails by name instead of being sent to a guessed project.
+    const result = await closeGitLabIssue(
+      ctx({
+        externalScope: null,
+        externalUrl: 'https://gitlab.example.com/group/asbs/-/issues/7',
+      }) as never
+    )
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('project')
+    expect(gitlabFetch).not.toHaveBeenCalled()
   })
 
   it('says which link it could not place when it gives up', async () => {
@@ -183,7 +206,7 @@ describe('closeGitLabIssue', () => {
       ctx({
         externalScope: '202',
         integrationConfig: { instanceUrl: 'https://gitlab.example.com' },
-        externalUrl: 'https://old-host.example.org/group/asbs/-/issues/7',
+        externalUrl: 'https://old-host.example.org/group/asbs/-/work_items/7',
       }) as never
     )
 
