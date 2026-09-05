@@ -217,6 +217,54 @@ The shape that would help is unchanged: a per-file `except` list, or scoping an
 entry to a diff range. Until then, declaring a file with pre-existing untested
 neighbours is a decision to be made deliberately, not a formality.
 
+## 2x — Two lists that must agree conflict on every merge in a stack
+
+`scripts/mutation-manifest.json` and the `toEqual` in
+`scripts/__tests__/mutation-scope.test.ts` are the same list written twice, by
+design — the test is the counterweight that stops the manifest shrinking
+quietly. Every branch appends to both, so **every** merge in a stack conflicts in
+both files, three times in one afternoon here.
+
+The conflicts are not hard, but they are hand-work in JSON where a wrong brace
+is a parse error, and a generic "take both sides" resolver corrupted the file
+once: the hunks are not uniform. Sometimes one side is empty and the union has to
+preserve the `},{` separators, sometimes both sides carry them already. Resolve
+these two by reading the hunk, not by a rule, and re-run
+`mutation-scope.test.ts` immediately — it fails loudly on a list that no longer
+matches, which is the fastest check that the resolution was right.
+
+Worth considering: assert the manifest as an unordered set of entries rather
+than an ordered array. Order carries no meaning, and an order-free assertion
+would let git merge appended entries without conflict.
+
+Second time, and it is not only those two files: **this one** conflicts on every
+merge in a stack for the same reason, because every branch appends an entry to
+it. Here the bad resolution was quieter than a parse error — one entry ended up
+in the file **twice, verbatim**, and a duplicated section looks exactly like a
+section. It was found by reading, not by a check. When resolving a conflict in
+an append-only document, count the headings afterwards.
+
+## 1x — An un-awaited `fc.assert` passes having asserted nothing
+
+`fc.assert(fc.asyncProperty(...))` returns a promise. Without `await`, the test
+function returns before a single case runs, vitest sees no rejection, and the
+property reports green — over zero examples. It is indistinguishable from a
+property that genuinely holds, and it fails in the reassuring direction: the
+stronger the property, the more confidence the empty pass buys.
+
+Caught here only because the property was written **before** the fix and was
+therefore expected to be red. It was green, which is the only reason anyone
+looked. Written after the implementation, as most properties are, it would have
+been a permanently green test proving nothing, and the mutation gate would not
+have flagged it either — a property that runs no case kills no mutant, but the
+mutants it should have killed were being killed by the example-based tests
+beside it.
+
+`fc.assert` over a synchronous `fc.property` needs no `await`, so the two spellings
+sit side by side in the same file and look alike. Rule of thumb: `asyncProperty`
+always with `await`, and a new property is worth proving red once before trusting
+it green.
+
 ## 1x — There are two DB test fixtures, and the wrong one is the one that gets copied
 
 Three new database suites here were written against
@@ -264,26 +312,6 @@ The order that works: merge without `--delete-branch`, retarget the PR above to
 `main` while its base still exists, then delete the branch. Or retarget every PR
 in the stack to `main` up front and accept that each diff temporarily contains
 the ones below it.
-
-## 1x — Two lists that must agree conflict on every merge in a stack
-
-`scripts/mutation-manifest.json` and the `toEqual` in
-`scripts/__tests__/mutation-scope.test.ts` are the same list written twice, by
-design — the test is the counterweight that stops the manifest shrinking
-quietly. Every branch appends to both, so **every** merge in a stack conflicts in
-both files, three times in one afternoon here.
-
-The conflicts are not hard, but they are hand-work in JSON where a wrong brace
-is a parse error, and a generic "take both sides" resolver corrupted the file
-once: the hunks are not uniform. Sometimes one side is empty and the union has to
-preserve the `},{` separators, sometimes both sides carry them already. Resolve
-these two by reading the hunk, not by a rule, and re-run
-`mutation-scope.test.ts` immediately — it fails loudly on a list that no longer
-matches, which is the fastest check that the resolution was right.
-
-Worth considering: assert the manifest as an unordered set of entries rather
-than an ordered array. Order carries no meaning, and an order-free assertion
-would let git merge appended entries without conflict.
 
 ## 1x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
 
@@ -352,32 +380,6 @@ bun x vitest run --coverage.enabled --coverage.reporter=json \
 
 Worth fixing in the gate rather than in memory: refuse a report older than the
 newest file it is being asked to grade.
-
-## 1x — There are two DB test fixtures, and the wrong one is the one that gets copied
-
-Three new database suites here were written against
-`lib/server/jobs/__tests__/harness.ts`, because the nearest existing example in
-the same directory (`events/__tests__/process-integration.test.ts`) uses it.
-That harness is for **lease** suites only: a lease exists so work can outlive
-the transaction that claimed it, so those suites commit for real, open four
-connections each, and clean up with `DELETE ... WHERE` on a database every
-worktree on the machine shares.
-
-The right tool for everything else is `lib/server/__tests__/db-test-fixture.ts`
-— one connection, a transaction rolled back after every test, and a `probe` that
-skips the suite on a stale schema instead of failing it mid-test. There is a
-README beside it that says exactly this. It was not found, because the search
-started from a neighbouring test file rather than from the directory that owns
-the fixture.
-
-Cost: three suites written twice, plus a stretch of chasing 10-second hook
-timeouts in unrelated portal suites on the suspicion that the extra connections
-had caused them. (They had not — `apps/web/src/lib/server/functions` produces
-between one and three of those on `origin/main` too, measured over two runs.)
-
-What would have prevented it: the harness's own header says it is for lease
-suites, but nothing says where to go instead. One line in it pointing at
-`db-test-fixture.ts` and its README would have been enough.
 
 ## 1x — postgres.js encodes a JSON _string_ parameter into jsonb a second time
 
