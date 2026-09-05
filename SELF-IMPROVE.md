@@ -310,6 +310,40 @@ database up in one command.
 
 # Resolved
 
+## 1x — Declaring a file in the mutation manifest is a claim, and it can cost an afternoon to find out it is false
+
+Adding an entry to `scripts/mutation-manifest.json` asserts that the named
+suites, on their own, pin that file's behaviour. The word "asserts" is doing
+real work: on a file that was already in the repository, the claim is usually
+**not** true, and there is no cheap way to find out except running the gate.
+
+Measured while touching two GitLab files with one field each.
+`gitlab/server/inbound.ts` came back with 21 survivors — all but one in guards
+nobody had ever pinned (an issue hook naming no issue, a note whose text is not
+text, an absent author, both 401 bodies). Closing them was worth doing and took
+about a dozen small tests, because the file is pure parsing. Then
+`gitlab/server/hook.ts` came back with **60**: 15 survivors and 45 never
+executed, across outbound error handling the change had not touched. That one
+was backed out — the entry would have been a false claim, and the gate's
+designed answer for an unpinned file is to name it as ungraded.
+
+So: the size of the claim has nothing to do with the size of the diff. Before
+declaring a pre-existing file, run the gate with the entry added and read the
+number before committing to it. A pure module is usually a dozen tests away
+from honest; a module that does I/O in its branches is a work item of its own.
+
+Two smaller traps found on the way:
+
+- `NoCoverage` mutants mean the entry names too few suites, not that the code is
+  untested. `inbound.ts` had 18 of them purely because `verifySignature` lives
+  in that file and is tested from `signature-matrix.test.ts` two directories
+  away. The fix is a second entry in `suites`, not more tests.
+- Editing the manifest with a blind string replace puts the new record in
+  `equivalents` as well as `graded`, because the same `"file":` line matches in
+  both arrays. The gate refuses to run at all and says an equivalence record
+  needs a `why` — which reads like a missing reason rather than a record that
+  should not exist. Edit that file as JSON, not as text.
+
 ## 1x — A Stryker run leaves two things behind that nothing else guards
 
 Both surfaced within an hour of the mutation gate going green, and neither is

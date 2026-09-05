@@ -22,11 +22,54 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/QuackbackIO/quackback/stargazers"><img src="https://img.shields.io/github/stars/QuackbackIO/quackback?style=flat&color=f5a623" alt="GitHub stars" /></a>
-  <a href="https://github.com/QuackbackIO/quackback/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License" /></a>
-  <a href="https://github.com/QuackbackIO/quackback/actions"><img src="https://img.shields.io/github/actions/workflow/status/QuackbackIO/quackback/ci.yml?label=CI" alt="CI" /></a>
-  <a href="https://github.com/QuackbackIO/quackback/issues"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" /></a>
+  <a href="https://github.com/theRealBithive/quackback/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/theRealBithive/quackback/ci.yml?branch=main&label=CI" alt="CI" /></a>
+  <a href="CLAUDE.md#measuring-coverage"><img src="https://img.shields.io/badge/diff%20coverage-enforced%20per%20PR-blue" alt="Diff coverage enforced per pull request" /></a>
+  <a href="CLAUDE.md#what-done-means"><img src="https://img.shields.io/badge/mutation%20gate-no%20unjustified%20survivors-blue" alt="Mutation gate: no unjustified survivors" /></a>
+  <a href="https://github.com/QuackbackIO/quackback"><img src="https://img.shields.io/badge/fork%20of-QuackbackIO%2Fquackback-lightgrey" alt="Fork of QuackbackIO/quackback" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License" /></a>
 </p>
+
+> **The two blue badges state a rule, not a measurement.** There is no
+> repository-wide coverage or mutation percentage here, deliberately: the gates
+> grade **what a change touches**, not the total, because a total is a number
+> nobody has to defend and it improves when you measure less. `diff-coverage`
+> and `mutation` are jobs in the workflow the CI badge reports, and per PR is
+> where they bite: on `main` the comparison base is `main`, so the diff is empty
+> and there is nothing for them to grade. What the two rules actually require is
+> in [CLAUDE.md](CLAUDE.md).
+
+## This is a fork
+
+Upstream is [QuackbackIO/quackback](https://github.com/QuackbackIO/quackback);
+everything below this section is upstream's own description of the product and
+is left as it stands, so a sync stays a sync. This section is the fork-local
+part.
+
+Exkulpa runs this codebase as a network service for its own products. Under
+AGPL-3.0 §13 that carries obligations towards the people using that instance —
+what they are, what is already satisfied, and what is still open is recorded in
+[LEGAL.md](LEGAL.md). Read it before building anything proprietary in here.
+
+Four things differ from upstream and will bite whoever ignores them:
+
+- **Everything written into the repo is English** — code, comments, commits,
+  docs. The conversation around it is German; the file is not. A patch has to be
+  able to go upstream without a translation pass.
+- **The contract comes before the tests, and the tests before the code.** For
+  anything with branches, money, dates, permissions or parsing, the guarantees
+  are written as a numbered list in plain domain language and confirmed _before_
+  a property is written. A property read off the implementation cannot fail.
+- **Two CI gates grade the diff, not the repo** — see the badges above.
+- **Never deploy a moving tag.** A push to `main` publishes
+  `ghcr.io/therealbithive/quackback:main`, which is fine to try things with and
+  wrong to run: a pod rescheduled overnight silently picks up a different build,
+  and afterwards nobody can say which source was running. Every merge gets a
+  `vX.Y.Z-exkulpa.N` tag instead.
+
+The working rules are in [CLAUDE.md](CLAUDE.md), and the concrete gotchas that
+have already cost someone an afternoon are collected in
+[SELF-IMPROVE.md](SELF-IMPROVE.md). Both are fork-local and absent upstream, so
+neither ever conflicts on a sync.
 
 <p align="center">
   <img src=".github/screenshot.png" alt="Quackback feedback portal" width="800" />
@@ -73,7 +116,7 @@ Slack, Linear, Jira, GitHub, GitLab, Asana, ClickUp, Monday, Trello, Notion, Sho
 ### Docker
 
 ```bash
-git clone https://github.com/QuackbackIO/quackback.git
+git clone https://github.com/theRealBithive/quackback.git
 cd quackback
 cp .env.example .env   # Edit with your configuration
 docker build -t quackback -f apps/web/Dockerfile .
@@ -97,7 +140,7 @@ See the [Contributing Guide](CONTRIBUTING.md) to get started.
 Prerequisites: [Bun](https://bun.sh/) v1.4.0+ and [Docker](https://docker.com/)
 
 ```bash
-git clone https://github.com/QuackbackIO/quackback.git
+git clone https://github.com/theRealBithive/quackback.git
 cd quackback
 bun run setup    # Install deps, start Docker, run migrations
 bun run db:seed  # Optional: seed demo data
