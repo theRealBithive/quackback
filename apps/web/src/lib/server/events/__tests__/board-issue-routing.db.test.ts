@@ -50,6 +50,12 @@ vi.mock('../hook-context', () => ({
   buildHookContext: async () => ({ portalBaseUrl: 'https://portal.example' }),
 }))
 
+// Real encryption needs the instance key; what matters here is that the token
+// reaches the target, not how it was unwrapped.
+vi.mock('@/lib/server/integrations/encryption', () => ({
+  decryptSecrets: (blob: string) => ({ accessToken: `token-from-${blob}` }),
+}))
+
 import { integrationResolver } from '../resolvers/integration.resolver'
 import type { DomainEvent } from '../envelope'
 
@@ -66,8 +72,8 @@ interface Seed {
 async function seed(): Promise<Seed> {
   const sql = testSql()
   const [integration] = await sql`
-    insert into integrations (id, integration_type, status, config)
-    values (gen_random_uuid(), ${INTEGRATION_TYPE}, 'active', '{}'::jsonb)
+    insert into integrations (id, integration_type, status, config, secrets)
+    values (gen_random_uuid(), ${INTEGRATION_TYPE}, 'active', '{}'::jsonb, 'sealed-blob')
     returning id`
   const [principal] = await sql`
     insert into principal (id, created_at) values (gen_random_uuid(), now()) returning id`
@@ -182,6 +188,16 @@ describe('the resolver reads the status from the post row', () => {
     )
 
     expect(targets).toEqual([])
+  })
+
+  it('hands the hook the decrypted access token, not the sealed blob', async () => {
+    const postId = await s.postId('asbs', 'triaged')
+
+    const targets = await integrationResolver.resolve(
+      statusChangedEvent(postId, s.boards.asbs, 'Triaged')
+    )
+
+    expect(targets[0].config.accessToken).toBe('token-from-sealed-blob')
   })
 
   it('ignores the status name the event carries, whatever it says (V7)', async () => {

@@ -223,3 +223,67 @@ describe('an instance that still carries the old single project', () => {
     expect(screen.queryByText(/no longer used for new issues/i)).toBeNull()
   })
 })
+
+describe('choosing which statuses create the issue (V4)', () => {
+  it('adds a status to a board that already has a rule', async () => {
+    render(<GitLabConfig {...props} />)
+    await screen.findByText('GWG-Kulpix')
+
+    // Only the connected board shows status checkboxes; New is the unchecked one.
+    fireEvent.click(screen.getByLabelText('New'))
+
+    await waitFor(() => expect(hoisted.save).toHaveBeenCalledTimes(1))
+    expect(hoisted.save.mock.calls[0][0].data.triggerStatusIds).toEqual([
+      'status_planned',
+      'status_new',
+    ])
+  })
+
+  it('removes a status without touching the rest of the rule', async () => {
+    hoisted.rules.mockResolvedValue([
+      {
+        boardId: 'board_asbs',
+        projectId: '222',
+        triggerStatusIds: ['status_new', 'status_planned'],
+      },
+    ])
+    render(<GitLabConfig {...props} />)
+    await screen.findByText('GWG-Kulpix')
+
+    fireEvent.click(screen.getByLabelText('New'))
+
+    await waitFor(() => expect(hoisted.save).toHaveBeenCalledTimes(1))
+    expect(hoisted.save.mock.calls[0][0].data).toMatchObject({
+      boardId: 'board_asbs',
+      projectId: '222',
+      triggerStatusIds: ['status_planned'],
+    })
+  })
+
+  it('refuses to save a rule with no triggering status left, and says so', async () => {
+    // An empty status list is a rule that never fires — indistinguishable from
+    // a broken integration once it is saved. Better to refuse than to store it.
+    hoisted.rules.mockResolvedValue([
+      { boardId: 'board_asbs', projectId: '222', triggerStatusIds: ['status_planned'] },
+    ])
+    render(<GitLabConfig {...props} />)
+    await screen.findByText('GWG-Kulpix')
+
+    fireEvent.click(screen.getByLabelText('Planned'))
+
+    expect(await screen.findByText(/at least one status/i)).toBeTruthy()
+    expect(hoisted.save).not.toHaveBeenCalled()
+  })
+})
+
+describe('when saving fails', () => {
+  it('says so instead of leaving the row looking saved', async () => {
+    hoisted.save.mockRejectedValue(new Error('network'))
+    render(<GitLabConfig {...props} />)
+    const selects = (await screen.findAllByTestId('project-select')) as HTMLSelectElement[]
+
+    fireEvent.change(selects[0], { target: { value: '111' } })
+
+    expect(await screen.findByText(/failed to save the routing rule/i)).toBeTruthy()
+  })
+})
