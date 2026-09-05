@@ -1,5 +1,5 @@
 {
-  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing — the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
+  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing \u2014 the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
   "graded": [
     {
       "file": "scripts/audit-policy.ts",
@@ -12,6 +12,22 @@
     {
       "file": "scripts/mutation-policy.ts",
       "suites": ["scripts/__tests__/mutation-policy.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/integrations/board-routing-policy.ts",
+      "suites": ["apps/web/src/lib/server/integrations/__tests__/board-routing-policy.test.ts"]
+    },
+    {
+      "file": "apps/web/src/integrations/gitlab/server/post-source.ts",
+      "suites": ["apps/web/src/integrations/gitlab/server/__tests__/post-source.db.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/events/resolvers/integration.resolver.ts",
+      "suites": [
+        "apps/web/src/lib/server/events/__tests__/board-issue-routing.test.ts",
+        "apps/web/src/lib/server/events/__tests__/board-issue-routing.db.test.ts",
+        "apps/web/src/lib/server/events/__tests__/integration-resolver.test.ts"
+      ]
     }
   ],
   "equivalents": [

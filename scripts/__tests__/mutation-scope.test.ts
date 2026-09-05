@@ -43,6 +43,22 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'scripts/mutation-policy.ts',
         suites: ['scripts/__tests__/mutation-policy.test.ts'],
       },
+      {
+        file: 'apps/web/src/lib/server/integrations/board-routing-policy.ts',
+        suites: ['apps/web/src/lib/server/integrations/__tests__/board-routing-policy.test.ts'],
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/post-source.ts',
+        suites: ['apps/web/src/integrations/gitlab/server/__tests__/post-source.db.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/events/resolvers/integration.resolver.ts',
+        suites: [
+          'apps/web/src/lib/server/events/__tests__/board-issue-routing.test.ts',
+          'apps/web/src/lib/server/events/__tests__/board-issue-routing.db.test.ts',
+          'apps/web/src/lib/server/events/__tests__/integration-resolver.test.ts',
+        ],
+      },
     ])
   })
 
