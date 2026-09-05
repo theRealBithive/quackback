@@ -173,6 +173,23 @@ describe('closeGitLabIssue', () => {
     expect(result.success).toBe(false)
   })
 
+  it('closes on the configured instance, not on the host the link remembers', async () => {
+    // The link's URL is a record of where the issue was *seen*; the configured
+    // instance is the one we hold a token for. When a self-hosted instance
+    // moves host, every old link still carries the old origin — and sending our
+    // token there would hand a credential to a host the operator no longer
+    // controls, while the issue stays open on the instance that matters.
+    await closeGitLabIssue(
+      ctx({
+        externalScope: '202',
+        integrationConfig: { instanceUrl: 'https://gitlab.example.com' },
+        externalUrl: 'https://old-host.example.org/group/asbs/-/issues/7',
+      }) as never
+    )
+
+    expect(calledUrl()).toMatch(/^https:\/\/gitlab\.example\.com\/api\/v4\//)
+  })
+
   it('falls back to the instance in the URL when the config names none', async () => {
     await closeGitLabIssue(ctx({ externalScope: '202', integrationConfig: {} }) as never)
 

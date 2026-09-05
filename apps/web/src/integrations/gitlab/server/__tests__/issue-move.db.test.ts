@@ -39,6 +39,7 @@ import {
   postExternalLinks,
   postActivity,
   eq,
+  and,
 } from '@/lib/server/db'
 
 const { gitlabFetch } = vi.hoisted(() => ({ gitlabFetch: vi.fn() }))
@@ -138,6 +139,12 @@ async function seed(): Promise<Seed> {
   }
 }
 
+/**
+ * The post's ACTIVE links. The status predicate is load-bearing for V13: a
+ * handler that flipped the old link to 'removed' without writing a new one
+ * leaves the post with no working link, and a count over every row would
+ * report that as one.
+ */
 async function activeLinksOf(postId: string) {
   return testDb
     .select({
@@ -147,7 +154,9 @@ async function activeLinksOf(postId: string) {
       externalUrl: postExternalLinks.externalUrl,
     })
     .from(postExternalLinks)
-    .where(eq(postExternalLinks.postId, postId as never))
+    .where(
+      and(eq(postExternalLinks.postId, postId as never), eq(postExternalLinks.status, 'active'))
+    )
 }
 
 function runMove(s: Seed, target: Partial<Record<string, string>> = {}) {
@@ -269,6 +278,11 @@ describe.skipIf(!fixture.available)('gitlabIssueMoveHook', () => {
   })
 
   it('falls back to the project we asked for when the answer omits it (V11)', async () => {
+    // Unlike the issue number, the destination is not GitLab's to tell us: we
+    // named it in the request, and a 2xx means the move to it happened. So an
+    // omitted `project_id` is a gap in the answer, not an unknown — which is
+    // why it is a fallback here and a failure for a missing `iid`, where
+    // guessing would point the link at a number nobody assigned.
     const s = await seed()
     gitlabFetch.mockResolvedValue(movedIssue({ project_id: undefined }))
 
@@ -327,6 +341,7 @@ describe.skipIf(!fixture.available)('gitlabIssueMoveHook', () => {
 
     expect(result.success).toBe(false)
     expect(result.authExpired).toBe(true)
+    expect(result.error).toContain('401')
   })
 
   it('treats a forbidden move as an expired token too', async () => {
@@ -340,11 +355,25 @@ describe.skipIf(!fixture.available)('gitlabIssueMoveHook', () => {
 
     expect(result.authExpired).toBe(true)
     expect(result.shouldRetry).toBeFalsy()
+    expect(result.error).toContain('403')
+  })
+
+  it('asks to be retried for the commonest server error', async () => {
+    // 500 is the boundary of the retryable range and by far the likeliest
+    // value in it: an instance restarting mid-move must not cost the move.
+    const s = await seed()
+    gitlabFetch.mockResolvedValue({ ok: false, status: 500, text: async () => 'oops' })
+
+    const result = await runMove(s)
+
+    expect(result.shouldRetry).toBe(true)
   })
 
   it('reports success without a timeline entry when the link is gone', async () => {
     // The post was deleted while the move was in flight: the link row cascaded
-    // away, so there is nothing to rewrite and nothing to write it onto.
+    // away, so there is nothing to rewrite and nothing to write it onto. The
+    // move itself did happen, so reporting a failure would have the worker
+    // retry a move GitLab then refuses — noise about a post nobody has.
     const s = await seed()
     gitlabFetch.mockResolvedValue(movedIssue())
     await testDb.delete(postExternalLinks).where(eq(postExternalLinks.id, s.linkId as never))
@@ -378,6 +407,9 @@ describe.skipIf(!fixture.available)('gitlabIssueMoveHook', () => {
     const result = await runMove(s)
 
     expect(result.success).toBe(false)
+    // An operator reading `last_error` has to be able to tell this apart from a
+    // refused move: nothing was rejected, the answer was unusable.
+    expect(result.error).toMatch(/issue number/i)
   })
 
   it('says why it did nothing when there is no integration', async () => {
@@ -424,6 +456,14 @@ describe.skipIf(!fixture.available)('gitlabIssueMoveHook', () => {
     const s = await seed()
     await testDb.delete(postExternalLinks).where(eq(postExternalLinks.id, s.linkId as never))
     await testDb.delete(integrations).where(eq(integrations.id, s.integrationId as never))
+    // The only integration left belongs to another tracker. Falling back to the
+    // default is right; reading *an* integration instead of *the* one would
+    // send our GitLab token to a host that never issued it.
+    await testDb.insert(integrations).values({
+      integrationType: 'linear',
+      status: 'active',
+      config: { instanceUrl: 'https://wrong.example.org' },
+    })
     gitlabFetch.mockResolvedValue(movedIssue())
 
     await runMove(s)
