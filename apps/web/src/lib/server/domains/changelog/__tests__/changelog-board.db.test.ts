@@ -146,6 +146,29 @@ describe.skipIf(!fixture.available)('changelog product filter, against Postgres'
     expect(await getEntryBoardIds(entry)).toEqual([alpha])
   })
 
+  it('saves an entry whose every product was deleted meanwhile, rather than failing (V7)', async () => {
+    // The editor had the form open while someone retired the product. Losing
+    // the assignment is the documented outcome; losing the entry is not.
+    const entry = await makeEntry('stale form')
+
+    await setEntryBoards(entry, [generateId('board') as BoardId])
+
+    expect(await getEntryBoardIds(entry)).toEqual([])
+  })
+
+  it('stops naming a product once it is deleted, in the admin view too (V1)', async () => {
+    // The admin view has no audience filter, which is not the same as no
+    // filter: a retired product is gone for everyone, not merely hidden.
+    const alpha = await makeBoard('Alpha')
+    const retired = await makeBoard('Retired')
+    const entry = await makeEntry('two products', [alpha, retired])
+
+    await testDb.update(boards).set({ deletedAt: new Date() }).where(eq(boards.id, retired))
+
+    const named = (await getBoardsForEntries([entry])).get(entry) ?? []
+    expect(named.map((board) => board.name)).toEqual(['Alpha'])
+  })
+
   it('shows an unassigned entry under every product filter (V2)', async () => {
     const alpha = await makeBoard('Alpha')
     const beta = await makeBoard('Beta')

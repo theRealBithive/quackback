@@ -1,5 +1,5 @@
 {
-  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing \u2014 the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
+  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing — the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
   "graded": [
     {
       "file": "scripts/audit-policy.ts",
@@ -86,7 +86,11 @@
     },
     {
       "file": "apps/web/src/lib/server/domains/changelog/changelog-board.service.ts",
-      "suites": ["apps/web/src/lib/server/domains/changelog/__tests__/changelog-board.db.test.ts"]
+      "suites": [
+        "apps/web/src/lib/server/domains/changelog/__tests__/changelog-board.db.test.ts",
+        "apps/web/src/lib/server/domains/changelog/__tests__/changelog-board-shortcut.test.ts",
+        "apps/web/src/lib/server/domains/changelog/__tests__/changelog-board-write.db.test.ts"
+      ]
     }
   ],
   "equivalents": [
@@ -123,7 +127,7 @@
       "mutator": "StringLiteral",
       "line": "const log = logger.child({ component: 'gitlab-post-source' })",
       "replacement": "\"\"",
-      "why": "Same line, same reason: the component name is log metadata, not behaviour. The line's operator-facing content that does matter \u2014 the post id in the warning \u2014 is asserted in post-source.db.test.ts."
+      "why": "Same line, same reason: the component name is log metadata, not behaviour. The line's operator-facing content that does matter — the post id in the warning — is asserted in post-source.db.test.ts."
     },
     {
       "file": "apps/web/src/integrations/gitlab/server/post-source.ts",
@@ -222,6 +226,13 @@
       "line": "'move refused'",
       "replacement": "\"\"",
       "why": "The message is metadata on a log line. It reaches no branch, no return value and no query, and nothing in the result an operator or the worker reads is built from it, so no input tells the two apart."
+    },
+    {
+      "file": "apps/web/src/lib/server/domains/changelog/changelog-board.service.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (filter.boardIds.length === 0) return sql`NOT ${assigned}`",
+      "replacement": "false",
+      "why": "The shortcut and the general form build predicates that mean the same thing. Falling through yields `NOT assigned OR EXISTS (SELECT 1 ... AND <empty inArray>)`, and drizzle renders an empty `inArray` as the literal `false` (measured on 0.45.2), so the EXISTS is unsatisfiable and the OR collapses back to `NOT assigned` for every row. No entry, product or reader can be arranged where the two disagree, because they are the same predicate written twice. The branch is kept rather than deleted because the general form only reduces correctly through that empty-inArray rendering, which is drizzle's choice and not ours to rely on."
     }
   ]
 }

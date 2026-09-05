@@ -116,7 +116,11 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
       },
       {
         file: 'apps/web/src/lib/server/domains/changelog/changelog-board.service.ts',
-        suites: ['apps/web/src/lib/server/domains/changelog/__tests__/changelog-board.db.test.ts'],
+        suites: [
+          'apps/web/src/lib/server/domains/changelog/__tests__/changelog-board.db.test.ts',
+          'apps/web/src/lib/server/domains/changelog/__tests__/changelog-board-shortcut.test.ts',
+          'apps/web/src/lib/server/domains/changelog/__tests__/changelog-board-write.db.test.ts',
+        ],
       },
     ])
   })
@@ -269,6 +273,13 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: "'move refused'",
         replacement: '""',
         why: expect.stringContaining('message is metadata'),
+      },
+      {
+        file: 'apps/web/src/lib/server/domains/changelog/changelog-board.service.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (filter.boardIds.length === 0) return sql`NOT ${assigned}`',
+        replacement: 'false',
+        why: expect.stringContaining('the same predicate written twice'),
       },
     ])
   })

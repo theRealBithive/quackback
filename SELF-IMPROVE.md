@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 4x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
+## 5x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
 Measured while checking whether the hand-rolled mutation script can be replaced.
 `@stryker-mutator/core@10` and `@stryker-mutator/vitest-runner@10` do install and
@@ -82,6 +82,62 @@ mutants share a line, which is exactly the trap this entry's third run
 describes. The columns are already in `.mutation-tmp/report.json`; carrying
 `location.start.column` into a `Finding` and printing it would retire that
 manual step.
+
+Fifth run, and the discipline held only because the entry exists. A new service
+module opened with
+
+```ts
+const isAssignedToSomeBoard = sql`EXISTS (SELECT 1 FROM ...)`
+```
+
+at **module scope**, which is not a fixture in a `describe` body but has the
+same effect: every suite importing that module builds the fragment at import
+time, so a mutant inside it crashes collection and reads as `Survived`. The
+tell is the same — the mutant looks like deep logic, the suite reports no
+tests. Moving it into `function assignedToSomeBoard(): SQL` fixed it. Worth
+generalising from "build fixtures inside the test" to **no call into anything
+mutable at module scope**, template tags included: a `sql` tagged template does
+not look like a call, and is one.
+
+## 4x — Local `typecheck` reports ~820 pre-existing errors
+
+`bun run typecheck` yields around 820 `error TS` on a **clean** tree, almost all in
+`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
+your own change added an error can only be established by stashing, counting the errors,
+restoring and counting again.
+
+Stashing is the wrong tool when a long background job is reading the working tree, and it
+answers a coarser question than the one you have. Grepping the error list for the files
+the change touches is exact and costs one run:
+
+```bash
+bun run typecheck 2>&1 | grep -E "error TS" > /tmp/tc.txt
+git diff --name-only <base>...HEAD | sed 's|^apps/web/||' \
+  | while read -r f; do grep -F "$f" /tmp/tc.txt; done
+```
+
+It is also worth running even when nothing looks type-shaped: it is what caught a test
+mocking `getValidAccessToken` as resolving `null`, where the source returns `''` and never
+a null. The mock typechecked as an error and the test asserted a state the source cannot
+produce — no suite and no mutation run would have said so.
+
+Either pull the codegen step into the `typecheck` script or document which command has to
+run first.
+
+Third occurrence, with a twist that wastes a five-minute run: **the count is
+for the `apps/web` project**. `bun x tsc --noEmit -p tsconfig.json` from the repository
+root type-checks a different project and reports **36823** errors, which reads
+as though the change broke the build. Both numbers are baselines; only the
+`apps/web` one is the one to compare against. Run it from `apps/web`, and
+remember the Bash tool keeps its working directory between calls, so a `cd`
+three commands ago is why the count changed.
+
+Fourth occurrence, and the number itself is the trap: this entry said 815, the
+clean tree now says 820, and five unexplained errors is exactly the shape of
+"your change broke something". **Measure the baseline, never read it from
+here** — the count drifts with every upstream sync, so a written-down figure
+ages into a false alarm. The grep-by-touched-file recipe above does not have
+this problem, which is the argument for using it instead of counting at all.
 
 ## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
 
@@ -160,39 +216,6 @@ eats it. It cost two full runs plus a stash-and-compare to prove it was not the
 change under test — the same twin-measurement tax as above, now for a suite that
 touches no database. A suite that close to the timeout is a failure waiting for a
 busy machine; the fix is to find what takes 16s in there, not to raise the limit.
-
-## 3x — Local `typecheck` reports 815 pre-existing errors
-
-`bun run typecheck` yields 815 `error TS` on a **clean** tree, almost all in
-`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
-your own change added an error can only be established by stashing, counting the errors,
-restoring and counting again.
-
-Stashing is the wrong tool when a long background job is reading the working tree, and it
-answers a coarser question than the one you have. Grepping the error list for the files
-the change touches is exact and costs one run:
-
-```bash
-bun run typecheck 2>&1 | grep -E "error TS" > /tmp/tc.txt
-git diff --name-only <base>...HEAD | sed 's|^apps/web/||' \
-  | while read -r f; do grep -F "$f" /tmp/tc.txt; done
-```
-
-It is also worth running even when nothing looks type-shaped: it is what caught a test
-mocking `getValidAccessToken` as resolving `null`, where the source returns `''` and never
-a null. The mock typechecked as an error and the test asserted a state the source cannot
-produce — no suite and no mutation run would have said so.
-
-Either pull the codegen step into the `typecheck` script or document which command has to
-run first.
-
-Third occurrence, with a twist that wastes a five-minute run: **the 815 is the
-`apps/web` project**. `bun x tsc --noEmit -p tsconfig.json` from the repository
-root type-checks a different project and reports **36823** errors, which reads
-as though the change broke the build. Both numbers are baselines; only the
-`apps/web` one is the one to compare against. Run it from `apps/web`, and
-remember the Bash tool keeps its working directory between calls, so a `cd`
-three commands ago is why the count changed.
 
 ## 3x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -323,6 +346,39 @@ same run had just run. Re-running the identical suites from the repo root
 turned that into `12 executed, 0 never executed`. The tell held: a file the run
 definitely executed was listed under "out of scope, although they look like
 source". Read that line before reading the holes.
+
+## 1x — Hand-rolled `db` stubs break on a query they never mentioned, and a drizzle `SQL` cannot be printed
+
+Two halves of the same problem: what a test does when it has to look at a query
+instead of at a result.
+
+Adding one `db.select()` to a shared read path — the products lookup in
+`getChangelogById` — broke three suites that had never heard of products.
+`mockReturnValueOnce` chains are positional, so a new query inserted _before_ an
+existing one silently hands every later call the wrong stub; and a stub chain
+that stops at `.where()` throws `orderBy is not a function` the moment a clause
+is added. Both failures name a method, never the call site, and neither is
+about the code under test. Two defences, both cheap and both applied here:
+make the chain awaitable at any depth (`chain.then = …` returning `[]`), so an
+added clause degrades to an empty result instead of a crash; and prefer
+splitting a query into its own service function over threading another
+`mockReturnValueOnce` through, so ordering stops being load-bearing.
+
+The other half: to assert that a predicate reached the query at all, the test
+has to read the `SQL` object the mock captured. `JSON.stringify` throws
+`Converting circular structure to JSON` — drizzle's `SQL` holds table objects
+that point back. `new PgDialect().sqlToQuery(condition)` renders it to
+`{ sql, params }`, with one catch that costs a run: rendering maps parameters
+through their column, so a readable stand-in id (`'board_alpha'`) fails inside
+typeid's parser with `Invalid length. Suffix should have 26 characters`. Test
+ids have to be real (`generateId('board')`), and they arrive in `params` as
+UUIDs, so compare against `toUuid(id)` rather than the typeid.
+
+This is worth an assertion helper next to the db fixture rather than a note:
+`renderedWhere(mock)` returning `{ sql, params }` would have saved both runs.
+It also matters beyond convenience — a suite that only checks _which filter was
+resolved_ passes when the filter is never pushed into the WHERE clause, which
+is a survivor the mutation gate pays twenty minutes to find.
 
 ## 1x — The coverage and mutation gates read HEAD, not the working tree
 
