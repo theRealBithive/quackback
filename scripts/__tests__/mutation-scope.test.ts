@@ -43,6 +43,10 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'scripts/mutation-policy.ts',
         suites: ['scripts/__tests__/mutation-policy.test.ts'],
       },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/url.ts',
+        suites: ['apps/web/src/integrations/gitlab/server/__tests__/url.test.ts'],
+      },
     ])
   })
 

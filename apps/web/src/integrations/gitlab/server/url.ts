@@ -19,8 +19,11 @@ export class GitLabInstanceUrlError extends Error {
 /**
  * Normalize a GitLab instance URL to its origin.
  * Empty / missing values resolve to gitlab.com so existing connections
- * keep working. Rejects credentials, non-http(s) schemes, and unparseable
- * strings — the same class of unsafe URLs sibling integrations refuse.
+ * keep working. Rejects credentials, anything that is not HTTPS, and
+ * unparseable strings — the same class of unsafe URLs sibling integrations
+ * refuse. TLS is required rather than merely preferred: every call to this
+ * origin carries `Authorization: Bearer <token>`, so a plain-HTTP instance
+ * would put the credential on the wire in the clear.
  */
 export function normalizeGitLabInstanceUrl(raw?: string | null): string {
   const trimmed = raw?.trim()
@@ -33,8 +36,8 @@ export function normalizeGitLabInstanceUrl(raw?: string | null): string {
     throw new GitLabInstanceUrlError('GitLab instance URL must be a valid URL')
   }
 
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    throw new GitLabInstanceUrlError('GitLab instance URL must be an http(s) URL')
+  if (parsed.protocol !== 'https:') {
+    throw new GitLabInstanceUrlError('GitLab instance URL must be an https URL')
   }
   if (parsed.username || parsed.password) {
     throw new GitLabInstanceUrlError('GitLab instance URL must not include credentials')
@@ -50,10 +53,19 @@ export function gitlabApiBase(instanceUrl?: string | null): string {
 
 /**
  * Project path from a GitLab issue web URL.
- * Accepts both `/{path}/-/issues/{iid}` (current) and `/{path}/issues/{iid}`.
+ *
+ * GitLab 18.10 made work items generally available and moved issues to
+ * `/{path}/-/work_items/{iid}`, redirecting `/issues/{iid}` there. That release
+ * is the floor this integration supports, so the older spelling is read as no
+ * project at all rather than half-supported — the reasoning is written out as
+ * V19 and V22 in the test module beside this one.
+ *
+ * The issue number is part of the pattern rather than trailing detail: the
+ * work item *list* lives at `/{path}/-/work_items`, and reading a project out
+ * of it would answer for an address that names no issue (V21).
  */
 export function extractGitLabProjectPath(url?: string | null): string | null {
   if (!url) return null
-  const match = url.match(/https?:\/\/[^/]+\/(.+?)\/(?:-\/)?issues(?:\/|$|\?)/)
+  const match = url.match(/https?:\/\/[^/]+\/(.+?)\/-\/work_items\/(\d+)(?:[/?#]|$)/)
   return match?.[1] ?? null
 }
