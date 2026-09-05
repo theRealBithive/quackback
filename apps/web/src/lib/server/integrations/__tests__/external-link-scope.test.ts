@@ -10,14 +10,13 @@
  *
  * Contract (domain language, confirmed before these tests were written):
  *
- *   V8  Eine Rückmeldung aus GitLab — Statuswechsel wie Kommentar — wirkt
- *       genau auf den Post, dessen Issue sie betrifft, und nie auf einen Post
- *       eines anderen Produkts, auch wenn die Issue-Nummern übereinstimmen.
- *   V9  Lässt sich eine Rückmeldung keinem Post eindeutig zuordnen, geschieht
- *       nichts. Es wird nie geraten.
- *   V10 Verknüpfungen, die vor dieser Änderung entstanden sind, funktionieren
- *       unverändert weiter, solange keine scope-behaftete Verknüpfung dieselbe
- *       Issue-Nummer trägt; wo eine es tut, gilt V9.
+ *   V8  A reply from GitLab — status change or comment — acts on exactly the
+ *       post whose issue it concerns, never on a post of another product, even
+ *       when the issue numbers match.
+ *   V9  A reply that cannot be attributed to exactly one post does nothing.
+ *       Nothing is ever guessed.
+ *   V10 Links made before this change keep working unchanged, as long as no
+ *       scoped link carries the same issue number; where one does, V9 decides.
  *
  * The qualifier on V10 is not a retreat from it, and it is one-directional. A
  * legacy link resolves until a *scoped* row appears on the same issue number,
