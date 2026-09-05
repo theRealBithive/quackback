@@ -20,6 +20,25 @@ const log = logger.child({ component: 'token-refresh' })
 const REFRESH_BUFFER_MS = 5 * 60 * 1000
 
 /**
+ * Say on the integration itself that its token could not be renewed.
+ *
+ * Without this the only symptom is the 401 that follows, arriving from
+ * whichever call happened to be next — so the health panel blames the
+ * delivery rather than the renewal, and the operator is told to reconnect by
+ * an error that does not know why.
+ *
+ * The message names the integration and the remedy and nothing else. The
+ * failure it describes carries a refresh token and a client secret, and this
+ * string is displayed in the settings UI.
+ */
+async function recordRenewalFailure(integrationId: IntegrationId, reason: string): Promise<void> {
+  await db
+    .update(integrations)
+    .set({ lastError: reason, lastErrorAt: new Date() })
+    .where(eq(integrations.id, integrationId))
+}
+
+/**
  * Get a valid access token for an integration, refreshing (and persisting)
  * if it is expired or expires within the buffer. Falls back to the stored
  * token when the provider has no refresh capability, no refresh token is
@@ -41,11 +60,29 @@ export async function getValidAccessToken(integrationId: IntegrationId): Promise
   // Lazy registry import: provider modules import this helper, so a static
   // import of the registry here would create a cycle (same as archive.ts).
   const { getIntegration } = await import('./index')
-  const refreshFn = getIntegration(integration.integrationType)?.refreshToken
-  if (!refreshFn || !refreshToken || !tokenExpiresAt) return token
+  // Neither of these is a fault: a provider without the capability may hand
+  // out tokens that never expire, and a connection with no recorded expiry has
+  // nothing to renew against.
+  const definition = getIntegration(integration.integrationType)
+  if (!definition?.refreshToken || !tokenExpiresAt) return token
+
+  const refreshFn = definition.refreshToken
+  const name = definition.catalog.name
 
   const expiresAt = new Date(tokenExpiresAt).getTime()
   if (Date.now() < expiresAt - REFRESH_BUFFER_MS) return token
+
+  if (!refreshToken) {
+    log.warn(
+      { integration_type: integration.integrationType },
+      'expired token and no refresh token stored'
+    )
+    await recordRenewalFailure(
+      integrationId,
+      `The ${name} connection has no refresh token stored, so its expired access token cannot be renewed. Please reconnect ${name}.`
+    )
+    return token
+  }
 
   try {
     log.debug({ integration_type: integration.integrationType }, 'refreshing integration token')
@@ -77,6 +114,10 @@ export async function getValidAccessToken(integrationId: IntegrationId): Promise
     log.error(
       { err, integration_type: integration.integrationType },
       'integration token refresh failed'
+    )
+    await recordRenewalFailure(
+      integrationId,
+      `Could not renew the ${name} access token. Please reconnect ${name}.`
     )
     return token // Fall back to existing token; the API call may still 401
   }

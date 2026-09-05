@@ -27,6 +27,23 @@ const MANUAL_WEBHOOK_PROVIDERS = new Set(
 const EXTERNAL_STATUS_PROVIDERS = new Set(
   listIntegrationTypes().filter((t) => getIntegration(t)?.listExternalStatuses)
 )
+const REFRESH_PROVIDERS = new Set(
+  listIntegrationTypes().filter((t) => getIntegration(t)?.refreshToken)
+)
+
+/**
+ * The providers whose token exchange reports an expiry, so their access tokens
+ * die on a clock and have to be renewed. Derived by reading each provider's
+ * `server/oauth.ts` for an `expiresIn` in what `exchangeCode` returns; it
+ * cannot be derived at runtime, because the expiry only exists once a real
+ * exchange has happened.
+ *
+ * This list is the whole point of the check below. GitLab reported an expiry,
+ * stored a refresh token, and declared no way to use it — so every GitLab
+ * connection stopped working two hours after it was made, and the only visible
+ * symptom was a 401 from whatever ran next.
+ */
+const PROVIDERS_WITH_EXPIRING_TOKENS = ['asana', 'gitlab', 'hubspot', 'jira', 'linear', 'teams']
 
 describe('registry capability coverage', () => {
   it('has inbound providers to check (guard against a silently empty registry)', () => {
@@ -62,6 +79,22 @@ describe('registry capability coverage', () => {
     expect([...MANUAL_WEBHOOK_PROVIDERS].sort()).toEqual(
       ['azure_devops', 'gitlab', 'shortcut', 'trello'].sort()
     )
+  })
+
+  it('every provider with an expiring access token declares refreshToken', () => {
+    for (const type of PROVIDERS_WITH_EXPIRING_TOKENS) {
+      expect(
+        getIntegration(type)?.refreshToken,
+        `${type} hands back an expiry but cannot renew — every connection dies when it runs out`
+      ).toBeTypeOf('function')
+    }
+  })
+
+  it('refreshToken is declared by exactly those providers', () => {
+    // Both directions on purpose. A provider that grew an expiry without the
+    // capability is the bug above; one that declares the capability without an
+    // expiry means this list has gone stale and stopped being a check.
+    expect([...REFRESH_PROVIDERS].sort()).toEqual([...PROVIDERS_WITH_EXPIRING_TOKENS].sort())
   })
 
   it('every inbound provider declares listExternalStatuses (WO-3: no more gap list)', () => {
