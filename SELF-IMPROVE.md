@@ -515,3 +515,24 @@ one chance to commit a stray manifest per change.
 the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
 does the intersection with the diff that used to be done by hand. Three runs
 paid for it.
+
+## 1x — The mutation gate had no database, so a third of its mutants were never run
+
+The `mutation` job in `ci.yml` carried no Postgres service. Every DB-backed suite in the
+manifest therefore skipped itself, Stryker found no test covering the code those suites
+hold, and reported their mutants as `NoCoverage`: **113 of 193** on the first run that
+graded a `.db.test.ts`. The gate failed on the count, which is the right outcome, but the
+message reads like a test problem and it was a runner problem.
+
+Worth knowing for the shape of the mistake, not just the fix: this exact hypothesis was
+written down earlier in the same session, then **retracted as disproved** — because the
+local reproduction had `DATABASE_URL` set and the run log said `Ran 47 tests`. The local
+evidence was real and the conclusion was still wrong, because the two environments differ
+in precisely the variable under test. A hypothesis about CI is not disproved by a local
+run unless the local run reproduces CI's environment.
+
+**Closed** by giving the job the pgvector service, `bun run db:migrate` and
+`REQUIRE_TEST_DB=1` — the last so a database that is missing or behind the migrations
+fails naming itself instead of reverting to the quiet skip. Documented in CLAUDE.md's
+mutation section, since "the job waits for `unit`" was the only prerequisite recorded
+there and it was not the only one.
