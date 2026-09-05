@@ -181,7 +181,14 @@ export const integrationResolver: SinkResolver = {
     if (relevant.length === 0) return []
     const context = await buildHookContext()
     if (!context) throw new Error('Failed to build integration hook context')
-    const statusId = await currentStatusId(event)
+    // Only read the status when some rule actually filters on one. An instance
+    // with no per-board routing then dispatches without an extra query, which
+    // is also what keeps every suite that stubs the mappings but not the
+    // database working.
+    const anyRuleFiltersByStatus = relevant.some(
+      (m) => ((m.filters as MappingFilters | null)?.statusIds?.length ?? 0) > 0
+    )
+    const statusId = anyRuleFiltersByStatus ? await currentStatusId(event) : undefined
     return buildIntegrationTargets(
       relevant,
       event.type,
