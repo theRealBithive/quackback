@@ -21,6 +21,15 @@ export interface ArchiveResult {
 export interface ArchiveContext {
   externalId: string
   externalUrl?: string | null
+  /**
+   * The container the item lives in, as the link row records it — a GitLab
+   * project id, a GitHub repository. Null on links made before it was
+   * recorded, and absent for providers that never set it. A provider that
+   * needs the container must prefer this over re-deriving one from the URL:
+   * an issue that moved carries a new container, and two answers that can
+   * disagree is one too many.
+   */
+  externalScope?: string | null
   accessToken: string
   integrationConfig: Record<string, unknown>
 }

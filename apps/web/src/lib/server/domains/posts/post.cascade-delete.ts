@@ -106,6 +106,7 @@ export async function executeCascadeDelete(
       integrationType: postExternalLinks.integrationType,
       externalId: postExternalLinks.externalId,
       externalUrl: postExternalLinks.externalUrl,
+      externalScope: postExternalLinks.externalScope,
       integrationSecrets: integrations.secrets,
       integrationConfig: integrations.config,
     })
@@ -157,6 +158,7 @@ export async function executeCascadeDelete(
       const result = await archiveExternalIssue(link.integrationType, {
         externalId: link.externalId,
         externalUrl: link.externalUrl,
+        externalScope: link.externalScope,
         accessToken,
         integrationConfig: config,
       })

@@ -75,6 +75,11 @@ export const P = {
     previousStatus: z.string(),
     newStatus: z.string(),
   }),
+  'post.board_changed': z.looseObject({
+    post: postRef,
+    fromBoardId: id,
+    toBoardId: id,
+  }),
   'post.updated': z.looseObject({ post: postRef, changedFields: z.array(z.string()) }),
   'post.deleted': z.looseObject({ post: postRef, deletedBy: nullableStr }),
   'post.restored': z.looseObject({ post: postRef }),

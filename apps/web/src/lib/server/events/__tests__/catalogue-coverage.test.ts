@@ -74,6 +74,7 @@ describe('event catalogue coverage', () => {
     'assigned',
     'owner_assigned',
     'attribute_changed',
+    'board_changed',
     'merged',
     'unmerged',
     'mentioned',
