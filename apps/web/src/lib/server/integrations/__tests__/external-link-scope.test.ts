@@ -16,7 +16,17 @@
  *   V9  Lässt sich eine Rückmeldung keinem Post eindeutig zuordnen, geschieht
  *       nichts. Es wird nie geraten.
  *   V10 Verknüpfungen, die vor dieser Änderung entstanden sind, funktionieren
- *       unverändert weiter.
+ *       unverändert weiter, solange keine scope-behaftete Verknüpfung dieselbe
+ *       Issue-Nummer trägt; wo eine es tut, gilt V9.
+ *
+ * The qualifier on V10 is not a retreat from it, and it is one-directional. A
+ * legacy link resolves until a *scoped* row appears on the same issue number,
+ * and at that moment the report becomes unattributable: it names a project,
+ * the scoped row says a different one, and the legacy row says nothing. V9
+ * then decides, and V9 says do nothing. Per-board routing is what manufactures
+ * those rows, so the remedy belongs there — fill in the scope of the legacy
+ * rows before a second project starts issuing numbers. Never by relaxing the
+ * rule here.
  */
 import { describe, it, expect } from 'vitest'
 import fc from 'fast-check'

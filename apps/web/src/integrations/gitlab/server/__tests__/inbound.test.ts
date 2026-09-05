@@ -28,7 +28,9 @@
  *       numbers are identical.
  *   V14 A note that cannot be attributed to exactly one post is ignored
  *       quietly. Nothing is guessed.
- *   V15 Links made before projects were recorded keep working unchanged.
+ *   V15 Links made before projects were recorded keep working unchanged, as
+ *       long as no link that does record one carries the same issue number;
+ *       where one does, V14 decides.
  *
  * V13-V15 are the plan's V8-V10; they arrived with per-board project routing,
  * which is what made two projects — and therefore colliding issue numbers —
