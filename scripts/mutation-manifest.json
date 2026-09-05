@@ -14,6 +14,10 @@
       "suites": ["scripts/__tests__/mutation-policy.test.ts"]
     },
     {
+      "file": "apps/web/src/integrations/gitlab/server/url.ts",
+      "suites": ["apps/web/src/integrations/gitlab/server/__tests__/url.test.ts"]
+    },
+    {
       "file": "apps/web/src/lib/server/integrations/external-link-scope.ts",
       "suites": ["apps/web/src/lib/server/integrations/__tests__/external-link-scope.test.ts"]
     },
