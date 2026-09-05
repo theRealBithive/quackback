@@ -48,7 +48,7 @@ export function selectLinksForScope<T extends ScopedLink>(
   // container we *can* name proves this id is not unique across containers,
   // and picking the unscoped one would be the cross-product leak V8 forbids.
   const unscoped = rows.filter((row) => row.externalScope === null)
-  if (unscoped.length === 0) return []
-  if (unscoped.length < rows.length) return []
+  const everyLinkIsUnscoped = unscoped.length === rows.length
+  if (!everyLinkIsUnscoped) return []
   return unscoped
 }
