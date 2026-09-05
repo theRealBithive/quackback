@@ -30,6 +30,7 @@ import {
   integrations,
   integrationEventMappings,
   postExternalLinks,
+  eq,
 } from '@/lib/server/db'
 
 vi.mock('@/lib/server/db', async (importOriginal) => ({
@@ -201,6 +202,57 @@ describe.skipIf(!fixture.available)('issueMoveResolver', () => {
   it('produces nothing for a post with no links', async () => {
     const w = await world()
     await testDb.delete(postExternalLinks)
+
+    const targets = await issueMoveResolver.resolve(boardChangedEvent(w, w.asbsBoardId) as never)
+
+    expect(targets).toEqual([])
+  })
+
+  it('produces nothing for an event with no payload at all', async () => {
+    const w = await world()
+    const event = boardChangedEvent(w, w.asbsBoardId)
+    const withoutPayload = { ...event, payload: undefined }
+
+    expect(await issueMoveResolver.resolve(withoutPayload as never)).toEqual([])
+  })
+
+  it('reads the rule of the board that was moved to, not another one (V11)', async () => {
+    // The lookup is by target key. Reading whichever rule came back first
+    // would move the issue into another product's project.
+    const w = await world()
+
+    const targets = await issueMoveResolver.resolve(boardChangedEvent(w, w.asbsBoardId) as never)
+
+    expect((targets[0].target as { toProjectId: string }).toProjectId).toBe(ASBS_PROJECT)
+  })
+
+  it('ignores a disabled rule (V14)', async () => {
+    const w = await world()
+    await testDb
+      .update(integrationEventMappings)
+      .set({ enabled: false })
+      .where(eq(integrationEventMappings.targetKey, w.asbsBoardId))
+
+    const targets = await issueMoveResolver.resolve(boardChangedEvent(w, w.asbsBoardId) as never)
+
+    expect(targets).toEqual([])
+  })
+
+  it('ignores a rule whose integration is no longer active (V14)', async () => {
+    const w = await world()
+    await testDb
+      .update(integrations)
+      .set({ status: 'error' })
+      .where(eq(integrations.id, w.integrationId as never))
+
+    const targets = await issueMoveResolver.resolve(boardChangedEvent(w, w.asbsBoardId) as never)
+
+    expect(targets).toEqual([])
+  })
+
+  it('ignores a link that is no longer active (V14)', async () => {
+    const w = await world()
+    await testDb.update(postExternalLinks).set({ status: 'removed' })
 
     const targets = await issueMoveResolver.resolve(boardChangedEvent(w, w.asbsBoardId) as never)
 

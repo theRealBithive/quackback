@@ -93,6 +93,63 @@ describe('closeGitLabIssue', () => {
     expect(init.headers.Authorization).toBe('Bearer a-token')
   })
 
+  it('treats an empty recorded project as not recorded', async () => {
+    // An empty string is not an answer. Taking it as one would send the
+    // request to `/projects//issues/7`.
+    await closeGitLabIssue(ctx({ externalScope: '' }) as never)
+
+    expect(calledUrl()).toContain('/projects/group%2Fasbs/')
+  })
+
+  it('says which link it could not place when it gives up', async () => {
+    const result = await closeGitLabIssue(ctx({ externalScope: null, externalUrl: null }) as never)
+
+    expect(result.error).toContain('project')
+  })
+
+  it('reports the platform in an error the operator will read', async () => {
+    gitlabFetch.mockResolvedValue({ ok: false, status: 500, text: async () => 'boom' })
+
+    const result = await closeGitLabIssue(ctx({ externalScope: '202' }) as never)
+
+    expect(result.error).toContain('GitLab')
+    expect(result.error).toContain('500')
+  })
+
+  it('sends JSON, and says so', async () => {
+    await closeGitLabIssue(ctx({ externalScope: '202' }) as never)
+
+    expect(gitlabFetch.mock.calls[0][1].headers['Content-Type']).toBe('application/json')
+  })
+
+  it('ignores a configured instance URL that is only whitespace', async () => {
+    await closeGitLabIssue(
+      ctx({
+        externalScope: '202',
+        integrationConfig: { instanceUrl: '   ' },
+        externalUrl: 'https://self-hosted.example.org/g/p/-/issues/7',
+      }) as never
+    )
+
+    expect(calledUrl()).toMatch(/^https:\/\/self-hosted\.example\.org\//)
+  })
+
+  it('falls back to gitlab.com when nothing names an instance', async () => {
+    await closeGitLabIssue(
+      ctx({ externalScope: '202', integrationConfig: {}, externalUrl: null }) as never
+    )
+
+    expect(calledUrl()).toMatch(/^https:\/\/gitlab\.com\/api\/v4\//)
+  })
+
+  it('falls back to gitlab.com when the stored URL cannot be parsed', async () => {
+    await closeGitLabIssue(
+      ctx({ externalScope: '202', integrationConfig: {}, externalUrl: 'not a url' }) as never
+    )
+
+    expect(calledUrl()).toMatch(/^https:\/\/gitlab\.com\/api\/v4\//)
+  })
+
   it('gives up when neither the link nor its URL names a project', async () => {
     const result = await closeGitLabIssue(ctx({ externalScope: null, externalUrl: null }) as never)
 

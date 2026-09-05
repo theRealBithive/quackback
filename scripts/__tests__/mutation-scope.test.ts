@@ -78,6 +78,7 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'apps/web/src/lib/server/events/resolvers/issue-move.resolver.ts',
         suites: [
           'apps/web/src/lib/server/events/resolvers/__tests__/issue-move.resolver.db.test.ts',
+          'apps/web/src/lib/server/events/__tests__/issue-move-wiring.test.ts',
         ],
       },
     ])
