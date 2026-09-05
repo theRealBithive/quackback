@@ -9,6 +9,7 @@ import { createCommentFn, addReactionFn, removeReactionFn } from '@/lib/server/f
 import { inboxKeys } from '@/lib/client/hooks/use-inbox-query'
 import type { PostDetails, PostCommentReaction, CommentWithReplies } from '@/lib/shared/types'
 import type { InboxPostListResult } from '@/lib/shared/db-types'
+import { patchInboxListCache } from '@/lib/client/mutations/inbox-list-cache'
 import type { PostCommentId, PrincipalId, PostId } from '@quackback/ids'
 import { addReplyToTree, replaceOptimisticInTree } from '@/lib/client/utils/comment-tree-helpers'
 
@@ -42,7 +43,13 @@ interface AddCommentInput {
 // Helper Functions
 // ============================================================================
 
-/** Update a post in all list caches */
+/**
+ * Update a post in all list caches.
+ *
+ * `inboxKeys.lists()` is a key prefix the facet counts also live under, so this
+ * goes through `patchInboxListCache` rather than reaching for `pages` directly
+ * — see the note there.
+ */
 function updatePostInLists(
   queryClient: ReturnType<typeof useQueryClient>,
   postId: PostId,
@@ -50,18 +57,10 @@ function updatePostInLists(
 ): void {
   queryClient.setQueriesData<InfiniteData<InboxPostListResult>>(
     { queryKey: inboxKeys.lists() },
-    (old) => {
-      if (!old) return old
-      return {
-        ...old,
-        pages: old.pages.map((page) => ({
-          ...page,
-          items: page.items.map((post) =>
-            post.id === postId ? { ...post, ...updater(post) } : post
-          ),
-        })),
-      }
-    }
+    (old) =>
+      patchInboxListCache(old, (items) =>
+        items.map((post) => (post.id === postId ? { ...post, ...updater(post) } : post))
+      )
   )
 }
 

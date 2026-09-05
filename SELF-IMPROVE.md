@@ -124,7 +124,7 @@ for a gate that grades coverage, test files counting as source is exactly the
 kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
 whole coverage block in `vitest.config.ts`, where the defaults can be spread.
 
-## 2x — The DB suites are flaky under parallel load
+## 3x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -150,6 +150,16 @@ All four CI shards passed with coverage on 4 vCPU. So the local failures are loa
 — this laptop runs vitest 11-way with Postgres on the same box — but ruling that
 out took a second full 3-minute shard run as a control. That is the cost of the
 flakiness: no single run means anything, so every measurement needs a twin.
+
+Hit a third time, and this one is not a DB suite at all:
+`lib/client/mutations/__tests__/settings.test.ts` times out (`Test timed out in
+20000ms`) whenever it runs inside a wider selection, and passes alone. The reason
+is visible once measured: alone it needs 16.7s of test time against the 20s
+`testTimeout` in `vitest.config.ts`, so it has 3s of headroom and any contention
+eats it. It cost two full runs plus a stash-and-compare to prove it was not the
+change under test — the same twin-measurement tax as above, now for a suite that
+touches no database. A suite that close to the timeout is a failure waiting for a
+busy machine; the fix is to find what takes 16s in there, not to raise the limit.
 
 ## 2x — Local `typecheck` reports 815 pre-existing errors
 
@@ -243,6 +253,98 @@ it. Here the bad resolution was quieter than a parse error — one entry ended u
 in the file **twice, verbatim**, and a duplicated section looks exactly like a
 section. It was found by reading, not by a check. When resolving a conflict in
 an append-only document, count the headings afterwards.
+
+## 2x — The coverage config lives in the root config, so a run from apps/web measures nothing
+
+`vitest.config.ts` at the repo root carries the `coverage` block;
+`apps/web/vitest.config.ts` does not. Run the documented coverage command from
+`apps/web` — the natural place, since that is where the suites are — and vitest
+writes **no report at all**, with no error.
+
+`scripts/diff-coverage-check.ts` then reads every `coverage-final.json` under
+`coverage/`, finds the one a _previous_ run left there, and grades the diff
+against it. The output is entirely plausible: a file count, a line count, and a
+list of "added lines that no test executed" — which are simply every line
+added since that stale report was written. Two cycles went into chasing those
+as real holes.
+
+Two things would have caught it: the report's own age, and the fact that new
+source files appeared under "out of scope, although they look like source" —
+a file the run had definitely executed cannot be out of scope. The second one
+is the tell worth remembering.
+
+The invocation that works, from the repo **root**, with `apps/web/` on the
+paths:
+
+```bash
+rm -rf coverage/local   # a stale report is graded silently
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportsDirectory=coverage/local apps/web/src/<the suites>
+```
+
+Worth fixing in the gate rather than in memory: refuse a report older than the
+newest file it is being asked to grade.
+
+Second run, and it does not need a stale report to mislead. With `coverage/`
+cleared first, the run from `apps/web` writes a report that is real but
+measured under `apps/web/vitest.config.ts`, whose coverage block does not
+exist — so the gate graded a brand-new source file as **out of scope** and
+called seven added lines in two edited files never executed, all of which that
+same run had just run. Re-running the identical suites from the repo root
+turned that into `12 executed, 0 never executed`. The tell held: a file the run
+definitely executed was listed under "out of scope, although they look like
+source". Read that line before reading the holes.
+
+## 1x — The coverage and mutation gates read HEAD, not the working tree
+
+Both gates ask git for the diff between the merge base and `HEAD`
+(`git diff -U0 <merge-base> HEAD` in `scripts/mutation-check.ts`, the same in
+`diff-coverage-check.ts`). So running either one over uncommitted work does not
+grade that work: it grades the previous commit and reports a confident PASS.
+
+That is exactly how it reads on screen. The run said `3 file(s), 80 line(s) — 12
+executed, 0 never executed` and `PASS: every line this change added was executed
+by a test` — while the new module, its suite and the component it rewired were
+all still unstaged. Nothing in the output says "your change is not in this
+measurement", because from the gate's point of view there is no change.
+
+The cost is a wasted 60-second coverage run and, worse, a moment of believing an
+untested file was covered. Committing first turned the same command into
+`5 file(s), 209 line(s) — 57 executed, 1 never executed` and named the line.
+
+Either would fix it: have both gates refuse to run with a dirty tree, or have
+them diff the working tree (`git diff <merge-base>` without `HEAD`) and say which
+of the two they did in the line they already print about the merge base.
+
+## 1x — A cache key nested under another's prefix, with six copies of the patch that reads it
+
+`inboxKeys.facetCounts()` was deliberately nested under `inboxKeys.lists()`
+(`['inbox','list','facet-counts',filters]`) so that invalidating the lists also
+refreshes the filter counts. That is sound for `invalidateQueries`, which only
+marks entries stale. It is a trap for `setQueriesData`, which matches the same
+prefix and hands the _counts_ payload to an updater written for an infinite
+list. The updater did `old.pages.map(...)`, a counts payload has no `pages`,
+and the throw landed inside `onMutate` — which aborts the mutation before
+`mutationFn` runs. Every metadata control in the feedback detail sidebar
+failed, and the change was never sent rather than merely mis-displayed.
+
+Two structural facts let it live in production for months. The
+`setQueriesData<InfiniteData<…>>` type parameter is an assertion, not a check:
+TypeScript agrees the value is a list because the call said so. And the same
+unguarded `old.pages.map` was copy-pasted **four** times across `posts.ts` and
+`comments.ts`, so nothing pointed at one place to fix.
+
+Five further copies live in `portal-posts.ts` and `users.ts` under
+`publicPostsKeys.lists()`. They are correct **today** only because nothing has
+been nested under that prefix yet — the same kind of commit that gave the inbox
+counts a shared prefix would break them.
+`apps/web/src/lib/client/mutations/inbox-list-cache.ts` is what the inbox now
+goes through; the portal ones should follow before someone nests a sibling
+there too.
+
+The rule that generalises: an updater reached through a key _prefix_ has to
+check the shape it was handed. Only an updater addressed by a full key may
+assume one.
 
 ## 1x — An un-awaited `fc.assert` passes having asserted nothing
 
@@ -349,37 +451,6 @@ what misleads. **Print the trimmed source line beside each survivor**, the way a
 
 Until then: never mutate from the summary alone. Take the `file:line:col` out of the
 detail block, and confirm the mutant by applying it by hand and watching the suite go red.
-
-## 1x — The coverage config lives in the root config, so a run from apps/web measures nothing
-
-`vitest.config.ts` at the repo root carries the `coverage` block;
-`apps/web/vitest.config.ts` does not. Run the documented coverage command from
-`apps/web` — the natural place, since that is where the suites are — and vitest
-writes **no report at all**, with no error.
-
-`scripts/diff-coverage-check.ts` then reads every `coverage-final.json` under
-`coverage/`, finds the one a _previous_ run left there, and grades the diff
-against it. The output is entirely plausible: a file count, a line count, and a
-list of "added lines that no test executed" — which are simply every line
-added since that stale report was written. Two cycles went into chasing those
-as real holes.
-
-Two things would have caught it: the report's own age, and the fact that new
-source files appeared under "out of scope, although they look like source" —
-a file the run had definitely executed cannot be out of scope. The second one
-is the tell worth remembering.
-
-The invocation that works, from the repo **root**, with `apps/web/` on the
-paths:
-
-```bash
-rm -rf coverage/local   # a stale report is graded silently
-bun x vitest run --coverage.enabled --coverage.reporter=json \
-  --coverage.reportsDirectory=coverage/local apps/web/src/<the suites>
-```
-
-Worth fixing in the gate rather than in memory: refuse a report older than the
-newest file it is being asked to grade.
 
 ## 1x — postgres.js encodes a JSON _string_ parameter into jsonb a second time
 

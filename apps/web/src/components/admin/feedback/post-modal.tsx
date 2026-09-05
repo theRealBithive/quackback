@@ -5,7 +5,7 @@ import { useKeyboardSubmit } from '@/lib/client/hooks/use-keyboard-submit'
 import { CustomerContextPanel } from '@/components/admin/feedback/customer-context-panel'
 import { ModalFooter } from '@/components/shared/modal-footer'
 import { useUrlModal } from '@/lib/client/hooks/use-url-modal'
-import { useSuspenseQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSuspenseQuery, useQuery } from '@tanstack/react-query'
 import type { JSONContent } from '@tiptap/react'
 import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/solid'
 import { toast } from 'sonner'
@@ -20,6 +20,7 @@ import { postOwnerQueries } from '@/lib/client/queries/post-owner'
 import { mergeSuggestionQueries } from '@/lib/client/queries/signals'
 import { usePermission } from '@/lib/client/hooks/use-permission'
 import { PERMISSIONS } from '@/lib/shared/permissions'
+import { failureMessage } from '@/lib/client/failure-message'
 import { inboxKeys } from '@/lib/client/hooks/use-inbox-query'
 import {
   MetadataSidebar,
@@ -39,17 +40,14 @@ import { AiSummaryCard } from '@/components/admin/feedback/ai-summary-card'
 import { SimilarPostsCard } from '@/components/admin/feedback/similar-posts-card'
 import { PostActivityTimeline } from '@/components/admin/feedback/detail/post-activity-timeline'
 import { useNavigationContext } from '@/components/admin/feedback/detail/use-navigation-context'
+import { useMetadataHandlers } from '@/components/admin/feedback/detail/use-metadata-handlers'
 import {
   useUpdatePost,
-  useChangePostStatusId,
-  useUpdatePostTags,
   usePinComment,
   useUnpinComment,
   useToggleCommentsLock,
   useDeletePost,
   useRestorePost,
-  useChangePostBoard,
-  useUpdatePostOwner,
 } from '@/lib/client/mutations'
 import {
   DeletePostDialog,
@@ -57,16 +55,8 @@ import {
 } from '@/components/public/post-detail/delete-post-dialog'
 import { usePostExternalLinks } from '@/lib/client/hooks/use-post-external-links-query'
 import { usePostDetailKeyboard } from '@/lib/client/hooks/use-post-detail-keyboard'
-import { setPostEtaFn } from '@/lib/server/functions/posts'
 import { useRouterState } from '@tanstack/react-router'
-import {
-  type PostId,
-  type PostStatusId,
-  type PostTagId,
-  type PostCommentId,
-  type BoardId,
-  type PrincipalId,
-} from '@quackback/ids'
+import { type PostId, type PostCommentId } from '@quackback/ids'
 import { useDeleteComment, useRestoreComment } from '@/lib/client/mutations/portal-comments'
 import { useLoadMoreAdminComments } from '@/lib/client/mutations/load-more-comments'
 import { InlineModerationActions } from '@/components/shared/inline-moderation-actions'
@@ -95,8 +85,6 @@ function PostModalContent({
   onNavigateToPost,
   onClose,
 }: PostModalContentProps) {
-  const queryClient = useQueryClient()
-
   // Queries
   const postQuery = useSuspenseQuery(adminQueries.postDetail(postId))
   const { data: tags = [] } = useQuery(adminQueries.tags())
@@ -136,7 +124,6 @@ function PostModalContent({
   const [hasInitialized, setHasInitialized] = useState(false)
 
   // UI state
-  const [isUpdating, setIsUpdating] = useState(false)
   const [showMergeDialog, setShowMergeDialog] = useState(false)
   const [showMergeOthersDialog, setShowMergeOthersDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -151,8 +138,6 @@ function PostModalContent({
 
   // Mutations
   const updatePost = useUpdatePost()
-  const updateStatus = useChangePostStatusId()
-  const updateTags = useUpdatePostTags()
   const pinComment = usePinComment({ postId: post.id as PostId })
   const unpinComment = useUnpinComment({ postId: post.id as PostId })
   const deleteCommentMutation = useDeleteComment({
@@ -166,8 +151,14 @@ function PostModalContent({
   const toggleCommentsLock = useToggleCommentsLock()
   const deletePost = useDeletePost()
   const restorePostMutation = useRestorePost()
-  const changePostBoard = useChangePostBoard()
-  const updateOwner = useUpdatePostOwner()
+  const {
+    isUpdating,
+    handleStatusChange,
+    handleTagsChange,
+    handleBoardChange,
+    handleOwnerChange,
+    handleEtaChange,
+  } = useMetadataHandlers({ postId: post.id as PostId, allTags: tags })
 
   // External links for cascade delete
   const externalLinksQuery = usePostExternalLinks(post.id as PostId, showDeleteDialog)
@@ -206,60 +197,6 @@ function PostModalContent({
   })
 
   // Handlers
-  const handleStatusChange = async (statusId: PostStatusId) => {
-    setIsUpdating(true)
-    try {
-      await updateStatus.mutateAsync({ postId: post.id as PostId, statusId })
-    } finally {
-      setIsUpdating(false)
-    }
-  }
-
-  const handleTagsChange = async (tagIds: PostTagId[]) => {
-    setIsUpdating(true)
-    try {
-      await updateTags.mutateAsync({ postId: post.id as PostId, tagIds, allTags: tags })
-    } finally {
-      setIsUpdating(false)
-    }
-  }
-
-  const handleBoardChange = async (boardId: BoardId) => {
-    setIsUpdating(true)
-    try {
-      await changePostBoard.mutateAsync({ postId: post.id as PostId, boardId })
-      toast.success('Board updated')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update board')
-    } finally {
-      setIsUpdating(false)
-    }
-  }
-
-  const handleOwnerChange = async (ownerId: PrincipalId | null) => {
-    try {
-      // The mutation applies the change optimistically and invalidates the
-      // inbox detail/list caches, matching the other sidebar callbacks here.
-      await updateOwner.mutateAsync({ postId: post.id as PostId, ownerId })
-      toast.success(ownerId ? 'Owner assigned' : 'Owner unassigned')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update owner')
-    }
-  }
-
-  const handleEtaChange = async (eta: string | null) => {
-    setIsUpdating(true)
-    try {
-      await setPostEtaFn({ data: { id: post.id, eta } })
-      queryClient.invalidateQueries({ queryKey: inboxKeys.detail(post.id as PostId) })
-      toast.success(eta ? 'ETA updated' : 'ETA cleared')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update ETA')
-    } finally {
-      setIsUpdating(false)
-    }
-  }
-
   const handleContentChange = useCallback((_json: JSONContent, _html: string, markdown: string) => {
     setContentJson(_json)
     setContentMarkdown(markdown)
@@ -281,7 +218,7 @@ function PostModalContent({
       toast.success('Post updated')
       onClose()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update post')
+      toast.error(failureMessage(err, 'Failed to update post'))
     }
   }
 
@@ -312,7 +249,7 @@ function PostModalContent({
         toast.success('Post restored')
         onClose()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Failed to restore post')
+        toast.error(failureMessage(err, 'Failed to restore post'))
       }
     },
     isDeleted: !!post.deletedAt,
@@ -603,7 +540,7 @@ function PostModalContent({
             setShowDeleteDialog(false)
             onClose()
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to delete post')
+            toast.error(failureMessage(err, 'Failed to delete post'))
           }
         }}
       />
