@@ -60,16 +60,16 @@ function completeRuleOf(row: StoredMappingWithConfig): BoardRoutingRule | null {
   const projectId = projectIdOf(row)
   if (projectId === null) return null
 
-  const statusIds = row.filters?.statusIds
-  if (!statusIds?.length) return null
+  const filters = row.filters
+  if (!filters?.statusIds?.length) return null
 
   // One row, one board: that is what makes the row's key meaningful, and it is
   // what `mapping_unique` turns into "a board points at at most one project".
-  const boardIds = row.filters?.boardIds
+  const boardIds = filters.boardIds
   if (boardIds?.length !== 1) return null
   if (boardIds[0] !== row.targetKey) return null
 
-  return { boardId: row.targetKey, projectId, triggerStatusIds: statusIds }
+  return { boardId: row.targetKey, projectId, triggerStatusIds: filters.statusIds }
 }
 
 /**
