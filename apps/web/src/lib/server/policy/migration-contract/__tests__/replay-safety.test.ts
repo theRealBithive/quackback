@@ -284,6 +284,12 @@ describe('the real corpus', () => {
     // unguarded write collapses the window to nothing — measured: without the
     // block the healable suffix went from five migrations to zero and took the
     // six heal assertions with it.
+    //
+    // Its claim is about rows, which is the one thing this file cannot check and
+    // the catalogue digest in `lineage-double-apply.db.test.ts` deliberately does
+    // not measure. So it is checked there instead, in `the guarded backfill,
+    // both directions`, against a real replay: a link that already carries a
+    // scope keeps it even after the integration's config has moved on.
     const vouching = files.filter(
       (f) => assessReplaySafety(f, readFileSync(join(MIGRATIONS_DIR, f), 'utf8')).vouched.length > 0
     )

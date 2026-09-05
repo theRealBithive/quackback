@@ -354,3 +354,120 @@ describe('the guarded rename, both directions', () => {
     }
   }, 120_000)
 })
+
+describe('the guarded backfill, both directions', () => {
+  const TAG = '0274_external_link_scope'
+
+  /**
+   * `0274` is `safe` only because a `-- @replay: guarded-by` annotation claims
+   * its `DO` block writes nothing once `external_scope` is filled. The
+   * catalogue digest above cannot check that claim and deliberately does not
+   * try: a backfill moves rows, and rows are the one thing that instrument
+   * refuses to measure. So this is where the claim meets Postgres.
+   *
+   * Both directions, for the reason the rename block gives: asserting only
+   * that a stored scope survives a replay would pass just as well against a
+   * migration whose UPDATEs never fired at all.
+   */
+  it('fills a link that carries no scope, and never rewrites one that does', async () => {
+    const db = await scratch()
+    const id = {
+      board: randomUUID(),
+      principal: randomUUID(),
+      integration: randomUUID(),
+      post: randomUUID(),
+      postLink: randomUUID(),
+      sidebarLink: randomUUID(),
+      ticket: randomUUID(),
+      ticketLink: randomUUID(),
+    }
+
+    async function scopes(): Promise<Record<string, string | null>> {
+      const rows = await withSql(db, (sql) =>
+        sql.unsafe<{ id: string; external_scope: string | null }[]>(
+          `SELECT id::text AS id, external_scope FROM post_external_links WHERE id IN ($1, $2)
+           UNION ALL
+           SELECT id::text AS id, external_scope FROM ticket_external_links WHERE id = $3`,
+          [id.postLink, id.sidebarLink, id.ticketLink]
+        )
+      )
+      return Object.fromEntries(rows.map((r) => [r.id, r.external_scope]))
+    }
+
+    await withSql(db, async (sql) => {
+      await sql.unsafe(`INSERT INTO boards (id, slug, name) VALUES ($1, $2, $3)`, [
+        id.board,
+        `replay-${SUFFIX}`,
+        'Replay',
+      ])
+      await sql.unsafe(`INSERT INTO principal (id, created_at) VALUES ($1, now())`, [id.principal])
+      // The config is written as a literal rather than a parameter on purpose.
+      // A JS string bound to a `jsonb` placeholder is JSON-encoded *again* by
+      // the driver and lands as the jsonb scalar `"{\"channelId\":\"101\"}"`,
+      // on which `->> 'channelId'` is null — so the backfill would match no row
+      // and this test would be measuring the wrong thing. Cost one run.
+      await sql.unsafe(
+        `INSERT INTO integrations (id, integration_type, status, config)
+         VALUES ($1, 'gitlab', 'active', '{"channelId":"101"}'::jsonb)`,
+        [id.integration]
+      )
+      await sql.unsafe(
+        `INSERT INTO posts (id, board_id, principal_id, title, content)
+         VALUES ($1, $2, $3, 'replay', 'replay')`,
+        [id.post, id.board, id.principal]
+      )
+      await sql.unsafe(
+        `INSERT INTO post_external_links (id, post_id, integration_id, integration_type, external_id)
+         VALUES ($1, $2, $3, 'gitlab', '42')`,
+        [id.postLink, id.post, id.integration]
+      )
+      // No integration row behind it — the shape a sidebar or reference link
+      // has. The backfill joins through `integration_id`, so this one is out of
+      // its reach by construction, and saying so here is what keeps a later
+      // widening of the join from passing unnoticed.
+      await sql.unsafe(
+        `INSERT INTO post_external_links (id, post_id, integration_type, external_id)
+         VALUES ($1, $2, 'gitlab', '43')`,
+        [id.sidebarLink, id.post]
+      )
+      await sql.unsafe(
+        `INSERT INTO tickets (id, title, status_id)
+         SELECT $1, 'replay', id FROM ticket_statuses ORDER BY id LIMIT 1`,
+        [id.ticket]
+      )
+      await sql.unsafe(
+        `INSERT INTO ticket_external_links (id, ticket_id, integration_id, integration_type, external_id)
+         VALUES ($1, $2, $3, 'gitlab', '42')`,
+        [id.ticketLink, id.ticket, id.integration]
+      )
+    })
+
+    // The instrument sees an unfilled scope at all. Without this the two
+    // comparisons below could both hold over rows that were never seeded.
+    expect(await scopes()).toEqual({
+      [id.postLink]: null,
+      [id.sidebarLink]: null,
+      [id.ticketLink]: null,
+    })
+
+    const filled = {
+      [id.postLink]: '101',
+      [id.sidebarLink]: null,
+      [id.ticketLink]: '101',
+    }
+    await withSql(db, (sql) => applyAgain(sql, TAG))
+    expect(await scopes()).toEqual(filled)
+
+    // The claim itself: the config moves on, a replay runs, and the scope the
+    // links already carry does not follow it. A bare UPDATE would rewrite both
+    // to 999 here — which is the fleet heal writing a project id no issue of
+    // theirs has ever lived in.
+    await withSql(db, (sql) =>
+      sql.unsafe(`UPDATE integrations SET config = '{"channelId":"999"}'::jsonb WHERE id = $1`, [
+        id.integration,
+      ])
+    )
+    await withSql(db, (sql) => applyAgain(sql, TAG))
+    expect(await scopes()).toEqual(filled)
+  }, 120_000)
+})
