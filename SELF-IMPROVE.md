@@ -5,6 +5,29 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
+## 1x — A mutation survivor is reported by line, and a line can hold several mutants
+
+The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that
+holds more than one mutable sub-expression that does not say which one, and the two
+readings lead to opposite conclusions. Both of these cost a mutate-run-restore cycle in
+one session:
+
+- `issue-move.ts:54` reads as a type assertion (`{ instanceUrl?: string }`, erased at
+  runtime and therefore genuinely equivalent). It was the argument to
+  `db.query.integrations.findFirst({ where: ... })` — a real gap, where dropping the
+  `where` returns _an_ integration instead of _the_ one.
+- `issue-move.resolver.ts:47` reads as the ternary on the next line. It was the arrow
+  body inside `.find((r) => r.boardId === boardId)` on line 47 itself.
+
+The column is in the detail section further up the report, but the summary is what you act
+on, and reading the source line at that number is the natural next move — which is exactly
+what misleads. **Print the trimmed source line beside each survivor**, the way an
+`equivalents` record already addresses its line by text. It costs one `readFileSync` in
+`mutation-policy.ts` and removes the ambiguity at the point of use.
+
+Until then: never mutate from the summary alone. Take the `file:line:col` out of the
+detail block, and confirm the mutant by applying it by hand and watching the suite go red.
+
 ## 1x — The coverage config lives in the root config, so a run from apps/web measures nothing
 
 `vitest.config.ts` at the repo root carries the `coverage` block;
@@ -208,6 +231,31 @@ All four CI shards passed with coverage on 4 vCPU. So the local failures are loa
 out took a second full 3-minute shard run as a control. That is the cost of the
 flakiness: no single run means anything, so every measurement needs a twin.
 
+## 2x — Local `typecheck` reports 815 pre-existing errors
+
+`bun run typecheck` yields 815 `error TS` on a **clean** tree, almost all in
+`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
+your own change added an error can only be established by stashing, counting the errors,
+restoring and counting again.
+
+Stashing is the wrong tool when a long background job is reading the working tree, and it
+answers a coarser question than the one you have. Grepping the error list for the files
+the change touches is exact and costs one run:
+
+```bash
+bun run typecheck 2>&1 | grep -E "error TS" > /tmp/tc.txt
+git diff --name-only <base>...HEAD | sed 's|^apps/web/||' \
+  | while read -r f; do grep -F "$f" /tmp/tc.txt; done
+```
+
+It is also worth running even when nothing looks type-shaped: it is what caught a test
+mocking `getValidAccessToken` as resolving `null`, where the source returns `''` and never
+a null. The mock typechecked as an error and the test asserted a state the source cannot
+produce — no suite and no mutation run would have said so.
+
+Either pull the codegen step into the `typecheck` script or document which command has to
+run first.
+
 ## 1x — Generating a vitest config has two traps, both of which look like a hang
 
 The mutation gate writes the runner's config per run, and both mistakes cost a
@@ -331,16 +379,6 @@ filename without `.sql`).
 Nothing in the repo says so. Either fix the snapshot collision or remove the `db:generate`
 script entry and record the manual procedure in `packages/db/README` — otherwise everyone
 tries it again and loses the same round.
-
-## 1x — Local `typecheck` reports 815 pre-existing errors
-
-`bun run typecheck` yields 815 `error TS` on a **clean** tree, almost all in
-`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
-your own change added an error can only be established by stashing, counting the errors,
-restoring and counting again.
-
-Either pull the codegen step into the `typecheck` script or document which command has to
-run first.
 
 ## 1x — No documented path to a local test database
 
