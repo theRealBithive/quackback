@@ -161,7 +161,7 @@ change under test — the same twin-measurement tax as above, now for a suite th
 touches no database. A suite that close to the timeout is a failure waiting for a
 busy machine; the fix is to find what takes 16s in there, not to raise the limit.
 
-## 2x — Local `typecheck` reports 815 pre-existing errors
+## 3x — Local `typecheck` reports 815 pre-existing errors
 
 `bun run typecheck` yields 815 `error TS` on a **clean** tree, almost all in
 `apps/web/src/routes/**`, because the generated route types are not built locally. Whether
@@ -186,7 +186,15 @@ produce — no suite and no mutation run would have said so.
 Either pull the codegen step into the `typecheck` script or document which command has to
 run first.
 
-## 2x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
+Third occurrence, with a twist that wastes a five-minute run: **the 815 is the
+`apps/web` project**. `bun x tsc --noEmit -p tsconfig.json` from the repository
+root type-checks a different project and reports **36823** errors, which reads
+as though the change broke the build. Both numbers are baselines; only the
+`apps/web` one is the one to compare against. Run it from `apps/web`, and
+remember the Bash tool keeps its working directory between calls, so a `cd`
+three commands ago is why the count changed.
+
+## 3x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
 An entry declares a whole file, and the gate fails on any survivor in it. A change that
 adds three lines to an upstream file therefore has to pin **every** branch that file
@@ -226,6 +234,27 @@ line I touched".
 The shape that would help is unchanged: a per-file `except` list, or scoping an
 entry to a diff range. Until then, declaring a file with pre-existing untested
 neighbours is a decision to be made deliberately, not a formality.
+
+Third occurrence, on the GitLab token renewal — and this one found a way around
+it worth repeating. Declaring the two files the change touched produced **48**
+survivors, 41 of them in halves the change never opened: `oauth.ts` carries an
+authorization-URL builder and a code exchange, and `token-refresh.ts` carries a
+`db.query.integrations.findFirst({ where })` whose unfiltered mutant is the same
+undeterminable case as `post.board.ts` above.
+
+So the new function moved into its own module, `gitlab/server/token-renewal.ts`,
+which the new suite pins on its own: 22 mutants, 22 killed, and the two
+pre-existing files reported by name as ungraded. **Putting new logic in a new
+file is currently the only way to have it mutation-graded without adopting its
+neighbours**, and it is worth doing deliberately for that reason alone — not
+only when the module boundary is independently justified. Jira's
+`server/token.ts` is the same shape, probably for the same reason.
+
+The seven survivors that remained were all real: nothing asserted the request
+was a POST, nothing passed `credentials: undefined` — which is what the
+framework actually passes when no platform credentials are stored
+(`credentials ?? undefined`), so the optional chaining that mutant removed is
+load-bearing rather than defensive.
 
 ## 2x — Two lists that must agree conflict on every merge in a stack
 

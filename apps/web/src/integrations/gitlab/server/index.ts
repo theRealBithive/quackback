@@ -3,6 +3,7 @@ import { closeGitLabIssue } from '@/integrations/gitlab/server/archive'
 import { fetchGitLabStatuses } from '@/integrations/gitlab/server/statuses'
 import { gitlabHook } from '@/integrations/gitlab/server/hook'
 import { getGitLabOAuthUrl, exchangeGitLabCode } from '@/integrations/gitlab/server/oauth'
+import { refreshGitLabToken } from '@/integrations/gitlab/server/token-renewal'
 import { gitlabCatalog } from '@/integrations/gitlab/server/catalog'
 import { gitlabInboundHandler } from '@/integrations/gitlab/server/inbound'
 import { listGitLabProjects } from '@/integrations/gitlab/server/projects'
@@ -17,6 +18,7 @@ export const gitlabIntegration: IntegrationDefinition = {
     buildAuthUrl: getGitLabOAuthUrl,
     exchangeCode: exchangeGitLabCode,
   },
+  refreshToken: refreshGitLabToken,
   destinations: {
     project: {
       label: 'Project',
