@@ -20,6 +20,11 @@
  * B9 A mutant the selected suites never executed is not graded, and fails the
  *    gate exactly like a survivor. A file is scored over all its mutants, never
  *    over the covered ones alone.
+ * B10 Two runs of the same commit reach the same verdict. Every setting of the
+ *    run is stated by the gate rather than inherited, the runner is never asked
+ *    to change the working copy, and it is never asked for work this repository
+ *    does not need — a verdict that depends on the machine it ran on is not a
+ *    measurement.
  *
  * The confirmed list is above in full. B1, B2, B3 and B8 are the coverage half
  * and live in `diff-coverage-policy.test.ts`; they stay written down here so
@@ -34,6 +39,15 @@
  * would pass that module: an unexecuted mutant is not a `Survived` in Stryker's
  * vocabulary. So the failing set here is `Survived` *and* `NoCoverage`, and the
  * score is always over every mutant.
+ *
+ * B10 was added after the gate contradicted itself: the same tree passed on one
+ * CI runner and failed on the next with `ts.parseConfigFileTextToJson is not a
+ * function`, thrown while Stryker rewrote a tsconfig it did not need to rewrite.
+ * The two runners differed in a Node patch version, and that rewrite reads the
+ * TypeScript compiler through CommonJS interop. Nothing about the code under
+ * test had changed, so whatever the second run measured, it was not this
+ * repository. A gate whose verdict can turn on the machine underneath is worth
+ * less than no gate, because it is believed.
  *
  * Two things this module deliberately does not do. It does not fail on a
  * `CompileError`: that is Stryker failing to build an invalid mutant, not a gap
@@ -742,7 +756,7 @@ describe('the report a run prints (B5, B9)', () => {
   })
 })
 
-describe('the Stryker run the gate asks for (B7)', () => {
+describe('the Stryker run the gate asks for (B10)', () => {
   function generated() {
     return strykerConfigFor({
       mutate: ['scripts/mutation-policy.ts'],
@@ -752,7 +766,7 @@ describe('the Stryker run the gate asks for (B7)', () => {
     })
   }
 
-  it('describes the whole run, so no setting is decided somewhere else', () => {
+  it('states every setting, so none is decided somewhere else (B10)', () => {
     expect(generated()).toEqual({
       packageManager: 'npm',
       testRunner: 'vitest',
@@ -772,7 +786,7 @@ describe('the Stryker run the gate asks for (B7)', () => {
     })
   })
 
-  it('names a tsconfig that does not exist, so the sandbox never rewrites one', () => {
+  it('asks for no tsconfig rewrite, which this repository does not need (B10)', () => {
     // Stryker rewrites the tsconfig it is pointed at, and that code path
     // imports the TypeScript compiler in a way whose result depends on the
     // Node build it runs under — it failed one CI run and passed the one
@@ -784,7 +798,7 @@ describe('the Stryker run the gate asks for (B7)', () => {
     expect(existsSync(path.join(repoRoot, named))).toBe(false)
   })
 
-  it('never mutates the checkout in place, whatever else changes', () => {
+  it('never asks the runner to change the working copy (B10)', () => {
     // `inPlace` would make Stryker edit the working tree instead of a
     // sandbox copy, and a crashed run would leave mutants in it. It is also
     // the other way to skip the tsconfig rewrite, and the wrong one.
