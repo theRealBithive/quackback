@@ -410,6 +410,10 @@ export const fetchBoardRoutingRulesFn = createServerFn({ method: 'GET' })
           eq(integrationEventMappings.eventType, ROUTING_EVENT_TYPE)
         )
       )
+      // Without this the row order is whatever the plan happens to produce,
+      // and it does change: the same three rules came back in two different
+      // orders on the same commit, once the machine was busy enough.
+      .orderBy(integrationEventMappings.targetKey)
 
     return rulesFromMappings(stored)
   })
