@@ -177,10 +177,19 @@ describe('github close', () => {
 // ---------------------------------------------------------------------------
 
 describe('gitlab close', () => {
+  /**
+   * The address form GitLab 18.10 and newer emit. These fixtures said
+   * `/-/issues/7` until the supported floor was pinned at 18.10, which is the
+   * release that moved issues to `/-/work_items/` and made every instance we
+   * serve emit this shape. The older spelling is no longer read at all — the
+   * reasoning is V19 and V22 in `gitlab/server/__tests__/url.test.ts`, and the
+   * test below holds the refusal here, where it is a close that fails rather
+   * than a parse that returns null.
+   */
   const glCtx = (overrides: Partial<ArchiveContext> = {}) =>
     baseCtx({
       externalId: '7',
-      externalUrl: 'https://gitlab.com/my-org/my-project/-/issues/7',
+      externalUrl: 'https://gitlab.com/my-org/my-project/-/work_items/7',
       ...overrides,
     })
 
@@ -204,6 +213,18 @@ describe('gitlab close', () => {
     expect(result.error).toContain('Cannot determine project')
   })
 
+  it('refuses a link stored in the pre-18.10 address form, rather than guessing', async () => {
+    // The visible cost of the 18.10 floor, asserted where it is felt: a link
+    // written before the instance was upgraded still carries `/-/issues/`, and
+    // closing it now fails by name instead of writing to a guessed project.
+    const result = await archiveExternalIssue(
+      'gitlab',
+      glCtx({ externalUrl: 'https://gitlab.com/my-org/my-project/-/issues/7' })
+    )
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('Cannot determine project')
+  })
+
   it('closes the issue on a custom HTTPS instance', async () => {
     const fetchMock = mockFetch(200)
     vi.stubGlobal('fetch', fetchMock)
@@ -211,7 +232,7 @@ describe('gitlab close', () => {
     await archiveExternalIssue(
       'gitlab',
       glCtx({
-        externalUrl: 'https://gitlab.example.com/my-org/my-project/-/issues/7',
+        externalUrl: 'https://gitlab.example.com/my-org/my-project/-/work_items/7',
         integrationConfig: { instanceUrl: 'https://gitlab.example.com' },
       })
     )
