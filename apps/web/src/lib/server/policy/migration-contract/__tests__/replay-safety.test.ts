@@ -276,6 +276,14 @@ describe('the real corpus', () => {
     // 0269 wraps two WHERE-null-or-empty UPDATEs in a DO block so a stored blob
     // makes the second run write zero rows. A bare UPDATE at the tip would
     // collapse that same window.
+    //
+    // 0274 is 0269's shape for the same reason: it backfills `external_scope`
+    // on the two link tables from the integration config, and both writes are
+    // `WHERE external_scope IS NULL`, so a link that already carries one is
+    // left alone on a replay. It sits at the tip, which is exactly where an
+    // unguarded write collapses the window to nothing — measured: without the
+    // block the healable suffix went from five migrations to zero and took the
+    // six heal assertions with it.
     const vouching = files.filter(
       (f) => assessReplaySafety(f, readFileSync(join(MIGRATIONS_DIR, f), 'utf8')).vouched.length > 0
     )
@@ -286,6 +294,7 @@ describe('the real corpus', () => {
       '0260_channel_threads_conversation_fk.sql',
       '0261_connectors.sql',
       '0269_messenger_ai_default_on.sql',
+      '0274_external_link_scope.sql',
     ])
   })
 
