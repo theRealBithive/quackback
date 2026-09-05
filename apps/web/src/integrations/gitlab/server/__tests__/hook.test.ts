@@ -4,6 +4,21 @@ import { gitlabHook } from '@/integrations/gitlab/server/hook'
 
 // GitLab requests go through the SSRF guard; route them to the stubbed global
 // fetch so the assertions below see the same calls.
+// The hook reads the post and its existing links before creating an issue.
+// Neither is what this file is about, and both are covered against a real
+// database in post-source.db.test.ts.
+vi.mock('@/integrations/gitlab/server/post-source', () => ({
+  loadIssueSource: async () => ({
+    postId: 'post_1',
+    title: 'Bug report',
+    content: '<p>Something broke</p>',
+    boardSlug: 'bugs',
+    authorName: 'Alex',
+    authorEmail: 'alex@example.com',
+  }),
+  hasActiveGitLabLink: async () => false,
+}))
+
 vi.mock('@/lib/server/content/ssrf-guard', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/content/ssrf-guard')>()),
   safeFetch: (url: string, init?: RequestInit) => globalThis.fetch(url, init),
@@ -45,27 +60,32 @@ const target = { channelId: '42' }
  *
  * Comment sync imports GitLab notes as post comments, and creating a comment
  * emits `comment.created`, which fans out to this hook like any other event.
- * Today the hook writes only for `post.created`, so the loop cannot close —
- * this pins that, so adding an outbound comment push has to confront the echo
- * deliberately rather than shipping an infinite ping-pong.
+ * The hook does not write for those, so the loop cannot close — this pins it,
+ * so adding an outbound comment push has to confront the echo deliberately
+ * rather than shipping an infinite ping-pong.
+ *
+ * `post.status_changed` used to be in this list and is not any more. It was
+ * never part of V10: it was here because the hook happened to write only for
+ * `post.created`, and per-board routing makes a status change the trigger on
+ * purpose. The echo it could cause is real and is closed somewhere better —
+ * an inbound status sync writes a status onto a post that by definition
+ * already has a GitLab link, and the duplicate guard refuses to create a
+ * second issue for it. That is asserted in hook-triage-trigger.test.ts.
  */
-describe('gitlabHook.run leaves everything but post.created alone (V10)', () => {
-  it.each(['comment.created', 'post.status_changed', 'post.updated'])(
-    'writes nothing to GitLab for %s',
-    async (type) => {
-      const fetchMock = mockFetch(201, { iid: 1, web_url: 'https://gitlab.example.com/i/1' })
-      vi.stubGlobal('fetch', fetchMock)
+describe('gitlabHook.run leaves comment and update events alone (V10)', () => {
+  it.each(['comment.created', 'post.updated'])('writes nothing to GitLab for %s', async (type) => {
+    const fetchMock = mockFetch(201, { iid: 1, web_url: 'https://gitlab.example.com/i/1' })
+    vi.stubGlobal('fetch', fetchMock)
 
-      const event = { ...makePostCreatedEvent(), type } as unknown as EventData
-      const result = await gitlabHook.run(event, target, {
-        accessToken: 'token',
-        rootUrl: 'https://app.example.com',
-      })
+    const event = { ...makePostCreatedEvent(), type } as unknown as EventData
+    const result = await gitlabHook.run(event, target, {
+      accessToken: 'token',
+      rootUrl: 'https://app.example.com',
+    })
 
-      expect(result.success).toBe(true)
-      expect(fetchMock).not.toHaveBeenCalled()
-    }
-  )
+    expect(result.success).toBe(true)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })
 
 beforeEach(() => {
@@ -131,12 +151,11 @@ describe('gitlabHook', () => {
     )
   })
 
-  it('skips non post.created events', async () => {
-    const result = await gitlabHook.run(
-      { type: 'post.status_changed' } as unknown as EventData,
-      target,
-      { accessToken: 'tok', rootUrl: 'https://app.example.com' }
-    )
+  it('skips an event type it does not create issues for', async () => {
+    const result = await gitlabHook.run({ type: 'post.deleted' } as unknown as EventData, target, {
+      accessToken: 'tok',
+      rootUrl: 'https://app.example.com',
+    })
     expect(result).toEqual({ success: true })
   })
 })
