@@ -20,14 +20,6 @@
     {
       "file": "apps/web/src/integrations/gitlab/server/post-source.ts",
       "suites": ["apps/web/src/integrations/gitlab/server/__tests__/post-source.db.test.ts"]
-    },
-    {
-      "file": "apps/web/src/lib/server/events/resolvers/integration.resolver.ts",
-      "suites": [
-        "apps/web/src/lib/server/events/__tests__/board-issue-routing.test.ts",
-        "apps/web/src/lib/server/events/__tests__/board-issue-routing.db.test.ts",
-        "apps/web/src/lib/server/events/__tests__/integration-resolver.test.ts"
-      ]
     }
   ],
   "equivalents": [
@@ -44,6 +36,27 @@
       "line": "if (best === undefined || best < count) executions.set(line, count)",
       "replacement": "best <= count",
       "why": "The same maximum, taken over the statements starting on one line. `<=` replaces an equal value with an equal value."
+    },
+    {
+      "file": "apps/web/src/integrations/gitlab/server/post-source.ts",
+      "mutator": "ObjectLiteral",
+      "line": "const log = logger.child({ component: 'gitlab-post-source' })",
+      "replacement": "{}",
+      "why": "The component name is metadata on a log line and reaches no branch, no return value and no query. A test could only assert the string back from the logger it just configured, which is the tautology the mutation gate exists to expose rather than to reward."
+    },
+    {
+      "file": "apps/web/src/integrations/gitlab/server/post-source.ts",
+      "mutator": "StringLiteral",
+      "line": "const log = logger.child({ component: 'gitlab-post-source' })",
+      "replacement": "\"\"",
+      "why": "Same line, same reason: the component name is log metadata, not behaviour. The line's operator-facing content that does matter \u2014 the post id in the warning \u2014 is asserted in post-source.db.test.ts."
+    },
+    {
+      "file": "apps/web/src/integrations/gitlab/server/post-source.ts",
+      "mutator": "ObjectLiteral",
+      "line": ".select({ id: postExternalLinks.id })",
+      "replacement": "{}",
+      "why": "The selected row is never read: hasActiveGitLabLink returns whether one came back, not what was in it. Narrowing or widening the projection cannot change that boolean, so no input distinguishes the two."
     }
   ]
 }

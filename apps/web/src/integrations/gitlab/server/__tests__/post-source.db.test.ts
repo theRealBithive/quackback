@@ -20,6 +20,11 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { fromUuid, toUuid } from '@quackback/ids'
 import { testDb, testSql, closeHarness } from '@/lib/server/jobs/__tests__/harness'
 
+const { warn } = vi.hoisted(() => ({ warn: vi.fn() }))
+vi.mock('@/lib/server/logger', () => ({
+  logger: { child: () => ({ warn, debug: vi.fn(), info: vi.fn(), error: vi.fn() }) },
+}))
+
 vi.mock('@/lib/server/db', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/db')>()),
   db: new Proxy(
@@ -101,6 +106,19 @@ describe('loading the post an issue is written from (V4)', () => {
     const gone = fromUuid('post', '00000000-0000-7000-8000-000000000000')
 
     expect(await loadIssueSource(gone)).toBeNull()
+  })
+
+  it('says in the log which post it gave up on', async () => {
+    // The only trace an operator gets. Nothing fails, no issue appears, and
+    // without the post id in the line there is nothing to search for.
+    warn.mockClear()
+    const gone = fromUuid('post', '00000000-0000-7000-8000-000000000000')
+
+    await loadIssueSource(gone)
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toEqual({ post_id: gone })
+    expect(warn.mock.calls[0][1]).toContain('not creating an issue')
   })
 })
 

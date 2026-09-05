@@ -30,6 +30,9 @@ import fc from 'fast-check'
 import {
   targetKeysToRetire,
   rulesFromMappings,
+  boardFilterAllows,
+  statusFilterAllows,
+  isBoardRoutingRule,
   type StoredMappingWithConfig,
 } from '../board-routing-policy'
 
@@ -256,5 +259,135 @@ describe('a row is retired unless it is a complete rule', () => {
     }
 
     expect(targetKeysToRetire([inconsistent])).toEqual(['board-asbs'])
+  })
+})
+
+/**
+ * The two filters the event resolver applies, tested directly.
+ *
+ * They are reached through `buildIntegrationTargets` in
+ * `events/__tests__/board-issue-routing.test.ts`, which is where the routing
+ * guarantees are stated. Here they are pinned on their own, including the
+ * shapes the resolver never produces but jsonb permits.
+ */
+describe('the board filter (V1, V2)', () => {
+  it('lets everything through when the mapping names no boards', () => {
+    expect(boardFilterAllows(null, ['board-a'])).toBe(true)
+    expect(boardFilterAllows({}, ['board-a'])).toBe(true)
+    expect(boardFilterAllows({ boardIds: [] }, ['board-a'])).toBe(true)
+  })
+
+  it('lets an event through when it names one of the filtered boards', () => {
+    expect(boardFilterAllows({ boardIds: ['board-a', 'board-b'] }, ['board-b'])).toBe(true)
+  })
+
+  it('stops an event on a board the mapping does not name', () => {
+    expect(boardFilterAllows({ boardIds: ['board-a'] }, ['board-c'])).toBe(false)
+  })
+
+  it('lets a board-less event reach a chat mapping filtered to a board', () => {
+    // Conversation and ticket events carry no board, and a channel filtered to
+    // a board should keep receiving them.
+    expect(boardFilterAllows({ boardIds: ['board-a'] }, [])).toBe(true)
+  })
+
+  it('stops a board-less event at a routing rule (V1)', () => {
+    // The exception above inverted: "no board" would mean "every project", so
+    // one post would open an issue in every product's tracker.
+    expect(boardFilterAllows({ boardIds: ['board-a'], statusIds: ['status-x'] }, [])).toBe(false)
+  })
+
+  it('stops a routing rule on a board it does not name, board-less or not', () => {
+    const rule = { boardIds: ['board-a'], statusIds: ['status-x'] }
+
+    expect(boardFilterAllows(rule, ['board-c'])).toBe(false)
+    expect(boardFilterAllows(rule, ['board-a'])).toBe(true)
+  })
+})
+
+describe('the status filter (V4, V7)', () => {
+  it('lets everything through when the mapping names no statuses', () => {
+    expect(statusFilterAllows(null, 'status-x')).toBe(true)
+    expect(statusFilterAllows({ boardIds: ['board-a'] }, 'status-x')).toBe(true)
+    expect(statusFilterAllows({ statusIds: [] }, 'status-x')).toBe(true)
+  })
+
+  it('lets a post through in one of the named statuses', () => {
+    expect(statusFilterAllows({ statusIds: ['status-x', 'status-y'] }, 'status-y')).toBe(true)
+  })
+
+  it('stops a post in a status the rule does not name', () => {
+    expect(statusFilterAllows({ statusIds: ['status-x'] }, 'status-z')).toBe(false)
+  })
+
+  it('stops a post whose status is unknown, rather than treating that as any', () => {
+    expect(statusFilterAllows({ statusIds: ['status-x'] }, undefined)).toBe(false)
+    expect(statusFilterAllows({ statusIds: ['status-x'] }, '')).toBe(false)
+  })
+
+  it('does not match an unknown status against a rule that names an empty one', () => {
+    // Nothing writes an empty status id — the input schema rejects it — but
+    // jsonb holds whatever is in it. "Unknown" and "named as empty" meeting and
+    // counting as a match is the one way this filter could let a post through
+    // that no rule actually selected.
+    expect(statusFilterAllows({ statusIds: [''] }, '')).toBe(false)
+    expect(statusFilterAllows({ statusIds: [''] }, undefined)).toBe(false)
+  })
+})
+
+describe('recognising a routing rule', () => {
+  it('is a rule exactly when it names at least one status', () => {
+    expect(isBoardRoutingRule({ statusIds: ['status-x'] })).toBe(true)
+    expect(isBoardRoutingRule({ statusIds: [] })).toBe(false)
+    expect(isBoardRoutingRule({ boardIds: ['board-a'] })).toBe(false)
+    expect(isBoardRoutingRule(null)).toBe(false)
+  })
+})
+
+describe('shapes jsonb permits that the write path never produces', () => {
+  it('is not a rule when it names no board at all', () => {
+    const noBoard: StoredMappingWithConfig = {
+      targetKey: 'board-asbs',
+      actionConfig: { channelId: '222' },
+      filters: { statusIds: ['status-triaged'] },
+    }
+
+    expect(targetKeysToRetire([noBoard])).toEqual(['board-asbs'])
+    expect(rulesFromMappings([noBoard])).toEqual([])
+  })
+
+  it('is not a rule when it names two boards', () => {
+    // One row, one board — that is what makes the row's key meaningful. A row
+    // filtered to two boards has no single board it belongs to.
+    const twoBoards: StoredMappingWithConfig = {
+      targetKey: 'board-asbs',
+      actionConfig: { channelId: '222' },
+      filters: { boardIds: ['board-asbs', 'board-gwg'], statusIds: ['status-triaged'] },
+    }
+
+    expect(targetKeysToRetire([twoBoards])).toEqual(['board-asbs'])
+    expect(rulesFromMappings([twoBoards])).toEqual([])
+  })
+
+  it('is not a rule when its project is an empty string', () => {
+    const blank: StoredMappingWithConfig = {
+      targetKey: 'board-asbs',
+      actionConfig: { channelId: '' },
+      filters: { boardIds: ['board-asbs'], statusIds: ['status-triaged'] },
+    }
+
+    expect(targetKeysToRetire([blank])).toEqual(['board-asbs'])
+    expect(rulesFromMappings([blank])).toEqual([])
+  })
+
+  it('is not a rule when it has no action config at all', () => {
+    const noConfig: StoredMappingWithConfig = {
+      targetKey: 'board-asbs',
+      actionConfig: null,
+      filters: { boardIds: ['board-asbs'], statusIds: ['status-triaged'] },
+    }
+
+    expect(targetKeysToRetire([noConfig])).toEqual(['board-asbs'])
+    expect(rulesFromMappings([noConfig])).toEqual([])
   })
 })
