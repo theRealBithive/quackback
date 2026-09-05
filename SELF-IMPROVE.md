@@ -5,128 +5,6 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 1x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
-
-An entry declares a whole file, and the gate fails on any survivor in it. A change that
-adds three lines to an upstream file therefore has to pin **every** branch that file
-already had, including ones its own diff never touched.
-
-Measured on `post.board.ts`: declaring it produced nine survivors. Six were real and are
-now killed — one of them, `db.query.posts.findFirst({ where: ... })` losing its `where`,
-is the same class of bug as an integration lookup returning _an_ integration instead of
-_the_ one. Two more sit on branches a foreign key and an open transaction make
-unreachable, so no input reaches them. The last is `db.query.boards.findFirst({ where: ...
-})` for the board the post came _from_: dropping the `where` returns a different board and
-really does change the payload, but which row an unordered query hands back is not
-something a test may rely on, and the board is fetched for its `name`, so the lookup
-cannot be removed either. It is upstream code the change did not touch.
-
-That one mutant blocks the entry for the whole file, because declaring it would assert
-"these suites hold this file" — and they do not. So the file goes back to being reported
-by name as ungraded, and six verified kills sit in the suite without the gate knowing.
-
-**A per-file `except` list, addressed by line text the way `equivalents` already is, would
-let a change declare the part it owns** and leave the untouched remainder named in the
-report. Without it the incentive runs the wrong way: the cheapest way to keep a gate green
-is to not declare the file, which is the outcome the manifest exists to prevent.
-
-The tests stay either way — writing them turned up two existing tests that never entered
-the branch they named (see the entry below on hand-typed TypeIDs).
-
-## 1x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
-
-`changeBoard('post_01jqzz000000000000000000', ...)` does not reach the not-found branch: the
-suffix is 24 characters, the TypeID parser wants 26, and it throws `Invalid length` long
-before the lookup. Two tests named `raises nothing when the post does not exist` and
-`raises nothing when the target board does not exist` were asserting a bare
-`.rejects.toThrow()`, so both passed on the parser's complaint and neither had ever
-executed the code they were named for.
-
-Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and absent,
-and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
-that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
-read as untested until proven otherwise.
-
-## 1x — A mutation survivor is reported by line, and a line can hold several mutants
-
-The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that
-holds more than one mutable sub-expression that does not say which one, and the two
-readings lead to opposite conclusions. Both of these cost a mutate-run-restore cycle in
-one session:
-
-- `issue-move.ts:54` reads as a type assertion (`{ instanceUrl?: string }`, erased at
-  runtime and therefore genuinely equivalent). It was the argument to
-  `db.query.integrations.findFirst({ where: ... })` — a real gap, where dropping the
-  `where` returns _an_ integration instead of _the_ one.
-- `issue-move.resolver.ts:47` reads as the ternary on the next line. It was the arrow
-  body inside `.find((r) => r.boardId === boardId)` on line 47 itself.
-
-The column is in the detail section further up the report, but the summary is what you act
-on, and reading the source line at that number is the natural next move — which is exactly
-what misleads. **Print the trimmed source line beside each survivor**, the way an
-`equivalents` record already addresses its line by text. It costs one `readFileSync` in
-`mutation-policy.ts` and removes the ambiguity at the point of use.
-
-Until then: never mutate from the summary alone. Take the `file:line:col` out of the
-detail block, and confirm the mutant by applying it by hand and watching the suite go red.
-
-## 1x — The coverage config lives in the root config, so a run from apps/web measures nothing
-
-`vitest.config.ts` at the repo root carries the `coverage` block;
-`apps/web/vitest.config.ts` does not. Run the documented coverage command from
-`apps/web` — the natural place, since that is where the suites are — and vitest
-writes **no report at all**, with no error.
-
-`scripts/diff-coverage-check.ts` then reads every `coverage-final.json` under
-`coverage/`, finds the one a _previous_ run left there, and grades the diff
-against it. The output is entirely plausible: a file count, a line count, and a
-list of "added lines that no test executed" — which are simply every line
-added since that stale report was written. Two cycles went into chasing those
-as real holes.
-
-Two things would have caught it: the report's own age, and the fact that new
-source files appeared under "out of scope, although they look like source" —
-a file the run had definitely executed cannot be out of scope. The second one
-is the tell worth remembering.
-
-The invocation that works, from the repo **root**, with `apps/web/` on the
-paths:
-
-```bash
-rm -rf coverage/local   # a stale report is graded silently
-bun x vitest run --coverage.enabled --coverage.reporter=json \
-  --coverage.reportsDirectory=coverage/local apps/web/src/<the suites>
-```
-
-Worth fixing in the gate rather than in memory: refuse a report older than the
-newest file it is being asked to grade.
-
-## 1x — There are two DB test fixtures, and the wrong one is the one that gets copied
-
-Three new database suites here were written against
-`lib/server/jobs/__tests__/harness.ts`, because the nearest existing example in
-the same directory (`events/__tests__/process-integration.test.ts`) uses it.
-That harness is for **lease** suites only: a lease exists so work can outlive
-the transaction that claimed it, so those suites commit for real, open four
-connections each, and clean up with `DELETE ... WHERE` on a database every
-worktree on the machine shares.
-
-The right tool for everything else is `lib/server/__tests__/db-test-fixture.ts`
-— one connection, a transaction rolled back after every test, and a `probe` that
-skips the suite on a stale schema instead of failing it mid-test. There is a
-README beside it that says exactly this. It was not found, because the search
-started from a neighbouring test file rather than from the directory that owns
-the fixture.
-
-Cost: three suites written twice, plus a stretch of chasing 10-second hook
-timeouts in unrelated portal suites on the suspicion that the extra connections
-had caused them. (They had not — `apps/web/src/lib/server/functions` produces
-between one and three of those on `origin/main` too, measured over two runs.)
-
-What would have prevented it: the harness's own header says it is for lease
-suites, but nothing says where to go instead. One line in it pointing at
-`db-test-fixture.ts` and its README would have been enough.
-
 ## 4x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
 Measured while checking whether the hand-rolled mutation script can be replaced.
@@ -297,6 +175,157 @@ produce — no suite and no mutation run would have said so.
 
 Either pull the codegen step into the `typecheck` script or document which command has to
 run first.
+
+## 1x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
+
+An entry declares a whole file, and the gate fails on any survivor in it. A change that
+adds three lines to an upstream file therefore has to pin **every** branch that file
+already had, including ones its own diff never touched.
+
+Measured on `post.board.ts`: declaring it produced nine survivors. Six were real and are
+now killed — one of them, `db.query.posts.findFirst({ where: ... })` losing its `where`,
+is the same class of bug as an integration lookup returning _an_ integration instead of
+_the_ one. Two more sit on branches a foreign key and an open transaction make
+unreachable, so no input reaches them. The last is `db.query.boards.findFirst({ where: ...
+})` for the board the post came _from_: dropping the `where` returns a different board and
+really does change the payload, but which row an unordered query hands back is not
+something a test may rely on, and the board is fetched for its `name`, so the lookup
+cannot be removed either. It is upstream code the change did not touch.
+
+That one mutant blocks the entry for the whole file, because declaring it would assert
+"these suites hold this file" — and they do not. So the file goes back to being reported
+by name as ungraded, and six verified kills sit in the suite without the gate knowing.
+
+**A per-file `except` list, addressed by line text the way `equivalents` already is, would
+let a change declare the part it owns** and leave the untouched remainder named in the
+report. Without it the incentive runs the wrong way: the cheapest way to keep a gate green
+is to not declare the file, which is the outcome the manifest exists to prevent.
+
+The tests stay either way — writing them turned up two existing tests that never entered
+the branch they named (see the entry below on hand-typed TypeIDs).
+
+## 1x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
+
+`changeBoard('post_01jqzz000000000000000000', ...)` does not reach the not-found branch: the
+suffix is 24 characters, the TypeID parser wants 26, and it throws `Invalid length` long
+before the lookup. Two tests named `raises nothing when the post does not exist` and
+`raises nothing when the target board does not exist` were asserting a bare
+`.rejects.toThrow()`, so both passed on the parser's complaint and neither had ever
+executed the code they were named for.
+
+Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and absent,
+and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
+that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
+read as untested until proven otherwise.
+
+## 1x — A mutation survivor is reported by line, and a line can hold several mutants
+
+The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that
+holds more than one mutable sub-expression that does not say which one, and the two
+readings lead to opposite conclusions. Both of these cost a mutate-run-restore cycle in
+one session:
+
+- `issue-move.ts:54` reads as a type assertion (`{ instanceUrl?: string }`, erased at
+  runtime and therefore genuinely equivalent). It was the argument to
+  `db.query.integrations.findFirst({ where: ... })` — a real gap, where dropping the
+  `where` returns _an_ integration instead of _the_ one.
+- `issue-move.resolver.ts:47` reads as the ternary on the next line. It was the arrow
+  body inside `.find((r) => r.boardId === boardId)` on line 47 itself.
+
+The column is in the detail section further up the report, but the summary is what you act
+on, and reading the source line at that number is the natural next move — which is exactly
+what misleads. **Print the trimmed source line beside each survivor**, the way an
+`equivalents` record already addresses its line by text. It costs one `readFileSync` in
+`mutation-policy.ts` and removes the ambiguity at the point of use.
+
+Until then: never mutate from the summary alone. Take the `file:line:col` out of the
+detail block, and confirm the mutant by applying it by hand and watching the suite go red.
+
+## 1x — The coverage config lives in the root config, so a run from apps/web measures nothing
+
+`vitest.config.ts` at the repo root carries the `coverage` block;
+`apps/web/vitest.config.ts` does not. Run the documented coverage command from
+`apps/web` — the natural place, since that is where the suites are — and vitest
+writes **no report at all**, with no error.
+
+`scripts/diff-coverage-check.ts` then reads every `coverage-final.json` under
+`coverage/`, finds the one a _previous_ run left there, and grades the diff
+against it. The output is entirely plausible: a file count, a line count, and a
+list of "added lines that no test executed" — which are simply every line
+added since that stale report was written. Two cycles went into chasing those
+as real holes.
+
+Two things would have caught it: the report's own age, and the fact that new
+source files appeared under "out of scope, although they look like source" —
+a file the run had definitely executed cannot be out of scope. The second one
+is the tell worth remembering.
+
+The invocation that works, from the repo **root**, with `apps/web/` on the
+paths:
+
+```bash
+rm -rf coverage/local   # a stale report is graded silently
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportsDirectory=coverage/local apps/web/src/<the suites>
+```
+
+Worth fixing in the gate rather than in memory: refuse a report older than the
+newest file it is being asked to grade.
+
+## 1x — There are two DB test fixtures, and the wrong one is the one that gets copied
+
+Three new database suites here were written against
+`lib/server/jobs/__tests__/harness.ts`, because the nearest existing example in
+the same directory (`events/__tests__/process-integration.test.ts`) uses it.
+That harness is for **lease** suites only: a lease exists so work can outlive
+the transaction that claimed it, so those suites commit for real, open four
+connections each, and clean up with `DELETE ... WHERE` on a database every
+worktree on the machine shares.
+
+The right tool for everything else is `lib/server/__tests__/db-test-fixture.ts`
+— one connection, a transaction rolled back after every test, and a `probe` that
+skips the suite on a stale schema instead of failing it mid-test. There is a
+README beside it that says exactly this. It was not found, because the search
+started from a neighbouring test file rather than from the directory that owns
+the fixture.
+
+Cost: three suites written twice, plus a stretch of chasing 10-second hook
+timeouts in unrelated portal suites on the suspicion that the extra connections
+had caused them. (They had not — `apps/web/src/lib/server/functions` produces
+between one and three of those on `origin/main` too, measured over two runs.)
+
+What would have prevented it: the harness's own header says it is for lease
+suites, but nothing says where to go instead. One line in it pointing at
+`db-test-fixture.ts` and its README would have been enough.
+
+## 1x — postgres.js encodes a JSON _string_ parameter into jsonb a second time
+
+Seeding an `integrations` row for a migration-replay test, this looked obvious:
+
+```ts
+sql.unsafe(`INSERT INTO integrations (..., config) VALUES ($1, ..., $2::jsonb)`, [
+  id,
+  JSON.stringify({ channelId: '101' }),
+])
+```
+
+What lands in the column is `"{\"channelId\":\"101\"}"` — `jsonb_typeof` says
+`string`, not `object`, so `config ->> 'channelId'` is **null**. The driver
+JSON-encodes the value it is given, and the value it was given was already JSON.
+Nothing errors: the insert succeeds, the row is there, and only the `->>` comes
+back empty.
+
+The failure surfaces a long way from the cause. Here the migration under test
+matched no row, the test went red on the wrong assertion, and the first
+hypothesis was that the migration's `DO` block had not executed at all — psql ran
+the same file correctly, which pointed at the execution path rather than at the
+seed. It cost a debug script to see `jsonb_typeof = string`.
+
+Pass the object (`[{ channelId: '101' }]`) and let the driver encode it once, or
+write the literal into the SQL, which is what the test does now — a constant does
+not need a placeholder, and the literal is the version that reads correctly at a
+glance. Worth checking wherever a test seeds a jsonb column, because the wrong
+version is silent and looks right.
 
 ## 1x — Generating a vitest config has two traps, both of which look like a hang
 
