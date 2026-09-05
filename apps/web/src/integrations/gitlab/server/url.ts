@@ -56,9 +56,13 @@ export function gitlabApiBase(instanceUrl?: string | null): string {
  * is the floor this integration supports, so the older spelling is read as no
  * project at all rather than half-supported — the reasoning is written out as
  * V19 and V22 in the test module beside this one.
+ *
+ * The issue number is part of the pattern rather than trailing detail: the
+ * work item *list* lives at `/{path}/-/work_items`, and reading a project out
+ * of it would answer for an address that names no issue (V21).
  */
 export function extractGitLabProjectPath(url?: string | null): string | null {
   if (!url) return null
-  const match = url.match(/https?:\/\/[^/]+\/(.+?)\/-\/work_items(?:\/|$|\?)/)
+  const match = url.match(/https?:\/\/[^/]+\/(.+?)\/-\/work_items\/(\d+)(?:[/?#]|$)/)
   return match?.[1] ?? null
 }

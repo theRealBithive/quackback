@@ -60,19 +60,36 @@ describe('normalizeGitLabInstanceUrl', () => {
     )
   })
 
-  it('rejects non-http(s) schemes', () => {
+  it('rejects non-http(s) schemes, and says which rule was broken', () => {
+    // The message is the whole diagnosis an operator gets in the settings form,
+    // so it is asserted rather than left to the error type. The name goes with
+    // it: it is what a log line shows when the message is already truncated.
     expect(() => normalizeGitLabInstanceUrl('javascript:alert(1)')).toThrow(GitLabInstanceUrlError)
-    expect(() => normalizeGitLabInstanceUrl('file:///etc/passwd')).toThrow(GitLabInstanceUrlError)
+    expect(() => normalizeGitLabInstanceUrl('file:///etc/passwd')).toThrow(/http\(s\) URL/)
+    try {
+      normalizeGitLabInstanceUrl('javascript:alert(1)')
+      expect.unreachable('a javascript: URL must not be accepted')
+    } catch (error) {
+      expect((error as Error).name).toBe('GitLabInstanceUrlError')
+    }
   })
 
-  it('rejects URLs that embed credentials', () => {
+  it('rejects URLs that embed credentials, either half of them', () => {
+    // Half a credential is still a credential leaving the settings form, and
+    // `user@host` alone is the form a copied browser URL takes.
     expect(() => normalizeGitLabInstanceUrl('https://user:pass@gitlab.example.com')).toThrow(
-      GitLabInstanceUrlError
+      /must not include credentials/
+    )
+    expect(() => normalizeGitLabInstanceUrl('https://user@gitlab.example.com')).toThrow(
+      /must not include credentials/
+    )
+    expect(() => normalizeGitLabInstanceUrl('https://:pass@gitlab.example.com')).toThrow(
+      /must not include credentials/
     )
   })
 
-  it('rejects unparseable strings', () => {
-    expect(() => normalizeGitLabInstanceUrl('not a url')).toThrow(GitLabInstanceUrlError)
+  it('rejects unparseable strings, and says so', () => {
+    expect(() => normalizeGitLabInstanceUrl('not a url')).toThrow(/must be a valid URL/)
   })
 })
 
@@ -110,9 +127,16 @@ describe('extractGitLabProjectPath', () => {
         fc.array(segment, { minLength: 2, maxLength: 4 }),
         fc.domain(),
         fc.integer({ min: 1, max: 10_000_000 }),
-        (segments, host, iid) => {
+        fc.constantFrom('http', 'https'),
+        // Everything GitLab appends after the issue number: a trailing slash, a
+        // comment anchor, a query, a child route. None of it names a project, so
+        // none of it may change the answer.
+        fc.constantFrom('', '/', '?foo=1', '#note_12', '/designs'),
+        (segments, host, iid, scheme, suffix) => {
           const path = segments.join('/')
-          const read = extractGitLabProjectPath(`https://${host}/${path}/-/work_items/${iid}`)
+          const read = extractGitLabProjectPath(
+            `${scheme}://${host}/${path}/-/work_items/${iid}${suffix}`
+          )
           expect(read).toBe(path)
         }
       )
@@ -130,6 +154,15 @@ describe('extractGitLabProjectPath', () => {
     // The project path itself is what decides where a close is sent, so a
     // truncated address must not answer with the group it happens to start with.
     expect(extractGitLabProjectPath('https://gitlab.com/-/work_items/7')).toBeNull()
+    // The work item *list* of a project names no issue either. It is one
+    // character away from an address that does, which is why it is pinned.
+    expect(extractGitLabProjectPath('https://gitlab.com/my-org/my-project/-/work_items')).toBeNull()
+    expect(
+      extractGitLabProjectPath('https://gitlab.com/my-org/my-project/-/work_items/')
+    ).toBeNull()
+    expect(
+      extractGitLabProjectPath('https://gitlab.com/my-org/my-project/-/work_items/new')
+    ).toBeNull()
   })
 
   it('yields nothing for the pre-18.10 spelling, rather than half-supporting it (V22)', () => {
