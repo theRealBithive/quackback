@@ -33,9 +33,10 @@
 > repository-wide coverage or mutation percentage here, deliberately: the gates
 > grade **what a change touches**, not the total, because a total is a number
 > nobody has to defend and it improves when you measure less. `diff-coverage`
-> and `mutation` are jobs inside the CI workflow, so the CI badge above goes red
-> when either of them fails. What the two rules actually require is in
-> [CLAUDE.md](CLAUDE.md).
+> and `mutation` are jobs in the workflow the CI badge reports, and per PR is
+> where they bite: on `main` the comparison base is `main`, so the diff is empty
+> and there is nothing for them to grade. What the two rules actually require is
+> in [CLAUDE.md](CLAUDE.md).
 
 ## This is a fork
 
