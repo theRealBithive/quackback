@@ -5,32 +5,6 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 1x — There are two DB test fixtures, and the wrong one is the one that gets copied
-
-Three new database suites here were written against
-`lib/server/jobs/__tests__/harness.ts`, because the nearest existing example in
-the same directory (`events/__tests__/process-integration.test.ts`) uses it.
-That harness is for **lease** suites only: a lease exists so work can outlive
-the transaction that claimed it, so those suites commit for real, open four
-connections each, and clean up with `DELETE ... WHERE` on a database every
-worktree on the machine shares.
-
-The right tool for everything else is `lib/server/__tests__/db-test-fixture.ts`
-— one connection, a transaction rolled back after every test, and a `probe` that
-skips the suite on a stale schema instead of failing it mid-test. There is a
-README beside it that says exactly this. It was not found, because the search
-started from a neighbouring test file rather than from the directory that owns
-the fixture.
-
-Cost: three suites written twice, plus a stretch of chasing 10-second hook
-timeouts in unrelated portal suites on the suspicion that the extra connections
-had caused them. (They had not — `apps/web/src/lib/server/functions` produces
-between one and three of those on `origin/main` too, measured over two runs.)
-
-What would have prevented it: the harness's own header says it is for lease
-suites, but nothing says where to go instead. One line in it pointing at
-`db-test-fixture.ts` and its README would have been enough.
-
 ## 4x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
 Measured while checking whether the hand-rolled mutation script can be replaced.
@@ -202,7 +176,7 @@ produce — no suite and no mutation run would have said so.
 Either pull the codegen step into the `typecheck` script or document which command has to
 run first.
 
-## 1x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
+## 2x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
 An entry declares a whole file, and the gate fails on any survivor in it. A change that
 adds three lines to an upstream file therefore has to pin **every** branch that file
@@ -229,6 +203,87 @@ is to not declare the file, which is the outcome the manifest exists to prevent.
 
 The tests stay either way — writing them turned up two existing tests that never entered
 the branch they named (see the entry below on hand-typed TypeIDs).
+
+Second occurrence, on the work item URL fix. Declaring `url.ts` — one changed
+line, a regex — meant asserting that its suite pins the **whole** file, including
+`normalizeGitLabInstanceUrl`, which the change never touched. Nine mutants
+survived the first run and eight of them were in that pre-existing half. Eight
+were worth killing anyway, but the ninth forced a contract decision (`http://`
+as an instance address) that had nothing to do with the change and could not be
+deferred, because the gate is per file and there is no way to say "grade the
+line I touched".
+
+The shape that would help is unchanged: a per-file `except` list, or scoping an
+entry to a diff range. Until then, declaring a file with pre-existing untested
+neighbours is a decision to be made deliberately, not a formality.
+
+## 1x — There are two DB test fixtures, and the wrong one is the one that gets copied
+
+Three new database suites here were written against
+`lib/server/jobs/__tests__/harness.ts`, because the nearest existing example in
+the same directory (`events/__tests__/process-integration.test.ts`) uses it.
+That harness is for **lease** suites only: a lease exists so work can outlive
+the transaction that claimed it, so those suites commit for real, open four
+connections each, and clean up with `DELETE ... WHERE` on a database every
+worktree on the machine shares.
+
+The right tool for everything else is `lib/server/__tests__/db-test-fixture.ts`
+— one connection, a transaction rolled back after every test, and a `probe` that
+skips the suite on a stale schema instead of failing it mid-test. There is a
+README beside it that says exactly this. It was not found, because the search
+started from a neighbouring test file rather than from the directory that owns
+the fixture.
+
+Cost: three suites written twice, plus a stretch of chasing 10-second hook
+timeouts in unrelated portal suites on the suspicion that the extra connections
+had caused them. (They had not — `apps/web/src/lib/server/functions` produces
+between one and three of those on `origin/main` too, measured over two runs.)
+
+What would have prevented it: the harness's own header says it is for lease
+suites, but nothing says where to go instead. One line in it pointing at
+`db-test-fixture.ts` and its README would have been enough.
+
+## 1x — Merging a stacked PR with `--delete-branch` closes the one above it, irrecoverably
+
+Four PRs stacked A -> B -> C -> D, each based on the one below. Merging A with
+`gh pr merge --squash --delete-branch` deleted its head branch, which was B's
+**base**. GitHub did not retarget B; it **closed** it. And a pull request whose
+base branch no longer exists cannot be reopened or retargeted:
+
+```
+GraphQL: Could not open the pull request. (reopenPullRequest)
+GraphQL: Cannot change the base branch of a closed pull request. (updatePullRequest)
+```
+
+The branch and its commits are untouched, so nothing is lost but the thread —
+the review history, the body, the discussion. The repair is a new PR from the
+same head branch, cross-linked in both directions, which is exactly the noise a
+stack is supposed to avoid.
+
+The order that works: merge without `--delete-branch`, retarget the PR above to
+`main` while its base still exists, then delete the branch. Or retarget every PR
+in the stack to `main` up front and accept that each diff temporarily contains
+the ones below it.
+
+## 1x — Two lists that must agree conflict on every merge in a stack
+
+`scripts/mutation-manifest.json` and the `toEqual` in
+`scripts/__tests__/mutation-scope.test.ts` are the same list written twice, by
+design — the test is the counterweight that stops the manifest shrinking
+quietly. Every branch appends to both, so **every** merge in a stack conflicts in
+both files, three times in one afternoon here.
+
+The conflicts are not hard, but they are hand-work in JSON where a wrong brace
+is a parse error, and a generic "take both sides" resolver corrupted the file
+once: the hunks are not uniform. Sometimes one side is empty and the union has to
+preserve the `},{` separators, sometimes both sides carry them already. Resolve
+these two by reading the hunk, not by a rule, and re-run
+`mutation-scope.test.ts` immediately — it fails loudly on a list that no longer
+matches, which is the fastest check that the resolution was right.
+
+Worth considering: assert the manifest as an unordered set of entries rather
+than an ordered array. Order carries no meaning, and an order-free assertion
+would let git merge appended entries without conflict.
 
 ## 1x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
 
