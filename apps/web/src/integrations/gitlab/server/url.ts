@@ -50,10 +50,15 @@ export function gitlabApiBase(instanceUrl?: string | null): string {
 
 /**
  * Project path from a GitLab issue web URL.
- * Accepts both `/{path}/-/issues/{iid}` (current) and `/{path}/issues/{iid}`.
+ *
+ * GitLab 18.10 made work items generally available and moved issues to
+ * `/{path}/-/work_items/{iid}`, redirecting `/issues/{iid}` there. That release
+ * is the floor this integration supports, so the older spelling is read as no
+ * project at all rather than half-supported — the reasoning is written out as
+ * V19 and V22 in the test module beside this one.
  */
 export function extractGitLabProjectPath(url?: string | null): string | null {
   if (!url) return null
-  const match = url.match(/https?:\/\/[^/]+\/(.+?)\/(?:-\/)?issues(?:\/|$|\?)/)
+  const match = url.match(/https?:\/\/[^/]+\/(.+?)\/-\/work_items(?:\/|$|\?)/)
   return match?.[1] ?? null
 }
