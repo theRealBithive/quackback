@@ -43,6 +43,15 @@
  * I12 A namespace we have not claimed yet is reported by name rather than
  *     failing the run. Claiming one is what turns its coverage into a promise,
  *     and a claim can therefore only ever make the gate louder. [V14]
+ * I13 A key that something more specific already accounts for is not evidence
+ *     that a pattern resolves. A source line naming the key outright accounts
+ *     for it, and so does a narrower pattern -- narrower meaning it leaves
+ *     less to be filled in at runtime. Without this a namespace reads as
+ *     answered because of its neighbours: `activation.goal.*` is satisfied by
+ *     `activation.goal.label`, which another line names by hand, while
+ *     `activation.goal.product_feedback` resolves to nothing. The report gets
+ *     shorter as the hole gets bigger, which is the direction nobody checks.
+ *     [V16]
  */
 import { describe, it, expect } from 'vitest'
 import fc from 'fast-check'
@@ -509,6 +518,108 @@ describe('ids the product assembles at runtime (I11, I12)', () => {
   })
 })
 
+describe('what counts as evidence that a pattern resolves (I13)', () => {
+  it('does not let a key the source names by hand answer a pattern (I13)', () => {
+    // The shape this was found in: `activation.goal.label` is a heading one
+    // line spells out, and it happens to sit under the same wildcard as
+    // `activation.goal.${outcome}`. The outcome ids exist nowhere.
+    const findings = grade({
+      scan: scanOf({
+        assembled: [{ pattern: 'activation.goal.*', file: 'getting-started.tsx', line: 197 }],
+        references: [ref('activation.goal.label', true, 'getting-started.tsx', 193)],
+      }),
+      catalogues: cataloguesOf({ 'activation.goal.label': 'Current goal' }),
+      claimedPrefixes: ['activation.'],
+    })
+
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({
+      kind: 'unanswered-pattern',
+      id: 'activation.goal.*',
+      line: 197,
+    })
+  })
+
+  it('counts an indirectly named key as spoken for too (I5, I13)', () => {
+    // I5 already treats a bare literal as reaching a key. It names the key
+    // just as exactly as an `id` does, so it accounts for it here as well.
+    const findings = grade({
+      scan: scanOf({
+        assembled: [{ pattern: 'activation.goal.*', file: 'getting-started.tsx', line: 197 }],
+        literals: ['activation.goal.label'],
+      }),
+      catalogues: cataloguesOf({ 'activation.goal.label': 'Current goal' }),
+      claimedPrefixes: ['activation.'],
+    })
+
+    expect(findings).toHaveLength(1)
+    expect(findings[0]!.id).toBe('activation.goal.*')
+  })
+
+  it('does not let a narrower pattern answer the wider one over it (I13)', () => {
+    // Both are real lines of the same page. Filling in the titles is what
+    // makes the wider one stop reporting -- while `blocked`, `description`,
+    // `action` and `completedAction`, the four suffixes it actually resolves
+    // to, still exist nowhere.
+    const findings = grade({
+      scan: scanOf({
+        assembled: [
+          { pattern: 'activation.task.*.*.title', file: 'getting-started.tsx', line: 535 },
+          { pattern: 'activation.task.*.*.*', file: 'getting-started.tsx', line: 570 },
+        ],
+      }),
+      catalogues: cataloguesOf({
+        'activation.task.internal.create-board.title': 'Create a private team board',
+      }),
+      claimedPrefixes: ['activation.'],
+    })
+
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({
+      kind: 'unanswered-pattern',
+      id: 'activation.task.*.*.*',
+      line: 570,
+    })
+  })
+
+  it('keeps the key as evidence for the narrower pattern that claims it (I13)', () => {
+    const findings = grade({
+      scan: assembledOf('activation.task.*.*.title', 'getting-started.tsx', 535),
+      catalogues: cataloguesOf({
+        'activation.task.internal.create-board.title': 'Create a private team board',
+      }),
+      claimedPrefixes: ['activation.'],
+    })
+
+    expect(findings).toEqual([])
+  })
+
+  it('accepts a key that nothing more specific accounts for (I13)', () => {
+    const findings = grade({
+      scan: assembledOf('activation.goal.*', 'getting-started.tsx', 197),
+      catalogues: cataloguesOf({ 'activation.goal.product_feedback': 'Product feedback' }),
+      claimedPrefixes: ['activation.'],
+    })
+
+    expect(findings).toEqual([])
+  })
+
+  it('reports the pattern rather than the key it refused as evidence (I13)', () => {
+    // The key is fine: it is defined, it is reached, and it is translated.
+    // Only the pattern is a finding, so the report says what to fix.
+    const findings = grade({
+      scan: scanOf({
+        assembled: [{ pattern: 'activation.goal.*', file: 'getting-started.tsx', line: 197 }],
+        references: [ref('activation.goal.label', true, 'getting-started.tsx', 193)],
+      }),
+      catalogues: cataloguesOf({ 'activation.goal.label': 'Current goal' }),
+      claimedPrefixes: ['activation.'],
+    })
+
+    expect(findings.map((f) => f.id)).toEqual(['activation.goal.*'])
+  })
+})
+
 describe('reading ids out of source (I8)', () => {
   it('finds a message and the English original beside it (I8)', () => {
     const scan = scanSource(
@@ -774,6 +885,58 @@ describe('properties', () => {
           return base.every((f) => after.has(`${f.kind}\u0000${f.id}`))
         }
       )
+    )
+  })
+
+  const segmentArb = fc.stringMatching(/^[a-z]{1,8}$/)
+
+  it('keys the source names by hand never rescue the pattern over them (I13)', () => {
+    // Said without reference to how evidence is decided: whatever the keys
+    // under a claimed namespace are, if a line of source names every one of
+    // them outright, the pattern that would have to build one at runtime is
+    // still answered by nothing.
+    fc.assert(
+      fc.property(fc.uniqueArray(segmentArb, { minLength: 1, maxLength: 4 }), (segments) => {
+        const ids = segments.map((segment) => `activation.goal.${segment}`)
+        const findings = gradeCatalogues({
+          scan: scanOf({
+            assembled: [{ pattern: 'activation.goal.*', file: 'x.tsx', line: 1 }],
+            references: ids.map((id) => ref(id, true)),
+          }),
+          catalogues: cataloguesOf(Object.fromEntries(ids.map((id) => [id, 'text']))),
+          defaultLocale: 'en',
+          exemptions: [],
+          claimedPrefixes: ['activation.'],
+        })
+        return findings.some((f) => f.kind === 'unanswered-pattern' && f.id === 'activation.goal.*')
+      })
+    )
+  })
+
+  it('one key nothing else accounts for is enough to answer a pattern (I13)', () => {
+    // The other direction, so the rule cannot pass by calling everything
+    // unanswered. The segments are drawn as one unique set and then split, so
+    // the free key differs from the named ones by construction rather than by
+    // a filter over the generated cases.
+    fc.assert(
+      fc.property(fc.uniqueArray(segmentArb, { minLength: 2, maxLength: 5 }), (segments) => {
+        const [free, ...named] = segments
+        const namedIds = named.map((segment) => `activation.goal.${segment}`)
+        const freeId = `activation.goal.${free}`
+        const findings = gradeCatalogues({
+          scan: scanOf({
+            assembled: [{ pattern: 'activation.goal.*', file: 'x.tsx', line: 1 }],
+            references: namedIds.map((id) => ref(id, true)),
+          }),
+          catalogues: cataloguesOf(
+            Object.fromEntries([freeId, ...namedIds].map((id) => [id, 'text']))
+          ),
+          defaultLocale: 'en',
+          exemptions: [],
+          claimedPrefixes: ['activation.'],
+        })
+        return findings.every((f) => f.kind !== 'unanswered-pattern')
+      })
     )
   })
 

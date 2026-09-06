@@ -264,18 +264,53 @@ function matchesPattern(id: string, pattern: string): boolean {
   return new RegExp(`^${parts.join('[A-Za-z0-9_.:-]+')}$`).test(id)
 }
 
-/** Whether any key in the catalogue can satisfy an assembled pattern. */
-function patternIsAnswered(catalogue: Record<string, string>, pattern: string): boolean {
-  return Object.keys(catalogue).some((id) => matchesPattern(id, pattern))
+/** The keys the source names outright, by an `id` or as a bare literal. */
+function namedIds(scan: SourceScan): Set<string> {
+  const named = new Set(scan.literals)
+  for (const reference of scan.references) named.add(reference.id)
+  return named
+}
+
+/** Whether something more specific than `pattern` already accounts for `id`:
+ *  a line naming it outright, or a pattern that leaves less to be filled in. */
+function accountedForElsewhere(
+  id: string,
+  pattern: string,
+  scan: SourceScan,
+  named: Set<string>
+): boolean {
+  if (named.has(id)) return true
+  // Fewer wildcards means less is filled in at runtime, so that pattern is the
+  // more specific account. Splitting on the wildcard counts the pieces around
+  // them, which is one more than the wildcards and orders the patterns alike.
+  const pieces = pattern.split('*').length
+  return scan.assembled.some(
+    (other) => other.pattern.split('*').length < pieces && matchesPattern(id, other.pattern)
+  )
+}
+
+/** Whether any key in the catalogue is evidence that a pattern resolves. A key
+ *  something more specific already accounts for is not (I13): otherwise a
+ *  namespace reads as answered because of its neighbours. */
+function patternIsAnswered(
+  catalogue: Record<string, string>,
+  pattern: string,
+  scan: SourceScan,
+  named: Set<string>
+): boolean {
+  return Object.keys(catalogue).some(
+    (id) => matchesPattern(id, pattern) && !accountedForElsewhere(id, pattern, scan, named)
+  )
 }
 
 /** The runtime-built ids the gate reports on rather than fails for: nothing in
  *  the catalogue can satisfy them, and we have not claimed their namespace. */
 export function unclaimedPatterns(input: CatalogueInput): AssembledId[] {
   const catalogue = input.catalogues[input.defaultLocale] ?? {}
+  const named = namedIds(input.scan)
   return input.scan.assembled.filter(
     (assembled) =>
-      !patternIsAnswered(catalogue, assembled.pattern) &&
+      !patternIsAnswered(catalogue, assembled.pattern, input.scan, named) &&
       !input.claimedPrefixes.some((prefix) => assembled.pattern.startsWith(prefix))
   )
 }
@@ -329,9 +364,10 @@ function gradeIgnoringExemptions(input: CatalogueInput): Finding[] {
   // I11 — built at runtime in a namespace we claim, and answered by nothing.
   // I1 cannot see this: no line of source spells such an id out, so there is
   // nothing to look up, and I4 reads the pattern itself as proof of use.
+  const namedInSource = namedIds(scan)
   for (const assembled of scan.assembled) {
     if (!input.claimedPrefixes.some((prefix) => assembled.pattern.startsWith(prefix))) continue
-    if (patternIsAnswered(defaultCatalogue, assembled.pattern)) continue
+    if (patternIsAnswered(defaultCatalogue, assembled.pattern, scan, namedInSource)) continue
     findings.push({
       kind: 'unanswered-pattern',
       id: assembled.pattern,
