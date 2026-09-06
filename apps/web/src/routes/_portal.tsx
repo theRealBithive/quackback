@@ -150,9 +150,6 @@ export const Route = createFileRoute('/_portal')({
       const brandingData = settings?.brandingData ?? null
       const brandingConfig = settings?.brandingConfig ?? {}
       const hasThemeConfig = brandingConfig.light || brandingConfig.dark
-      // The same locale the document was built from, so the gate's auth dialog
-      // never speaks a different language than `<html lang>` claims.
-      const locale = resolvedLocale
       // Instant-SSO: when the workspace's only sign-in method is a single OIDC
       // provider, redirect anonymous visitors straight to the IdP. Skipped for
       // 'unauthorized' (signed-in non-member) — they already have a session and
@@ -176,7 +173,9 @@ export const Route = createFileRoute('/_portal')({
         themeStyles: hasThemeConfig ? generateThemeCSS(brandingConfig) : '',
         customCss: settings?.customCss ?? '',
         configFontSans: readFontSans(brandingConfig.light),
-        locale,
+        // The same locale the document was built from, so the gate's auth
+        // dialog never speaks a different language than `<html lang>` claims.
+        locale: resolvedLocale,
         // Only meaningful for 'unauthorized' — null for an anonymous visitor.
         // Lets the overlay say "you're signed in as alice@…, but…".
         userEmail: accessResult.reason === 'unauthorized' ? (session?.user?.email ?? null) : null,
