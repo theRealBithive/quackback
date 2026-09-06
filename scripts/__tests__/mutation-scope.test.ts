@@ -127,6 +127,14 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'apps/web/src/test/render-with-intl.tsx',
         suites: ['apps/web/src/test/__tests__/render-with-intl.test.tsx'],
       },
+      {
+        file: 'apps/web/src/lib/shared/language-choice.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/language-choice.test.ts'],
+      },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        suites: ['apps/web/src/components/settings/__tests__/language-card.test.tsx'],
+      },
     ])
   })
 
