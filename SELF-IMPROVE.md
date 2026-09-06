@@ -99,6 +99,84 @@ generalising from "build fixtures inside the test" to **no call into anything
 mutable at module scope**, template tags included: a `sql` tagged template does
 not look like a call, and is one.
 
+## 5x — Local `typecheck` reports hundreds of pre-existing errors
+
+`bun run typecheck` yields around 820 `error TS` on a **clean** tree, almost all in
+`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
+your own change added an error can only be established by stashing, counting the errors,
+restoring and counting again.
+
+Stashing is the wrong tool when a long background job is reading the working tree, and it
+answers a coarser question than the one you have. Grepping the error list for the files
+the change touches is exact and costs one run:
+
+```bash
+bun run typecheck 2>&1 | grep -E "error TS" > /tmp/tc.txt
+git diff --name-only <base>...HEAD | sed 's|^apps/web/||' \
+  | while read -r f; do grep -F "$f" /tmp/tc.txt; done
+```
+
+It is also worth running even when nothing looks type-shaped: it is what caught a test
+mocking `getValidAccessToken` as resolving `null`, where the source returns `''` and never
+a null. The mock typechecked as an error and the test asserted a state the source cannot
+produce — no suite and no mutation run would have said so.
+
+Either pull the codegen step into the `typecheck` script or document which command has to
+run first.
+
+Third occurrence, with a twist that wastes a five-minute run: **the count is
+for the `apps/web` project**. `bun x tsc --noEmit -p tsconfig.json` from the repository
+root type-checks a different project and reports **36823** errors, which reads
+as though the change broke the build. Both numbers are baselines; only the
+`apps/web` one is the one to compare against. Run it from `apps/web`, and
+remember the Bash tool keeps its working directory between calls, so a `cd`
+three commands ago is why the count changed.
+
+Fourth occurrence, and the number itself is the trap: this entry said 815, the
+clean tree now says 820, and five unexplained errors is exactly the shape of
+"your change broke something". **Measure the baseline, never read it from
+here** — the count drifts with every upstream sync, so a written-down figure
+ages into a false alarm. The grep-by-touched-file recipe above does not have
+this problem, which is the argument for using it instead of counting at all.
+
+Fifth occurrence, caused by that fourth note. It recorded "815 then, 820 now" as
+evidence that the baseline drifts — but the 820 was counted on a tree that
+already carried the change under test, and five of those errors were the
+change's own: a test file rendering a component that had just been given two new
+required props. The tree reads 815 again with them fixed. So the note that
+warned against reading a number from here supplied a new one, measured wrong,
+and a report went out saying "820, zero added" when the true answer was five
+added. **A total means nothing unless the tree is genuinely clean, and a branch
+with commits on it never is.** CI's `bun run --filter @quackback/web typecheck`
+names all five by file and line in seventy seconds and is the only cheap
+authority; locally, use the grep-by-touched-file recipe, which cannot be fooled
+this way. The figures in this entry are a record of how far the number moves —
+not something to compare against.
+
+**One more thing the recipe above could not have caught**, measured on that
+fifth occurrence: the file that failed to compile was
+`changelog-segment-picker.test.tsx`, and it was **not in the change's diff** — the
+change added two required props to a component, and what broke was a _consumer_
+nobody had opened. Grepping the error list for touched files is blind to exactly
+the most common way a type error appears. There was no local check that would
+have found it.
+
+**Closed** by generating the route tree before typechecking.
+`apps/web/scripts/generate-route-tree.ts` resolves Vite's config, which is when
+the TanStack Start plugin writes `src/routeTree.gen.ts` — 2.8 seconds, and
+byte-identical to what the 55-second `bun run build` writes, verified by diff.
+Both `typecheck` scripts run it first, so a clean tree now reports **0 errors**
+instead of 815, and any error is the change's own. No baseline, no stashing, no
+counting, and the grep recipe is no longer needed for anything.
+
+Two details are load-bearing and are commented in the script: resolving the
+config leaves plugin watchers open, so it has to `process.exit(0)` explicitly or
+it hangs with the work already done (measured: still sitting there at 90
+seconds); and the script fails loudly if no file appeared, because a silent
+no-op would quietly restore the number. CI cannot catch that rot on its own —
+the `check` job builds before it typechecks, and the build writes the same file
+— which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
+
 ## 4x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
@@ -249,6 +327,37 @@ framework actually passes when no platform credentials are stored
 (`credentials ?? undefined`), so the optional chaining that mutant removed is
 load-bearing rather than defensive.
 
+## 3x — Coverage had to be re-installed for every measurement
+
+The tooling for non-trivial logic is half-present. `fast-check` is a
+devDependency and is used by a handful of suites; a mutation runner was missing,
+so every mutation number in this repo up to the audit-gate change was produced by
+a throwaway script that applies mutants textually one at a time and re-runs the
+suite by hand.
+
+Second run: the infrastructure gate on the DB fixture needed 25 mutants written
+out by hand to find the four that mattered (three unasserted lines of the
+remediation message, and — the one that counted — no end-to-end test that an
+unreachable database _without_ `REQUIRE_TEST_DB` still skips instead of throwing,
+which is the regression that would have turned every laptop run red). A real
+runner would have listed those in one command instead of one bespoke script per
+change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
+transiently and `package.json`/`bun.lock` restored afterwards, every time.
+
+Third run closed the mutation half — Stryker landed with the dependency-audit
+gate — and left the coverage half exactly as it was. `@vitest/coverage-v8` still
+has to be added, used, and then unpicked from `package.json` and `bun.lock`
+before anything can be committed, and the whole-file percentage it prints is not
+the number the discipline asks for: the lines a change touches have to be
+intersected with the JSON reporter's uncovered list by hand. Installing it as a
+devDependency the way Stryker now is would remove one install, one restore and
+one chance to commit a stray manifest per change.
+
+**Closed** by the diff-coverage gate: `@vitest/coverage-v8` is a devDependency,
+the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
+does the intersection with the diff that used to be done by hand. Three runs
+paid for it.
+
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
 `scripts/mutation-manifest.json` and the `toEqual` in
@@ -317,6 +426,47 @@ turned that into `12 executed, 0 never executed`. The tell held: a file the run
 definitely executed was listed under "out of scope, although they look like
 source". Read that line before reading the holes.
 
+## 2x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+
+`lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
+`error:03000098:digital envelope routines::invalid digest`. It is not the repo:
+the same `createSign('RSA-SHA1')` throws in a bare `node -e` outside the
+checkout, because the system OpenSSL refuses to _produce_ a SHA-1 signature
+under the DEFAULT crypto policy. Verification is not blocked — measured, a
+`createVerify('RSA-SHA1')` runs and returns `false` — so it is only the fixture
+the test signs for itself that cannot be made here. The production path is fine
+and CI signs it happily, which is why nobody had noticed.
+
+The red line is not the cost. `coverage.reportOnFailure` defaults to **false**,
+so a full run with _any_ failing test writes no `coverage-final.json` at all, and
+`diff-coverage-check.ts` then reads an empty `coverage/` and grades nothing. Ten
+minutes of full-suite wall clock produced no number, quietly, under a log that
+opens with `Coverage enabled with v8`. Locally the flag is not optional:
+
+```bash
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportOnFailure=true --coverage.reportsDirectory=coverage/local
+```
+
+Two fixes, both small: sign the SignatureVersion 1 fixture once and check it in,
+so the test verifies instead of signing; and put `reportOnFailure: true` in the
+root config's `coverage` block, so a red suite still yields the report that says
+which lines the change left uncovered — which is exactly when it is wanted.
+
+Second run, and it cost the same ten minutes again — while measuring an
+unrelated i18n change. Neither fix has been made, so the trap is intact: the
+run opens with `Coverage enabled with v8`, ends `2 failed | 866 passed`, and
+`diff-coverage-check.ts` then reports `FAIL: the diff-coverage gate graded
+nothing` — a message about _its_ inputs, which reads as a problem with the
+change rather than with the run that fed it. Two observations worth adding.
+The gate names the missing report but not the likely cause, and it is
+one-line-fixable: a red suite with `reportOnFailure` off is the only way to
+reach that state locally, so the message should say so. And the failure is
+environmental rather than repo-specific, which means it hits every Fedora
+checkout on the first full local run and every one after it, until the fixture
+is checked in. The fixture fix is the cheaper of the two and retires the entry
+outright; `reportOnFailure: true` only makes the loss visible.
+
 ## 1x — A migration passes every local gate and fails CI on schema drift
 
 `bun run db:check-drift` is a CI step (inside the `test` shard, not `check`), and
@@ -347,33 +497,6 @@ Two things worth doing: run `bun run db:check-drift` locally whenever a
 migration is added (it takes about a minute and needs only `DATABASE_URL`), and
 say so in CLAUDE.md's Migrations section next to the two tests that go red on
 purpose — the gate that fails here is silent until CI.
-
-## 1x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
-
-`lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
-`error:03000098:digital envelope routines::invalid digest`. It is not the repo:
-the same `createSign('RSA-SHA1')` throws in a bare `node -e` outside the
-checkout, because the system OpenSSL refuses to _produce_ a SHA-1 signature
-under the DEFAULT crypto policy. Verification is not blocked — measured, a
-`createVerify('RSA-SHA1')` runs and returns `false` — so it is only the fixture
-the test signs for itself that cannot be made here. The production path is fine
-and CI signs it happily, which is why nobody had noticed.
-
-The red line is not the cost. `coverage.reportOnFailure` defaults to **false**,
-so a full run with _any_ failing test writes no `coverage-final.json` at all, and
-`diff-coverage-check.ts` then reads an empty `coverage/` and grades nothing. Ten
-minutes of full-suite wall clock produced no number, quietly, under a log that
-opens with `Coverage enabled with v8`. Locally the flag is not optional:
-
-```bash
-bun x vitest run --coverage.enabled --coverage.reporter=json \
-  --coverage.reportOnFailure=true --coverage.reportsDirectory=coverage/local
-```
-
-Two fixes, both small: sign the SignatureVersion 1 fixture once and check it in,
-so the test verifies instead of signing; and put `reportOnFailure: true` in the
-root config's `coverage` block, so a red suite still yields the report that says
-which lines the change left uncovered — which is exactly when it is wanted.
 
 ## 1x — Hand-rolled `db` stubs break on a query they never mentioned, and a drizzle `SQL` cannot be printed
 
@@ -755,84 +878,6 @@ database up in one command.
 
 # Resolved
 
-## 5x — Local `typecheck` reports hundreds of pre-existing errors
-
-`bun run typecheck` yields around 820 `error TS` on a **clean** tree, almost all in
-`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
-your own change added an error can only be established by stashing, counting the errors,
-restoring and counting again.
-
-Stashing is the wrong tool when a long background job is reading the working tree, and it
-answers a coarser question than the one you have. Grepping the error list for the files
-the change touches is exact and costs one run:
-
-```bash
-bun run typecheck 2>&1 | grep -E "error TS" > /tmp/tc.txt
-git diff --name-only <base>...HEAD | sed 's|^apps/web/||' \
-  | while read -r f; do grep -F "$f" /tmp/tc.txt; done
-```
-
-It is also worth running even when nothing looks type-shaped: it is what caught a test
-mocking `getValidAccessToken` as resolving `null`, where the source returns `''` and never
-a null. The mock typechecked as an error and the test asserted a state the source cannot
-produce — no suite and no mutation run would have said so.
-
-Either pull the codegen step into the `typecheck` script or document which command has to
-run first.
-
-Third occurrence, with a twist that wastes a five-minute run: **the count is
-for the `apps/web` project**. `bun x tsc --noEmit -p tsconfig.json` from the repository
-root type-checks a different project and reports **36823** errors, which reads
-as though the change broke the build. Both numbers are baselines; only the
-`apps/web` one is the one to compare against. Run it from `apps/web`, and
-remember the Bash tool keeps its working directory between calls, so a `cd`
-three commands ago is why the count changed.
-
-Fourth occurrence, and the number itself is the trap: this entry said 815, the
-clean tree now says 820, and five unexplained errors is exactly the shape of
-"your change broke something". **Measure the baseline, never read it from
-here** — the count drifts with every upstream sync, so a written-down figure
-ages into a false alarm. The grep-by-touched-file recipe above does not have
-this problem, which is the argument for using it instead of counting at all.
-
-Fifth occurrence, caused by that fourth note. It recorded "815 then, 820 now" as
-evidence that the baseline drifts — but the 820 was counted on a tree that
-already carried the change under test, and five of those errors were the
-change's own: a test file rendering a component that had just been given two new
-required props. The tree reads 815 again with them fixed. So the note that
-warned against reading a number from here supplied a new one, measured wrong,
-and a report went out saying "820, zero added" when the true answer was five
-added. **A total means nothing unless the tree is genuinely clean, and a branch
-with commits on it never is.** CI's `bun run --filter @quackback/web typecheck`
-names all five by file and line in seventy seconds and is the only cheap
-authority; locally, use the grep-by-touched-file recipe, which cannot be fooled
-this way. The figures in this entry are a record of how far the number moves —
-not something to compare against.
-
-**One more thing the recipe above could not have caught**, measured on that
-fifth occurrence: the file that failed to compile was
-`changelog-segment-picker.test.tsx`, and it was **not in the change's diff** — the
-change added two required props to a component, and what broke was a _consumer_
-nobody had opened. Grepping the error list for touched files is blind to exactly
-the most common way a type error appears. There was no local check that would
-have found it.
-
-**Closed** by generating the route tree before typechecking.
-`apps/web/scripts/generate-route-tree.ts` resolves Vite's config, which is when
-the TanStack Start plugin writes `src/routeTree.gen.ts` — 2.8 seconds, and
-byte-identical to what the 55-second `bun run build` writes, verified by diff.
-Both `typecheck` scripts run it first, so a clean tree now reports **0 errors**
-instead of 815, and any error is the change's own. No baseline, no stashing, no
-counting, and the grep recipe is no longer needed for anything.
-
-Two details are load-bearing and are commented in the script: resolving the
-config leaves plugin watchers open, so it has to `process.exit(0)` explicitly or
-it hangs with the work already done (measured: still sitting there at 90
-seconds); and the script fails loudly if no file appeared, because a silent
-no-op would quietly restore the number. CI cannot catch that rot on its own —
-the `check` job builds before it typechecks, and the build writes the same file
-— which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
-
 ## 1x — A Stryker run leaves two things behind that nothing else guards
 
 Both surfaced within an hour of the mutation gate going green, and neither is
@@ -870,37 +915,6 @@ Still open, and worth knowing before it bites elsewhere: **the Node version in
 CI is not controlled.** Every job that runs a tool with a `#!/usr/bin/env node`
 shebang gets the runner image's Node, which drifts between images inside a
 single workflow run. Pinning it needs `actions/setup-node` in each such job.
-
-## 3x — Coverage had to be re-installed for every measurement
-
-The tooling for non-trivial logic is half-present. `fast-check` is a
-devDependency and is used by a handful of suites; a mutation runner was missing,
-so every mutation number in this repo up to the audit-gate change was produced by
-a throwaway script that applies mutants textually one at a time and re-runs the
-suite by hand.
-
-Second run: the infrastructure gate on the DB fixture needed 25 mutants written
-out by hand to find the four that mattered (three unasserted lines of the
-remediation message, and — the one that counted — no end-to-end test that an
-unreachable database _without_ `REQUIRE_TEST_DB` still skips instead of throwing,
-which is the regression that would have turned every laptop run red). A real
-runner would have listed those in one command instead of one bespoke script per
-change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
-transiently and `package.json`/`bun.lock` restored afterwards, every time.
-
-Third run closed the mutation half — Stryker landed with the dependency-audit
-gate — and left the coverage half exactly as it was. `@vitest/coverage-v8` still
-has to be added, used, and then unpicked from `package.json` and `bun.lock`
-before anything can be committed, and the whole-file percentage it prints is not
-the number the discipline asks for: the lines a change touches have to be
-intersected with the JSON reporter's uncovered list by hand. Installing it as a
-devDependency the way Stryker now is would remove one install, one restore and
-one chance to commit a stray manifest per change.
-
-**Closed** by the diff-coverage gate: `@vitest/coverage-v8` is a devDependency,
-the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
-does the intersection with the diff that used to be done by hand. Three runs
-paid for it.
 
 ## 1x — The mutation gate had no database, so a third of its mutants were never run
 
