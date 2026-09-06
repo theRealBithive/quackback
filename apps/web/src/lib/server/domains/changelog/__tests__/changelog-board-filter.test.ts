@@ -30,11 +30,14 @@
  *     page.
  * V12 History is preserved: on introduction, an entry that already links
  *     shipped feedback is assigned to the products those posts belong to.
+ * V13 Deleted feedback is not evidence of a product. Feedback that was deleted
+ *     before the backfill ran contributes nothing to it, so an entry whose only
+ *     linked feedback is gone stays a cross-product announcement.
  *
  * V6, V9, V10 and V11 need a database, a request or a browser and are held in
- * `changelog-board.db.test.ts` and the route suites. V12 is a statement inside
- * migration 0275 and is held in `changelog-board-backfill.db.test.ts`, which
- * runs that statement out of the file. V8 is held here as a non-interference
+ * `changelog-board.db.test.ts` and the route suites. V12 and V13 are statements
+ * inside migration 0275 and are held in `changelog-board-backfill.db.test.ts`,
+ * which runs that statement out of the file. V8 is held here as a non-interference
  * property and again against the real reader in the DB suite.
  */
 import { describe, expect, it } from 'vitest'

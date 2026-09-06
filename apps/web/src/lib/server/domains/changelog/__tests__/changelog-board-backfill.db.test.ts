@@ -17,15 +17,15 @@
  *     appears under every product filter, and in the unfiltered list.
  * V12 History is preserved: on introduction, an entry that already links
  *     shipped feedback is assigned to the products those posts belong to.
+ * V13 Deleted feedback is not evidence of a product. Feedback that was deleted
+ *     before the backfill ran contributes nothing to it, so an entry whose only
+ *     linked feedback is gone stays a cross-product announcement.
  *
- * One question the contract does not answer, and the SQL decides on its own:
- * the statement skips posts with `deleted_at` set, so an entry whose only
- * linked feedback was deleted later comes out unassigned. Both readings are
- * defensible — the entry did ship that product's feedback, and a deleted post
- * is no longer evidence of anything — and the difference is visible to a reader
- * on the day the filter ships. It is deliberately not asserted here: a test
- * either way would be read off the implementation rather than off the contract.
- * Recorded so the decision is made by a person and not by an omission.
+ * V13 was left open when this file was first written, because the migration
+ * decided it on its own and a test either way would have been read off the SQL
+ * rather than off the contract. It was put to the maintainer as a question and
+ * answered: a deleted post is no longer evidence of anything. The number is
+ * theirs, the assertions below are only its consequences.
  *
  * The contract was agreed in German and is written here in English, which is
  * the language of this repository.
@@ -230,6 +230,37 @@ describe.skipIf(!fixture.available)('the product backfill in migration 0275', ()
 
     expect(await productsOf(alphaEntry)).toEqual([alpha])
     expect(await productsOf(betaEntry)).toEqual([beta])
+  })
+
+  it('does not take a product from feedback that was deleted (V13, V2)', async () => {
+    const author = await makeAuthor()
+    const alpha = await makeBoard('alpha')
+    const post = await makePost(alpha, author, 'Alpha request')
+    const entry = await makeEntry('Release', [post])
+    await testDb.update(posts).set({ deletedAt: new Date() }).where(eq(posts.id, post))
+
+    await runBackfill()
+
+    expect(await productsOf(entry)).toEqual([])
+  })
+
+  it('keeps the products whose feedback is still there (V13, V12)', async () => {
+    // The unguarded half of V13: dropping the deleted post must not drop the
+    // entry from the backfill altogether. An entry that shipped feedback for
+    // two products, one of them since deleted, still belongs to the other.
+    const author = await makeAuthor()
+    const alpha = await makeBoard('alpha')
+    const beta = await makeBoard('beta')
+    const deleted = await makePost(beta, author, 'Beta request')
+    const entry = await makeEntry('Release', [
+      await makePost(alpha, author, 'Alpha request'),
+      deleted,
+    ])
+    await testDb.update(posts).set({ deletedAt: new Date() }).where(eq(posts.id, deleted))
+
+    await runBackfill()
+
+    expect(await productsOf(entry)).toEqual([alpha])
   })
 
   it('is a no-op the second time, so a fleet replay changes nothing', async () => {
