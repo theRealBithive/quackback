@@ -429,6 +429,11 @@ describe('ids the product assembles at runtime (I11, I12)', () => {
       file: 'use-case-selector.tsx',
       line: 138,
     })
+    // And what it says, naming the catalogue that was searched. This is the
+    // least self-explanatory of the five kinds -- "unanswered" means nothing
+    // to a reader meeting it in a CI log for the first time.
+    expect(findings[0].detail).toContain('no en.json key can satisfy it')
+    expect(findings[0].detail).toContain('renders English')
   })
 
   it('accepts a claimed pattern one key already answers (I11)', () => {
