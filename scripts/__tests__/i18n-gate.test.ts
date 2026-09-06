@@ -138,6 +138,11 @@ describe('the i18n gate as a process', () => {
     expect(stdout).toContain('unanswered-pattern')
     expect(stdout).toContain('onboarding.goal.*.label')
     expect(stdout).toContain('card.tsx')
+    // And why, naming the catalogue it looked in. A report that says only
+    // which line is wrong leaves the reader to work out what "unanswered"
+    // means, and the whole point of the kind is that it is not obvious.
+    expect(stdout).toContain('no en.json key can satisfy it')
+    expect(stdout).toContain('renders English')
     expect(exitCode).toBe(1)
   })
 

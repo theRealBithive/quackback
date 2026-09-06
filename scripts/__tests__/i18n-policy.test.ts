@@ -467,6 +467,21 @@ describe('ids the product assembles at runtime (I11, I12)', () => {
     expect(unclaimedPatterns(claimed)).toEqual([])
   })
 
+  it('reads a claim list of several prefixes one at a time (I12)', () => {
+    const input = {
+      scan: assembledOf('activation.task.*.title'),
+      catalogues: cataloguesOf({}),
+      defaultLocale: 'en',
+      exemptions: [],
+      claimedPrefixes: ['onboarding.', 'activation.'],
+    }
+
+    // Covered by the second entry, and that is enough: a namespace is claimed
+    // when any prefix covers it, never only when every one of them does.
+    expect(unclaimedPatterns(input)).toEqual([])
+    expect(gradeCatalogues(input)).toHaveLength(1)
+  })
+
   it('does not report a pattern the catalogue answers, claimed or not (I12)', () => {
     const answered = {
       scan: assembledOf('activation.goal.*'),
