@@ -34,6 +34,12 @@ jobs:
       - name: Audit dependencies
         run: bun scripts/audit-check.ts
       - run: bun run lint
+      # The catalogues must answer for every message the interface can show.
+      # The parity test beside them compares the nine files to each other, so a
+      # key missing from all nine, or present in all nine and empty, is perfect
+      # parity there and a broken string to a reader.
+      - name: Check message catalogues
+        run: bun scripts/i18n-check.ts
       # Build the widget bundle first — apps/web imports
       # packages/widget/dist/browser.js via Vite ?raw, so it must exist
       # before the web build runs.
