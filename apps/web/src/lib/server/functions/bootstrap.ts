@@ -35,9 +35,12 @@ export interface BootstrapData {
    *  `auth_sso` row in `platform_credentials` will NOT include 'sso'
    *  here, so the UI never renders an SSO button that would 404. */
   registeredAuthProviders: string[]
-  /** Locale resolved from the request's Accept-Language header, used by the
-   *  root document to set `<html lang>`/`dir` during SSR. Resolved here so it
-   *  rides the bootstrap request without a separate round-trip. */
+  /** The locale the interface speaks in, used by the root document to set
+   *  `<html lang>`/`dir` during SSR. Named for the header because that is
+   *  where it started and what every consumer still calls it; a signed-in
+   *  teammate's own preference now outranks the header, and a preference
+   *  naming a language we do not ship falls through to it. Resolved here so
+   *  it rides the bootstrap request without a separate round-trip. */
   acceptLanguageLocale: SupportedLocale
   /** Version string the admin update banner was dismissed for, read from the
    *  `update_banner_dismissed_version` cookie, or null if never dismissed.
@@ -71,6 +74,11 @@ export interface BootstrapData {
 async function getSessionAndRole(): Promise<{
   session: Session | null
   role: Role | null
+  /** The teammate's own language preference, kept beside the session rather
+   *  than on it: `Session` is dehydrated into the SSR HTML for the client,
+   *  and the interface locale is resolved here on the server, so there is no
+   *  reason to widen that payload. */
+  preferredLanguage: string | null
 }> {
   // Fast-path for unauthenticated requests: if there's no Cookie header at
   // all the request can't possibly carry a session token, so we can skip
@@ -79,7 +87,7 @@ async function getSessionAndRole(): Promise<{
   const { getRequestHeaders } = await import('@tanstack/react-start/server')
   const headers = getRequestHeaders()
   if (!headers.get('cookie')) {
-    return { session: null, role: null }
+    return { session: null, role: null, preferredLanguage: null }
   }
 
   const [{ auth }, { db, principal, eq }, { cacheGet, cacheSet, CACHE_KEYS }] = await Promise.all([
@@ -94,7 +102,7 @@ async function getSessionAndRole(): Promise<{
     })
 
     if (!session?.user) {
-      return { session: null, role: null }
+      return { session: null, role: null, preferredLanguage: null }
     }
 
     const userId = session.user.id as UserId
@@ -135,12 +143,14 @@ async function getSessionAndRole(): Promise<{
         },
       },
       role: (principalRecord?.role as Role | null) ?? null,
+      preferredLanguage:
+        (session.user as { preferredLanguage?: string | null }).preferredLanguage ?? null,
     }
   } catch (error) {
     // During SSR, auth might fail due to env var issues
     // Return null session and let the client retry
     log.error({ err: error }, 'get session failed')
-    return { session: null, role: null }
+    return { session: null, role: null, preferredLanguage: null }
   }
 }
 
@@ -163,11 +173,8 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
 
   // Single principal read returns both session.principalType + userRole;
   // run in parallel with the settings fetch.
-  const [{ session, role: userRole }, settings, registeredAuthProviders] = await Promise.all([
-    getSessionAndRole(),
-    getWorkspaceSettings(),
-    getRegisteredAuthProviders(),
-  ])
+  const [{ session, role: userRole, preferredLanguage }, settings, registeredAuthProviders] =
+    await Promise.all([getSessionAndRole(), getWorkspaceSettings(), getRegisteredAuthProviders()])
 
   // One-time initialization on first request.
   //
@@ -220,7 +227,13 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
   const updateBannerDismissedVersion = getUpdateBannerDismissedVersionCookie(
     headers.get('cookie') ?? null
   )
-  const acceptLanguageLocale = resolveLocale(headers.get('accept-language'))
+  // A teammate's own choice outranks their browser; `resolveLocale` drops an
+  // unsupported preference and reads the header instead, so picking a language
+  // we do not ship never pins the interface to English (V3).
+  const acceptLanguageLocale = resolveLocale(
+    headers.get('accept-language'),
+    preferredLanguage ?? undefined
+  )
 
   // Advertise the prefers-color-scheme client hint so the browser tells us the
   // OS preference. Critical-CH makes Chromium retry the very first navigation
@@ -232,7 +245,9 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
   setResponseHeader('Critical-CH', 'Sec-CH-Prefers-Color-Scheme')
   // This document is keyed on every input we render into it: the `theme` cookie
   // (and the session/role embedded in the dehydrated context), Accept-Language
-  // for `<html lang>`/`dir`, the color-scheme hint, and now Host (below,
+  // and the signed-in teammate's own language preference for `<html lang>`/
+  // `dir` -- that preference hangs off the session, so `Cookie` already keys
+  // it -- the color-scheme hint, and now Host (below,
   // baseUrl switches to the help center's verified custom domain when the
   // request arrives on it). List them all so a shared cache can never serve
   // e.g. a dark-cookie document to a no-cookie visitor that happens to share

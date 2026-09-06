@@ -446,6 +446,11 @@ async function createAuth() {
     user: {
       additionalFields: {
         locale: { type: 'string', required: false, input: false },
+        // The teammate-set language preference. Declared here so getSession
+        // returns it and the bootstrap render can resolve the interface
+        // locale without a second query; `input: false` because it is set
+        // through setMyLanguagePreferenceFn, never through a signup payload.
+        preferredLanguage: { type: 'string', required: false, input: false },
       },
     },
 
