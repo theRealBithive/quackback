@@ -358,6 +358,53 @@ the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
 does the intersection with the diff that used to be done by hand. Three runs
 paid for it.
 
+## 3x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+
+`lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
+`error:03000098:digital envelope routines::invalid digest`. It is not the repo:
+the same `createSign('RSA-SHA1')` throws in a bare `node -e` outside the
+checkout, because the system OpenSSL refuses to _produce_ a SHA-1 signature
+under the DEFAULT crypto policy. Verification is not blocked — measured, a
+`createVerify('RSA-SHA1')` runs and returns `false` — so it is only the fixture
+the test signs for itself that cannot be made here. The production path is fine
+and CI signs it happily, which is why nobody had noticed.
+
+The red line is not the cost. `coverage.reportOnFailure` defaults to **false**,
+so a full run with _any_ failing test writes no `coverage-final.json` at all, and
+`diff-coverage-check.ts` then reads an empty `coverage/` and grades nothing. Ten
+minutes of full-suite wall clock produced no number, quietly, under a log that
+opens with `Coverage enabled with v8`. Locally the flag is not optional:
+
+```bash
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportOnFailure=true --coverage.reportsDirectory=coverage/local
+```
+
+Two fixes, both small: sign the SignatureVersion 1 fixture once and check it in,
+so the test verifies instead of signing; and put `reportOnFailure: true` in the
+root config's `coverage` block, so a red suite still yields the report that says
+which lines the change left uncovered — which is exactly when it is wanted.
+
+Second run, and it cost the same ten minutes again — while measuring an
+unrelated i18n change. Neither fix has been made, so the trap is intact: the
+run opens with `Coverage enabled with v8`, ends `2 failed | 866 passed`, and
+`diff-coverage-check.ts` then reports `FAIL: the diff-coverage gate graded
+nothing` — a message about _its_ inputs, which reads as a problem with the
+change rather than with the run that fed it. Two observations worth adding.
+The gate names the missing report but not the likely cause, and it is
+one-line-fixable: a red suite with `reportOnFailure` off is the only way to
+reach that state locally, so the message should say so. And the failure is
+environmental rather than repo-specific, which means it hits every Fedora
+checkout on the first full local run and every one after it, until the fixture
+is checked in. The fixture fix is the cheaper of the two and retires the entry
+outright; `reportOnFailure: true` only makes the loss visible.
+
+Third run, on a branch that touches nine message catalogues. This time the
+coverage report was taken from a narrow run instead, so nothing was lost but
+the minute spent working out whether the red line was mine. It was not: the
+same test is red on `origin/main`. Checking the fixture in would have made
+that answer free.
+
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
 `scripts/mutation-manifest.json` and the `toEqual` in
@@ -425,47 +472,6 @@ same run had just run. Re-running the identical suites from the repo root
 turned that into `12 executed, 0 never executed`. The tell held: a file the run
 definitely executed was listed under "out of scope, although they look like
 source". Read that line before reading the holes.
-
-## 2x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
-
-`lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
-`error:03000098:digital envelope routines::invalid digest`. It is not the repo:
-the same `createSign('RSA-SHA1')` throws in a bare `node -e` outside the
-checkout, because the system OpenSSL refuses to _produce_ a SHA-1 signature
-under the DEFAULT crypto policy. Verification is not blocked — measured, a
-`createVerify('RSA-SHA1')` runs and returns `false` — so it is only the fixture
-the test signs for itself that cannot be made here. The production path is fine
-and CI signs it happily, which is why nobody had noticed.
-
-The red line is not the cost. `coverage.reportOnFailure` defaults to **false**,
-so a full run with _any_ failing test writes no `coverage-final.json` at all, and
-`diff-coverage-check.ts` then reads an empty `coverage/` and grades nothing. Ten
-minutes of full-suite wall clock produced no number, quietly, under a log that
-opens with `Coverage enabled with v8`. Locally the flag is not optional:
-
-```bash
-bun x vitest run --coverage.enabled --coverage.reporter=json \
-  --coverage.reportOnFailure=true --coverage.reportsDirectory=coverage/local
-```
-
-Two fixes, both small: sign the SignatureVersion 1 fixture once and check it in,
-so the test verifies instead of signing; and put `reportOnFailure: true` in the
-root config's `coverage` block, so a red suite still yields the report that says
-which lines the change left uncovered — which is exactly when it is wanted.
-
-Second run, and it cost the same ten minutes again — while measuring an
-unrelated i18n change. Neither fix has been made, so the trap is intact: the
-run opens with `Coverage enabled with v8`, ends `2 failed | 866 passed`, and
-`diff-coverage-check.ts` then reports `FAIL: the diff-coverage gate graded
-nothing` — a message about _its_ inputs, which reads as a problem with the
-change rather than with the run that fed it. Two observations worth adding.
-The gate names the missing report but not the likely cause, and it is
-one-line-fixable: a red suite with `reportOnFailure` off is the only way to
-reach that state locally, so the message should say so. And the failure is
-environmental rather than repo-specific, which means it hits every Fedora
-checkout on the first full local run and every one after it, until the fixture
-is checked in. The fixture fix is the cheaper of the two and retires the entry
-outright; `reportOnFailure: true` only makes the loss visible.
 
 ## 1x — A migration passes every local gate and fails CI on schema drift
 
@@ -1045,3 +1051,72 @@ run unless the local run reproduces CI's environment.
 fails naming itself instead of reverting to the quiet skip. Documented in CLAUDE.md's
 mutation section, since "the job waits for `unit`" was the only prerequisite recorded
 there and it was not the only one.
+
+## 1x — Every `defaultMessage` beside a catalogued id is a mutant nothing can kill
+
+react-intl reads `defaultMessage` only when the active catalogue has no entry
+for the id written next to it. `bun scripts/i18n-check.ts` fails the build over
+exactly that, so in a shipped source file the catalogue always wins and the
+fallback string never reaches a screen. A `StringLiteral` mutant that empties it
+therefore survives every test that could exist — measured on the language card,
+where three of nine survivors were this and nothing else.
+
+Three is one manifest record each, and defensible. The work ahead wraps roughly
+3,600 strings, every one of which carries a `defaultMessage`, so the same
+argument would have to be typed out thousands of times — and a manifest that
+long stops being a record anyone reads.
+
+**The gate could decide it once.** A `StringLiteral` mutant on a property named
+`defaultMessage`, whose sibling `id` the i18n gate has verified in all nine
+catalogues, is excused _by that gate_ rather than by an author's say-so. That is
+a rule with a mechanism behind it, unlike an allowlist entry, and it stays
+checkable: an id missing from a catalogue does not get the excuse, and the
+survivor stands.
+
+## 1x — Mounting a real route in a test: three traps, none of which say so
+
+`routes/__tests__/document-lang.test.tsx` puts a memory router around the real
+`__root` to read the `lang` and `dir` a document ends up with. It cost four
+rounds, one per trap, and none of the failures named its cause.
+
+- **Everything redirects to `/onboarding`.** The root's `beforeLoad` sends any
+  non-exempt path there unless `settings.settings.setupState` parses as a
+  _complete v2_ state, and complete is strict: `version: 2`, `steps.core`,
+  `steps.workspace`, and a `startingPoint` whose `outcome`, `resourceType`,
+  `source`, `resolution` and `completedAt` all satisfy `normalizeSetupStateV2`.
+  A near miss returns `null`, which reads as a fresh install. The symptom is a
+  match list of just `["__root__"]`; nothing mentions setup state.
+- **A route that never matched still renders a document.** The not-found page
+  renders inside the root document, so `<html lang>` is set anyway — to `en`.
+  Half the assertions in a lang test expect `en`, so the suite goes green having
+  mounted nothing. It did. Assert the route id is in `router.state.matches`
+  before reading anything off the document.
+- **React 19 hoists the document.** A route's own `<html>`/`<head>`/`<body>` land
+  on the real `document.documentElement`, not inside the container `render()`
+  returns, so `container.querySelector('html')` finds nothing. They also outlive
+  `cleanup()`, so clear the attributes before each render or a test reads back
+  the previous one's.
+
+A pathless layout route built by hand — `createRoute({ getParentRoute, id:
+'_portal' })` with a child under it — never matched at all, and that one is
+still unexplained; the way around it was to use a path-shaped localized route
+(`/auth/recovery`) instead. A documented "mount a route in a test" helper would
+have retired all four.
+
+## 1x — A catalogue edit breaks suites nowhere near it
+
+Adding the missing `onboarding.` keys turned
+`routes/onboarding/__tests__/onboarding-intl.test.tsx` red three commits later.
+That test asserted a step renders its inline English default, on the stated
+grounds that _no catalogue carries onboarding keys_ — true when it was written,
+and quietly untrue afterwards.
+
+Nothing local points at it. `bun scripts/i18n-check.ts` passes, because the keys
+are present in all nine catalogues. `locale-parity` passes, because they are in
+lockstep. Every suite beside the change is green. It surfaced only on a full
+run, eight minutes of wall clock, and would otherwise have surfaced in CI.
+
+**A catalogue file is a dependency of every suite that renders text.** Editing
+`apps/web/src/locales/*.json` means running the whole suite before committing,
+not the suites near the change — worth saying in `CLAUDE.md` beside the coverage
+advice, because the instinct is that a JSON file of strings cannot break a test.
