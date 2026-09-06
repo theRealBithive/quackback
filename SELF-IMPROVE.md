@@ -99,60 +99,6 @@ generalising from "build fixtures inside the test" to **no call into anything
 mutable at module scope**, template tags included: a `sql` tagged template does
 not look like a call, and is one.
 
-## 5x — Local `typecheck` reports hundreds of pre-existing errors
-
-`bun run typecheck` yields around 820 `error TS` on a **clean** tree, almost all in
-`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
-your own change added an error can only be established by stashing, counting the errors,
-restoring and counting again.
-
-Stashing is the wrong tool when a long background job is reading the working tree, and it
-answers a coarser question than the one you have. Grepping the error list for the files
-the change touches is exact and costs one run:
-
-```bash
-bun run typecheck 2>&1 | grep -E "error TS" > /tmp/tc.txt
-git diff --name-only <base>...HEAD | sed 's|^apps/web/||' \
-  | while read -r f; do grep -F "$f" /tmp/tc.txt; done
-```
-
-It is also worth running even when nothing looks type-shaped: it is what caught a test
-mocking `getValidAccessToken` as resolving `null`, where the source returns `''` and never
-a null. The mock typechecked as an error and the test asserted a state the source cannot
-produce — no suite and no mutation run would have said so.
-
-Either pull the codegen step into the `typecheck` script or document which command has to
-run first.
-
-Third occurrence, with a twist that wastes a five-minute run: **the count is
-for the `apps/web` project**. `bun x tsc --noEmit -p tsconfig.json` from the repository
-root type-checks a different project and reports **36823** errors, which reads
-as though the change broke the build. Both numbers are baselines; only the
-`apps/web` one is the one to compare against. Run it from `apps/web`, and
-remember the Bash tool keeps its working directory between calls, so a `cd`
-three commands ago is why the count changed.
-
-Fourth occurrence, and the number itself is the trap: this entry said 815, the
-clean tree now says 820, and five unexplained errors is exactly the shape of
-"your change broke something". **Measure the baseline, never read it from
-here** — the count drifts with every upstream sync, so a written-down figure
-ages into a false alarm. The grep-by-touched-file recipe above does not have
-this problem, which is the argument for using it instead of counting at all.
-
-Fifth occurrence, caused by that fourth note. It recorded "815 then, 820 now" as
-evidence that the baseline drifts — but the 820 was counted on a tree that
-already carried the change under test, and five of those errors were the
-change's own: a test file rendering a component that had just been given two new
-required props. The tree reads 815 again with them fixed. So the note that
-warned against reading a number from here supplied a new one, measured wrong,
-and a report went out saying "820, zero added" when the true answer was five
-added. **A total means nothing unless the tree is genuinely clean, and a branch
-with commits on it never is.** CI's `bun run --filter @quackback/web typecheck`
-names all five by file and line in seventy seconds and is the only cheap
-authority; locally, use the grep-by-touched-file recipe, which cannot be fooled
-this way. The figures in this entry are a record of how far the number moves —
-not something to compare against.
-
 ## 4x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
@@ -808,6 +754,84 @@ Still open: there is no `docker compose -f compose.test.yml up -d` to bring the
 database up in one command.
 
 # Resolved
+
+## 5x — Local `typecheck` reports hundreds of pre-existing errors
+
+`bun run typecheck` yields around 820 `error TS` on a **clean** tree, almost all in
+`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
+your own change added an error can only be established by stashing, counting the errors,
+restoring and counting again.
+
+Stashing is the wrong tool when a long background job is reading the working tree, and it
+answers a coarser question than the one you have. Grepping the error list for the files
+the change touches is exact and costs one run:
+
+```bash
+bun run typecheck 2>&1 | grep -E "error TS" > /tmp/tc.txt
+git diff --name-only <base>...HEAD | sed 's|^apps/web/||' \
+  | while read -r f; do grep -F "$f" /tmp/tc.txt; done
+```
+
+It is also worth running even when nothing looks type-shaped: it is what caught a test
+mocking `getValidAccessToken` as resolving `null`, where the source returns `''` and never
+a null. The mock typechecked as an error and the test asserted a state the source cannot
+produce — no suite and no mutation run would have said so.
+
+Either pull the codegen step into the `typecheck` script or document which command has to
+run first.
+
+Third occurrence, with a twist that wastes a five-minute run: **the count is
+for the `apps/web` project**. `bun x tsc --noEmit -p tsconfig.json` from the repository
+root type-checks a different project and reports **36823** errors, which reads
+as though the change broke the build. Both numbers are baselines; only the
+`apps/web` one is the one to compare against. Run it from `apps/web`, and
+remember the Bash tool keeps its working directory between calls, so a `cd`
+three commands ago is why the count changed.
+
+Fourth occurrence, and the number itself is the trap: this entry said 815, the
+clean tree now says 820, and five unexplained errors is exactly the shape of
+"your change broke something". **Measure the baseline, never read it from
+here** — the count drifts with every upstream sync, so a written-down figure
+ages into a false alarm. The grep-by-touched-file recipe above does not have
+this problem, which is the argument for using it instead of counting at all.
+
+Fifth occurrence, caused by that fourth note. It recorded "815 then, 820 now" as
+evidence that the baseline drifts — but the 820 was counted on a tree that
+already carried the change under test, and five of those errors were the
+change's own: a test file rendering a component that had just been given two new
+required props. The tree reads 815 again with them fixed. So the note that
+warned against reading a number from here supplied a new one, measured wrong,
+and a report went out saying "820, zero added" when the true answer was five
+added. **A total means nothing unless the tree is genuinely clean, and a branch
+with commits on it never is.** CI's `bun run --filter @quackback/web typecheck`
+names all five by file and line in seventy seconds and is the only cheap
+authority; locally, use the grep-by-touched-file recipe, which cannot be fooled
+this way. The figures in this entry are a record of how far the number moves —
+not something to compare against.
+
+**One more thing the recipe above could not have caught**, measured on that
+fifth occurrence: the file that failed to compile was
+`changelog-segment-picker.test.tsx`, and it was **not in the change's diff** — the
+change added two required props to a component, and what broke was a _consumer_
+nobody had opened. Grepping the error list for touched files is blind to exactly
+the most common way a type error appears. There was no local check that would
+have found it.
+
+**Closed** by generating the route tree before typechecking.
+`apps/web/scripts/generate-route-tree.ts` resolves Vite's config, which is when
+the TanStack Start plugin writes `src/routeTree.gen.ts` — 2.8 seconds, and
+byte-identical to what the 55-second `bun run build` writes, verified by diff.
+Both `typecheck` scripts run it first, so a clean tree now reports **0 errors**
+instead of 815, and any error is the change's own. No baseline, no stashing, no
+counting, and the grep recipe is no longer needed for anything.
+
+Two details are load-bearing and are commented in the script: resolving the
+config leaves plugin watchers open, so it has to `process.exit(0)` explicitly or
+it hangs with the work already done (measured: still sitting there at 90
+seconds); and the script fails loudly if no file appeared, because a silent
+no-op would quietly restore the number. CI cannot catch that rot on its own —
+the `check` job builds before it typechecks, and the build writes the same file
+— which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
 
 ## 1x — A Stryker run leaves two things behind that nothing else guards
 
