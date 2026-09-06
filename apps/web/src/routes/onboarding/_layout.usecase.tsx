@@ -78,7 +78,7 @@ export function CloudUseCaseForm(props: {
       <header className="text-center">
         <h1 className="text-2xl font-bold">
           <FormattedMessage
-            id="onboarding.usecase.title"
+            id="onboarding.goal.question"
             defaultMessage="What would you like to accomplish first?"
           />
         </h1>

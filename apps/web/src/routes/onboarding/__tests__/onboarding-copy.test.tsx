@@ -138,7 +138,7 @@ describe('the onboarding wizard in German', () => {
     renderInGerman(<CloudUseCaseForm onSave={async () => {}} />)
 
     expect(
-      screen.getByRole('heading', { name: translated('onboarding.usecase.title') })
+      screen.getByRole('heading', { name: translated('onboarding.goal.question') })
     ).toBeInTheDocument()
     expect(screen.getByText(translated('onboarding.usecase.description'))).toBeInTheDocument()
     expect(

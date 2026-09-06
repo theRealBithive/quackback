@@ -404,7 +404,7 @@ function WorkspaceAndGoalStep() {
         <fieldset className="space-y-4 animate-in fade-in duration-200 motion-reduce:animate-none">
           <legend className="text-base font-semibold">
             <FormattedMessage
-              id="onboarding.workspace.goalLegend"
+              id="onboarding.goal.question"
               defaultMessage="What would you like to accomplish first?"
             />
           </legend>
