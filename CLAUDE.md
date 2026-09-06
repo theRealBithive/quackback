@@ -256,9 +256,14 @@ and recreate of a constraint identical to the one already there.
 
 ## Things the linter and typechecker will not tell you plainly
 
-- `bun run typecheck` reports **~815 pre-existing errors** on a clean tree,
-  because the generated route types are not built locally. To know whether you
-  added one, count, `git stash`, count again.
+- `bun run typecheck` reports **0 errors on a clean tree**, so an error is
+  yours. It used to report ~815, because `src/routeTree.gen.ts` is generated and
+  gitignored and only the build wrote it; the advice was to count, `git stash`,
+  count again. That is gone: both `typecheck` scripts now run
+  `apps/web/scripts/generate-route-tree.ts` first, which resolves Vite's config
+  — the point at which the route tree is written — in under three seconds. If
+  you ever see hundreds of errors in `src/routes/**` again, that script failed
+  and said so; do not start counting.
 - Job handler modules must not contain a call-time `import()`
   (`jobs/__tests__/handler-imports.test.ts`). It would load that module graph
   inside a per-pass workspace scope.
