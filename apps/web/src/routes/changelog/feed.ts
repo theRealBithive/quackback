@@ -8,11 +8,13 @@ export const Route = createFileRoute('/changelog/feed')({
        * GET /changelog/feed
        * Returns RSS 2.0 feed of published changelog entries
        */
-      GET: async () => {
+      GET: async ({ request }) => {
         const [
           { config },
           { db, changelogEntries, and, desc, sql },
           { publicChangelogConditions },
+          { resolveChangelogBoardFilter },
+          { changelogBoardFilterCondition, visibleBoardIdsFor },
           { getSettingsBrandingData },
           { resolvePortalAccessForRequest },
           { isChangelogAudienceGranted },
@@ -22,6 +24,8 @@ export const Route = createFileRoute('/changelog/feed')({
           import('@/lib/server/config'),
           import('@/lib/server/db'),
           import('@/lib/server/domains/changelog/changelog.public'),
+          import('@/lib/server/domains/changelog/changelog-board-filter'),
+          import('@/lib/server/domains/changelog/changelog-board.service'),
           import('@/lib/server/settings-utils'),
           import('@/lib/server/functions/portal-access'),
           import('@/lib/server/domains/changelog/changelog.audience'),
@@ -46,13 +50,31 @@ export const Route = createFileRoute('/changelog/feed')({
         const actor = access.granted ? await policyActorFromAuth(await getOptionalAuth()) : null
         const audienceGranted = actor ? await isChangelogAudienceGranted(actor) : false
 
+        // `?board=` narrows the feed to a product, under exactly the rules the
+        // page uses — the same resolver, the same predicate, the same meaning
+        // for an entry with no product. A feed that disagreed with the page it
+        // is linked from would be worse than no feed filter at all.
+        const requestedBoardIds = new URL(request.url).searchParams.getAll('board')
+        // The reader's visible boards are only looked up when a product was
+        // actually asked for — the same guard the page uses, so the plain feed
+        // costs exactly what it cost before.
+        const visibleBoardIds =
+          requestedBoardIds.length > 0 && actor ? await visibleBoardIdsFor(actor) : []
+        const boardFilter = resolveChangelogBoardFilter(requestedBoardIds, visibleBoardIds)
+        const boardCondition = changelogBoardFilterCondition(boardFilter)
+
         const productEnabled = await isFeatureEnabled('changelog')
         const entries =
           productEnabled && access.granted && audienceGranted
             ? await db
                 .select()
                 .from(changelogEntries)
-                .where(and(...publicChangelogConditions(new Date())))
+                .where(
+                  and(
+                    ...publicChangelogConditions(new Date()),
+                    ...(boardCondition ? [boardCondition] : [])
+                  )
+                )
                 .orderBy(desc(effectiveDisplayDate))
                 .limit(50)
             : []
@@ -67,12 +89,17 @@ export const Route = createFileRoute('/changelog/feed')({
         // a real data leak.
         const cacheControl = 'private, max-age=300'
 
+        // `atom:link rel=self` has to name the URL that was actually fetched,
+        // or a reader subscribed to one product re-resolves to the whole feed.
+        const feedQuery = requestedBoardIds.map((id) => `board=${encodeURIComponent(id)}`).join('&')
+        const feedUrl = `${baseUrl}/changelog/feed${feedQuery ? `?${feedQuery}` : ''}`
+
         // Build RSS XML
         const rssXml = buildRssFeed({
           title: `${siteName} Changelog`,
           description: `Latest updates and releases from ${siteName}`,
           link: `${baseUrl}/changelog`,
-          feedUrl: `${baseUrl}/changelog/feed`,
+          feedUrl,
           entries: entries.map((entry) => ({
             id: entry.id,
             title: entry.title,

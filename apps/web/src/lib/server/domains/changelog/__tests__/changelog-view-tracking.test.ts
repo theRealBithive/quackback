@@ -50,11 +50,17 @@ beforeEach(() => {
   mockWhere.mockReturnValue({ catch: vi.fn() })
   mockSet.mockReturnValue({ where: mockWhere })
   mockUpdate.mockReturnValue({ set: mockSet })
-  // db.select(...).from(...).innerJoin(...).innerJoin(...).where(...) => []
+  // db.select(...).from(...).innerJoin(...).where(...)[.orderBy(...)] => []
+  // Awaitable at any depth, so both the linked-post query and the products
+  // query resolve without the suite knowing which clause each one ends on.
   const chain: Record<string, unknown> = {}
-  chain.from = () => chain
-  chain.innerJoin = () => chain
-  chain.where = () => Promise.resolve([])
+  const self = () => chain
+  chain.from = self
+  chain.innerJoin = self
+  chain.where = self
+  chain.orderBy = self
+  chain.then = (onOk: (v: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+    Promise.resolve([]).then(onOk, onErr)
   mockSelect.mockReturnValue(chain)
 })
 

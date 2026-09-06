@@ -20,6 +20,12 @@ import type { ChangelogId, PostStatusId } from '@quackback/ids'
 import { NotFoundError } from '@/lib/shared/errors'
 import { computeStatus } from './changelog.service'
 import { getCategoriesForEntries, categoryGateAllows } from './changelog-category.service'
+import { resolveChangelogBoardFilter } from './changelog-board-filter'
+import {
+  changelogBoardFilterCondition,
+  getVisibleBoardsForEntries,
+  visibleBoardIdsFor,
+} from './changelog-board.service'
 import { ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy/types'
 import type { PublicChangelogEntry, PublicChangelogListResult } from './changelog.types'
 import { contentJsonForClient } from '@/lib/server/content/storage-read-urls'
@@ -154,6 +160,12 @@ export async function getPublicChangelogById(
     statuses.forEach((s) => statusMap.set(s.id, { name: s.name, color: s.color }))
   }
 
+  // Products are projected, never gated on: an entry's product assignment is
+  // editorial metadata and must not decide who may read the entry (that stays
+  // with the category segment gate above). The audience filter is on the join,
+  // so a board this reader may not see is never named on an entry they can.
+  const entryBoards = (await getVisibleBoardsForEntries([id], actor)).get(id) ?? []
+
   return {
     id: entry.id,
     title: entry.title,
@@ -164,6 +176,7 @@ export async function getPublicChangelogById(
       ? resignStoredAssetUrl(entry.featuredImageUrl)
       : entry.featuredImageUrl,
     categories: categories.map((c) => ({ id: c.id, name: c.name, color: c.color })),
+    boards: entryBoards,
     linkedPosts: linkedPostRows.map((lp) => ({
       id: lp.postId,
       title: lp.postTitle,
@@ -185,13 +198,29 @@ export async function listPublicChangelogs(
   params: {
     cursor?: string
     limit?: number
+    /** Product (board) ids the reader asked for; see changelog-board-filter.ts. */
+    boardIds?: string[]
   },
   actor: Actor = ANONYMOUS_ACTOR
 ): Promise<PublicChangelogListResult> {
-  const { cursor, limit = 20 } = params
+  const { cursor, limit = 20, boardIds } = params
   const now = new Date()
 
   const conditions = publicChangelogConditions(now)
+
+  // The product filter runs in SQL rather than over the fetched page, because
+  // it has to agree with the cursor: filtering after pagination would hand back
+  // short pages and, at a page boundary, drop matching entries entirely.
+  //
+  // The reader's visible boards are only looked up when a product was actually
+  // asked for. Without that guard the unfiltered changelog — the overwhelmingly
+  // common read — would pay for a boards query it makes no use of.
+  const boardFilter = resolveChangelogBoardFilter(
+    boardIds,
+    boardIds?.length ? await visibleBoardIdsFor(actor) : []
+  )
+  const boardCondition = changelogBoardFilterCondition(boardFilter)
+  if (boardCondition) conditions.push(boardCondition)
 
   // Cursor-based pagination. The lookup does NOT filter on deletedAt:
   // if an admin deleted the cursor row between page load and "Load
@@ -208,11 +237,19 @@ export async function listPublicChangelogs(
       ? (cursorEntry.displayDate ?? cursorEntry.publishedAt)
       : null
     if (cursorEffective) {
+      // The cursor timestamp is compared against `effectiveDisplayDate`, which
+      // is a raw `coalesce(...)` expression rather than a column — so drizzle
+      // has no column mapper for the other side and hands postgres.js a `Date`,
+      // which it cannot encode (`The "string" argument must be of type
+      // string ... Received an instance of Date`). Send it as text and let
+      // Postgres cast, which is what a column comparison would have done. Until
+      // this was fixed, every "Load more" on the public changelog threw.
+      const cursorTimestamp = sql`${cursorEffective.toISOString()}::timestamptz`
       conditions.push(
         or(
-          lt(effectiveDisplayDate, cursorEffective),
+          sql`${effectiveDisplayDate} < ${cursorTimestamp}`,
           and(
-            sql`${effectiveDisplayDate} = ${cursorEffective}`,
+            sql`${effectiveDisplayDate} = ${cursorTimestamp}`,
             lt(changelogEntries.id, cursor as ChangelogId)
           )
         )!
@@ -288,6 +325,7 @@ export async function listPublicChangelogs(
   // changelog volume, and it keeps the cursor anchored on the underlying
   // publish ordering rather than reshuffling pagination around a rare gate.
   const categoriesByEntry = await getCategoriesForEntries(entryIds)
+  const boardsByEntry = await getVisibleBoardsForEntries(entryIds, actor)
 
   // Transform to output format (no author info for public view)
   const result: PublicChangelogEntry[] = items
@@ -296,6 +334,7 @@ export async function listPublicChangelogs(
     .map((entry) => {
       const entryLinkedPosts = linkedPostsMap.get(entry.id) ?? []
       const entryCategories = categoriesByEntry.get(entry.id) ?? []
+      const entryBoards = boardsByEntry.get(entry.id) ?? []
       return {
         id: entry.id,
         title: entry.title,
@@ -306,6 +345,7 @@ export async function listPublicChangelogs(
           ? resignStoredAssetUrl(entry.featuredImageUrl)
           : entry.featuredImageUrl,
         categories: entryCategories.map((c) => ({ id: c.id, name: c.name, color: c.color })),
+        boards: entryBoards,
         linkedPosts: entryLinkedPosts.map((lp) => ({
           id: lp.postId,
           title: lp.postTitle,

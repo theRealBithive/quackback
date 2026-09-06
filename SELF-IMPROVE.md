@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 4x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
+## 5x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
 Measured while checking whether the hand-rolled mutation script can be replaced.
 `@stryker-mutator/core@10` and `@stryker-mutator/vitest-runner@10` do install and
@@ -83,6 +83,123 @@ describes. The columns are already in `.mutation-tmp/report.json`; carrying
 `location.start.column` into a `Finding` and printing it would retire that
 manual step.
 
+Fifth run, and the discipline held only because the entry exists. A new service
+module opened with
+
+```ts
+const isAssignedToSomeBoard = sql`EXISTS (SELECT 1 FROM ...)`
+```
+
+at **module scope**, which is not a fixture in a `describe` body but has the
+same effect: every suite importing that module builds the fragment at import
+time, so a mutant inside it crashes collection and reads as `Survived`. The
+tell is the same — the mutant looks like deep logic, the suite reports no
+tests. Moving it into `function assignedToSomeBoard(): SQL` fixed it. Worth
+generalising from "build fixtures inside the test" to **no call into anything
+mutable at module scope**, template tags included: a `sql` tagged template does
+not look like a call, and is one.
+
+## 5x — Local `typecheck` reports hundreds of pre-existing errors
+
+`bun run typecheck` yields around 820 `error TS` on a **clean** tree, almost all in
+`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
+your own change added an error can only be established by stashing, counting the errors,
+restoring and counting again.
+
+Stashing is the wrong tool when a long background job is reading the working tree, and it
+answers a coarser question than the one you have. Grepping the error list for the files
+the change touches is exact and costs one run:
+
+```bash
+bun run typecheck 2>&1 | grep -E "error TS" > /tmp/tc.txt
+git diff --name-only <base>...HEAD | sed 's|^apps/web/||' \
+  | while read -r f; do grep -F "$f" /tmp/tc.txt; done
+```
+
+It is also worth running even when nothing looks type-shaped: it is what caught a test
+mocking `getValidAccessToken` as resolving `null`, where the source returns `''` and never
+a null. The mock typechecked as an error and the test asserted a state the source cannot
+produce — no suite and no mutation run would have said so.
+
+Either pull the codegen step into the `typecheck` script or document which command has to
+run first.
+
+Third occurrence, with a twist that wastes a five-minute run: **the count is
+for the `apps/web` project**. `bun x tsc --noEmit -p tsconfig.json` from the repository
+root type-checks a different project and reports **36823** errors, which reads
+as though the change broke the build. Both numbers are baselines; only the
+`apps/web` one is the one to compare against. Run it from `apps/web`, and
+remember the Bash tool keeps its working directory between calls, so a `cd`
+three commands ago is why the count changed.
+
+Fourth occurrence, and the number itself is the trap: this entry said 815, the
+clean tree now says 820, and five unexplained errors is exactly the shape of
+"your change broke something". **Measure the baseline, never read it from
+here** — the count drifts with every upstream sync, so a written-down figure
+ages into a false alarm. The grep-by-touched-file recipe above does not have
+this problem, which is the argument for using it instead of counting at all.
+
+Fifth occurrence, caused by that fourth note. It recorded "815 then, 820 now" as
+evidence that the baseline drifts — but the 820 was counted on a tree that
+already carried the change under test, and five of those errors were the
+change's own: a test file rendering a component that had just been given two new
+required props. The tree reads 815 again with them fixed. So the note that
+warned against reading a number from here supplied a new one, measured wrong,
+and a report went out saying "820, zero added" when the true answer was five
+added. **A total means nothing unless the tree is genuinely clean, and a branch
+with commits on it never is.** CI's `bun run --filter @quackback/web typecheck`
+names all five by file and line in seventy seconds and is the only cheap
+authority; locally, use the grep-by-touched-file recipe, which cannot be fooled
+this way. The figures in this entry are a record of how far the number moves —
+not something to compare against.
+
+## 4x — Test suites are flaky under parallel load
+
+`principals/__tests__/seat-usage.db.test.ts` and
+`tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
+the ~120 fixture-backed suites run together, and pass when run alone. Measured
+over nine full runs of that set: 3 failures in 6 runs on one branch, 1 in 3 on an
+unmodified tree — different files, same shape. `seat-usage` asserts
+`after.members === before.members + 2` against a database-wide count and saw +4,
+so something outside its own rolled-back transaction commits rows while it runs.
+
+The cost is not the flake itself, it is that it makes any change to shared test
+infrastructure unfalsifiable: proving a fixture change innocent took six 75-second
+full-set runs plus a stash-and-compare, because a single red run says nothing.
+Either make the whole-DB counts workspace-scoped, or serialise the suites that
+count globally.
+
+Hit again while measuring what coverage costs a shard. Locally, shard 1/4 with
+coverage failed 4 tests and without coverage failed 1 — which reads as "coverage
+broke the suite" until you notice the one failure is in both runs
+(`singletons-not-shared.test.ts`, a 20s timeout) and the other three are
+`channel-accounts/__tests__/channel-account.service.test.ts`, a real-DB suite,
+two of them with `Cannot access '__vite_ssr_import_4__' before initialization`.
+All four CI shards passed with coverage on 4 vCPU. So the local failures are load
+— this laptop runs vitest 11-way with Postgres on the same box — but ruling that
+out took a second full 3-minute shard run as a control. That is the cost of the
+flakiness: no single run means anything, so every measurement needs a twin.
+
+Hit a third time, and this one is not a DB suite at all:
+`lib/client/mutations/__tests__/settings.test.ts` times out (`Test timed out in
+20000ms`) whenever it runs inside a wider selection, and passes alone. The reason
+is visible once measured: alone it needs 16.7s of test time against the 20s
+`testTimeout` in `vitest.config.ts`, so it has 3s of headroom and any contention
+eats it. It cost two full runs plus a stash-and-compare to prove it was not the
+change under test — the same twin-measurement tax as above, now for a suite that
+touches no database. A suite that close to the timeout is a failure waiting for a
+busy machine; the fix is to find what takes 16s in there, not to raise the limit.
+
+Hit a fourth time, in the one run a final report actually rests on: the whole
+suite, 1429 files. `settings.test.ts` timed out again and took
+`policy/module-state/__tests__/module-state.test.ts` with it — that suite walks
+the source tree, needed 32s under the load of a full run, and lives under the
+same 20s ceiling. Both pass in seconds when the two of them run alone. So a full
+local run now ends with three red lines none of which mean anything until a
+control run has been done, and two of the three are known by name. Either pin a
+per-suite `testTimeout` for these two or make the scanner cache its walk; the
+alternative is that every full run ends in a diagnosis.
+
 ## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
 
 Three wasted turns diagnosing an env-leakage question, all of them spent on the
@@ -123,76 +240,6 @@ line there is no way to spread `coverageConfigDefaults.exclude`, so a
 for a gate that grades coverage, test files counting as source is exactly the
 kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
 whole coverage block in `vitest.config.ts`, where the defaults can be spread.
-
-## 3x — Test suites are flaky under parallel load
-
-`principals/__tests__/seat-usage.db.test.ts` and
-`tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
-the ~120 fixture-backed suites run together, and pass when run alone. Measured
-over nine full runs of that set: 3 failures in 6 runs on one branch, 1 in 3 on an
-unmodified tree — different files, same shape. `seat-usage` asserts
-`after.members === before.members + 2` against a database-wide count and saw +4,
-so something outside its own rolled-back transaction commits rows while it runs.
-
-The cost is not the flake itself, it is that it makes any change to shared test
-infrastructure unfalsifiable: proving a fixture change innocent took six 75-second
-full-set runs plus a stash-and-compare, because a single red run says nothing.
-Either make the whole-DB counts workspace-scoped, or serialise the suites that
-count globally.
-
-Hit again while measuring what coverage costs a shard. Locally, shard 1/4 with
-coverage failed 4 tests and without coverage failed 1 — which reads as "coverage
-broke the suite" until you notice the one failure is in both runs
-(`singletons-not-shared.test.ts`, a 20s timeout) and the other three are
-`channel-accounts/__tests__/channel-account.service.test.ts`, a real-DB suite,
-two of them with `Cannot access '__vite_ssr_import_4__' before initialization`.
-All four CI shards passed with coverage on 4 vCPU. So the local failures are load
-— this laptop runs vitest 11-way with Postgres on the same box — but ruling that
-out took a second full 3-minute shard run as a control. That is the cost of the
-flakiness: no single run means anything, so every measurement needs a twin.
-
-Hit a third time, and this one is not a DB suite at all:
-`lib/client/mutations/__tests__/settings.test.ts` times out (`Test timed out in
-20000ms`) whenever it runs inside a wider selection, and passes alone. The reason
-is visible once measured: alone it needs 16.7s of test time against the 20s
-`testTimeout` in `vitest.config.ts`, so it has 3s of headroom and any contention
-eats it. It cost two full runs plus a stash-and-compare to prove it was not the
-change under test — the same twin-measurement tax as above, now for a suite that
-touches no database. A suite that close to the timeout is a failure waiting for a
-busy machine; the fix is to find what takes 16s in there, not to raise the limit.
-
-## 3x — Local `typecheck` reports 815 pre-existing errors
-
-`bun run typecheck` yields 815 `error TS` on a **clean** tree, almost all in
-`apps/web/src/routes/**`, because the generated route types are not built locally. Whether
-your own change added an error can only be established by stashing, counting the errors,
-restoring and counting again.
-
-Stashing is the wrong tool when a long background job is reading the working tree, and it
-answers a coarser question than the one you have. Grepping the error list for the files
-the change touches is exact and costs one run:
-
-```bash
-bun run typecheck 2>&1 | grep -E "error TS" > /tmp/tc.txt
-git diff --name-only <base>...HEAD | sed 's|^apps/web/||' \
-  | while read -r f; do grep -F "$f" /tmp/tc.txt; done
-```
-
-It is also worth running even when nothing looks type-shaped: it is what caught a test
-mocking `getValidAccessToken` as resolving `null`, where the source returns `''` and never
-a null. The mock typechecked as an error and the test asserted a state the source cannot
-produce — no suite and no mutation run would have said so.
-
-Either pull the codegen step into the `typecheck` script or document which command has to
-run first.
-
-Third occurrence, with a twist that wastes a five-minute run: **the 815 is the
-`apps/web` project**. `bun x tsc --noEmit -p tsconfig.json` from the repository
-root type-checks a different project and reports **36823** errors, which reads
-as though the change broke the build. Both numbers are baselines; only the
-`apps/web` one is the one to compare against. Run it from `apps/web`, and
-remember the Bash tool keeps its working directory between calls, so a `cd`
-three commands ago is why the count changed.
 
 ## 3x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -323,6 +370,109 @@ same run had just run. Re-running the identical suites from the repo root
 turned that into `12 executed, 0 never executed`. The tell held: a file the run
 definitely executed was listed under "out of scope, although they look like
 source". Read that line before reading the holes.
+
+## 1x — A migration passes every local gate and fails CI on schema drift
+
+`bun run db:check-drift` is a CI step (inside the `test` shard, not `check`), and
+nothing in the local workflow points at it. It recreates a scratch database from
+the migrations and diffs it against the TS schema, and it caught something no
+test could: drizzle-kit reported
+
+```
+ALTER TABLE "changelog_entry_boards" DROP CONSTRAINT "changelog_entry_boards_pk";
+ALTER TABLE "changelog_entry_boards" ADD CONSTRAINT "changelog_entry_boards_pk"
+  PRIMARY KEY("board_id","changelog_entry_id");
+```
+
+— a drop and recreate of a constraint that is **already exactly that**. Postgres
+agreed with both sides: `pg_get_constraintdef` read back
+`PRIMARY KEY (board_id, changelog_entry_id)` under that name, and the TS schema
+declared the same name and the same order.
+
+The cause is that the composite key led with `board_id` while the table declared
+`changelog_entry_id` first. drizzle-kit compares a composite key against the
+table's **attribute order**, so a key deliberately ordered for the index it
+should serve reads as a difference. The link table it was modelled on does not
+trip this only because its key happens to match its column order. Fix: declare
+the columns in key order — the comment on the schema now says why, because it
+looks like cosmetics and is not.
+
+Two things worth doing: run `bun run db:check-drift` locally whenever a
+migration is added (it takes about a minute and needs only `DATABASE_URL`), and
+say so in CLAUDE.md's Migrations section next to the two tests that go red on
+purpose — the gate that fails here is silent until CI.
+
+## 1x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+
+`lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
+`error:03000098:digital envelope routines::invalid digest`. It is not the repo:
+the same `createSign('RSA-SHA1')` throws in a bare `node -e` outside the
+checkout, because the system OpenSSL refuses to _produce_ a SHA-1 signature
+under the DEFAULT crypto policy. Verification is not blocked — measured, a
+`createVerify('RSA-SHA1')` runs and returns `false` — so it is only the fixture
+the test signs for itself that cannot be made here. The production path is fine
+and CI signs it happily, which is why nobody had noticed.
+
+The red line is not the cost. `coverage.reportOnFailure` defaults to **false**,
+so a full run with _any_ failing test writes no `coverage-final.json` at all, and
+`diff-coverage-check.ts` then reads an empty `coverage/` and grades nothing. Ten
+minutes of full-suite wall clock produced no number, quietly, under a log that
+opens with `Coverage enabled with v8`. Locally the flag is not optional:
+
+```bash
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportOnFailure=true --coverage.reportsDirectory=coverage/local
+```
+
+Two fixes, both small: sign the SignatureVersion 1 fixture once and check it in,
+so the test verifies instead of signing; and put `reportOnFailure: true` in the
+root config's `coverage` block, so a red suite still yields the report that says
+which lines the change left uncovered — which is exactly when it is wanted.
+
+## 1x — Hand-rolled `db` stubs break on a query they never mentioned, and a drizzle `SQL` cannot be printed
+
+Two halves of the same problem: what a test does when it has to look at a query
+instead of at a result.
+
+Adding one `db.select()` to a shared read path — the products lookup in
+`getChangelogById` — broke three suites that had never heard of products.
+`mockReturnValueOnce` chains are positional, so a new query inserted _before_ an
+existing one silently hands every later call the wrong stub; and a stub chain
+that stops at `.where()` throws `orderBy is not a function` the moment a clause
+is added. Both failures name a method, never the call site, and neither is
+about the code under test. Two defences, both cheap and both applied here:
+make the chain awaitable at any depth (`chain.then = …` returning `[]`), so an
+added clause degrades to an empty result instead of a crash; and prefer
+splitting a query into its own service function over threading another
+`mockReturnValueOnce` through, so ordering stops being load-bearing.
+
+The other half: to assert that a predicate reached the query at all, the test
+has to read the `SQL` object the mock captured. `JSON.stringify` throws
+`Converting circular structure to JSON` — drizzle's `SQL` holds table objects
+that point back. `new PgDialect().sqlToQuery(condition)` renders it to
+`{ sql, params }`, with one catch that costs a run: rendering maps parameters
+through their column, so a readable stand-in id (`'board_alpha'`) fails inside
+typeid's parser with `Invalid length. Suffix should have 26 characters`. Test
+ids have to be real (`generateId('board')`), and they arrive in `params` as
+UUIDs, so compare against `toUuid(id)` rather than the typeid.
+
+This is worth an assertion helper next to the db fixture rather than a note:
+`renderedWhere(mock)` returning `{ sql, params }` would have saved both runs.
+It also matters beyond convenience — a suite that only checks _which filter was
+resolved_ passes when the filter is never pushed into the WHERE clause, which
+is a survivor the mutation gate pays twenty minutes to find.
+
+A third variant, for when the assertion is "no query was issued at all":
+`testDb` is a **Proxy** onto the active transaction, so `vi.spyOn(testDb,
+'select')` fails with `The property "select" is not defined on the object`, and
+so does spying on its prototype. There is no way to count queries through the
+fixture; that assertion needs its own small suite with a counting stub, which
+then has to be added to that file's `suites` list in the mutation manifest.
+
+One last thing that reads as a pass: `bun scripts/mutation-check.ts | tail -60`
+reports **tail's** exit code. The gate printed `FAIL: 5 mutant(s) ... not
+caught` and the shell said `exited with code 0`. Redirect to a file and read it
+instead of piping, or the one signal CI acts on is the one you discard.
 
 ## 1x — The coverage and mutation gates read HEAD, not the working tree
 

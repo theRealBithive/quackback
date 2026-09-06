@@ -279,6 +279,8 @@ export {
   changelogEntriesRelations,
   changelogEntryPosts,
   changelogEntryPostsRelations,
+  changelogEntryBoards,
+  changelogEntryBoardsRelations,
   changelogCategories,
   changelogCategoriesRelations,
   changelogEntryCategories,

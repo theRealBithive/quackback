@@ -1765,6 +1765,13 @@
       "when": 1785700000032,
       "tag": "0274_external_link_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 252,
+      "version": "7",
+      "when": 1785700000033,
+      "tag": "0275_changelog_entry_boards",
+      "breakpoints": true
     }
   ]
 }

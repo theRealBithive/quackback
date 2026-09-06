@@ -25,6 +25,12 @@ export const createChangelogSchema = z.object({
   contentJson: tiptapContentSchema.nullable().optional(),
   linkedPostIds: z.array(z.string()).optional(),
   categoryIds: z.array(z.string()).optional(),
+  /**
+   * Products (boards) this entry is about. Omitted or [] means it is a
+   * cross-product announcement: it shows under every product filter rather
+   * than under none.
+   */
+  boardIds: z.array(z.string()).max(100).optional(),
   publishState: publishStateSchema,
   displayDate: z.coerce.date().nullable().optional(),
   /** Hero image URL shown atop the public entry detail page; null clears it. */
@@ -49,6 +55,12 @@ export const updateChangelogSchema = z.object({
   contentJson: tiptapContentSchema.nullable().optional(),
   linkedPostIds: z.array(z.string()).optional(),
   categoryIds: z.array(z.string()).optional(),
+  /**
+   * Products (boards) this entry is about. Omitted or [] means it is a
+   * cross-product announcement: it shows under every product filter rather
+   * than under none.
+   */
+  boardIds: z.array(z.string()).max(100).optional(),
   publishState: publishStateSchema.optional(),
   displayDate: z.coerce.date().nullable().optional(),
   /** Hero image URL shown atop the public entry detail page; null clears it. */
@@ -99,6 +111,12 @@ export const topViewedChangelogsSchema = z.object({
 export const listPublicChangelogsSchema = z.object({
   cursor: z.string().optional(),
   limit: z.number().int().positive().max(100).optional(),
+  /**
+   * Narrow to entries about these products. Ids the reader may not see are
+   * dropped server-side rather than rejected, so a shared link never reports
+   * whether a board exists (see changelog-board-filter.ts).
+   */
+  boardIds: z.array(z.string()).max(100).optional(),
 })
 
 // Export types inferred from schemas

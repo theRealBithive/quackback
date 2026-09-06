@@ -27,14 +27,21 @@ import {
   type StatusOption,
 } from '@/components/shared/sidebar-primitives'
 import { ChangelogCategorySelect } from './changelog-category-select'
+import { ChangelogBoardSelect } from './changelog-board-select'
 import { SegmentMultiSelect } from '@/components/admin/segments/segment-multi-select'
 import { listSegmentsFn } from '@/lib/server/functions/admin'
 import { changelogSettingsQueries } from '@/lib/client/queries/changelog'
 import { useImageUpload } from '@/lib/client/hooks/use-image-upload'
 import { cn, tomorrowAt } from '@/lib/shared/utils'
-import type { PostId, ChangelogCategoryId, SegmentId } from '@quackback/ids'
+import type { BoardId, PostId, ChangelogCategoryId, SegmentId } from '@quackback/ids'
 import type { PublishState } from '@/lib/shared/schemas/changelog'
-import { TagIcon, EnvelopeIcon, PhotoIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import {
+  TagIcon,
+  EnvelopeIcon,
+  PhotoIcon,
+  XMarkIcon,
+  Squares2X2Icon,
+} from '@heroicons/react/24/outline'
 
 interface ChangelogMetadataSidebarContentProps {
   publishState: PublishState
@@ -43,6 +50,9 @@ interface ChangelogMetadataSidebarContentProps {
   onLinkedPostsChange: (postIds: PostId[]) => void
   categoryIds: ChangelogCategoryId[]
   onCategoriesChange: (categoryIds: ChangelogCategoryId[]) => void
+  /** Products this entry is about; [] = a cross-product announcement. */
+  boardIds: BoardId[]
+  onBoardsChange: (boardIds: BoardId[]) => void
   notify: boolean
   onNotifyChange: (notify: boolean) => void
   /** Publish-notification targeting; empty = notify every subscriber. */
@@ -70,6 +80,8 @@ export function ChangelogMetadataSidebarContent({
   onLinkedPostsChange,
   categoryIds,
   onCategoriesChange,
+  boardIds,
+  onBoardsChange,
   notify,
   onNotifyChange,
   segmentIds = [],
@@ -274,6 +286,14 @@ export function ChangelogMetadataSidebarContent({
           />
         </div>
       )}
+
+      {/* Products (boards) — what the public changelog filter narrows by */}
+      <div className="space-y-2">
+        <SidebarRow icon={<Squares2X2Icon className="h-4 w-4" />} label="Products">
+          {null}
+        </SidebarRow>
+        <ChangelogBoardSelect value={boardIds} onChange={onBoardsChange} />
+      </div>
 
       {/* Labels (categories) */}
       <div className="space-y-2">

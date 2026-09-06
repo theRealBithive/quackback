@@ -49,16 +49,29 @@ vi.mock('@/lib/server/db', async (importOriginal) => ({
         return { where: () => p }
       },
     }),
-    select: () => ({
-      from: () => ({
-        where: () => ({ orderBy: () => ({ limit: () => Promise.resolve(mockDueRows) }) }),
-      }),
-    }),
+    select: () => {
+      // Awaitable at any depth so the due-rows query (ends on `.limit()`) and
+      // the products query (ends on `.orderBy()`) share one shape.
+      const chain: Record<string, unknown> = {}
+      const self = () => chain
+      chain.from = self
+      chain.innerJoin = self
+      chain.where = self
+      chain.orderBy = self
+      chain.limit = () => Promise.resolve(mockDueRows)
+      chain.then = (onOk: (v: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+        Promise.resolve([]).then(onOk, onErr)
+      return chain
+    },
     delete: () => ({ where: vi.fn().mockResolvedValue(undefined) }),
   },
   eq: vi.fn(),
   and: vi.fn(),
   asc: vi.fn(),
+  sql: Object.assign(
+    vi.fn(() => ({ kind: 'sql' })),
+    { raw: vi.fn() }
+  ),
   isNull: vi.fn(),
   isNotNull: vi.fn(),
   lte: vi.fn(),

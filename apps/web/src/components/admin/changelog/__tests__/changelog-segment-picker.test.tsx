@@ -52,6 +52,8 @@ const baseProps = {
   onLinkedPostsChange: () => {},
   categoryIds: [],
   onCategoriesChange: () => {},
+  boardIds: [],
+  onBoardsChange: () => {},
   notify: true,
   onNotifyChange: () => {},
 }

@@ -241,6 +241,19 @@ whether the new migration writes data:
   DDL needs a `-- @contract: safe-after X.Y.Z` comment in the migration, never an
   allowlist entry.
 
+Then run the drift check, which is a CI step and has no local trigger:
+
+```bash
+DATABASE_URL=postgresql://postgres:password@localhost:5432/quackback_test \
+  bun run db:check-drift
+```
+
+It builds a scratch database from the migrations and diffs it against the TS
+schema, so it catches the half of a migration no test looks at. It also has one
+sharp edge worth knowing before it fires: a composite primary key must be
+declared in the same order as the table's columns, or drizzle-kit reports a drop
+and recreate of a constraint identical to the one already there.
+
 ## Things the linter and typechecker will not tell you plainly
 
 - `bun run typecheck` reports **~815 pre-existing errors** on a clean tree,
