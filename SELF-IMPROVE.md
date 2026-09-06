@@ -876,6 +876,48 @@ migrations connects fine and turns every per-file probe into a skip.
 Still open: there is no `docker compose -f compose.test.yml up -d` to bring the
 database up in one command.
 
+## 1x — `en.json` is generated, stale, and nothing compares it to the source
+
+Measured on 2026-09-06 while building the shared intl render helper. `en.json`
+is not hand-written: `bun run intl:extract` regenerates it from every
+`defaultMessage` under `src/**`. It has not been re-run in a while, and three
+numbers fall out of comparing the two:
+
+|                                                | Count     |                                                               |
+| ---------------------------------------------- | --------- | ------------------------------------------------------------- |
+| ids in the source with **no** catalogue entry  | **95**    | render `defaultMessage`; untranslatable in all nine languages |
+| catalogue ids with no literal source reference | 243       | partly dynamic ids, partly dead keys — paid for nine times    |
+| shared ids whose **text differs**              | 27 of 947 | the catalogue is behind the source                            |
+
+At runtime the catalogue wins: `loadMessages` imports `en.json`, and an entry
+that exists beats the `defaultMessage` beside it. So for those 27 the product
+shows the older wording — mostly typography (`...` against an ellipsis,
+straight against curly quotes), but three are different sentences.
+
+No existing test can see any of this, and the reason is worth knowing before
+trusting the suite: `locale-parity.test.ts` compares the nine catalogues **to
+each other**, so an id missing from all nine is perfect parity. The
+`*-message-coverage` tests check that a used id falls under an allowed prefix,
+not that it is defined anywhere. The gap between those two is exactly where
+the 95 live.
+
+The mechanics of measuring it cost a run, twice over. `formatjs extract` takes
+`--flatten` and ignores it in this version — values come back as
+`{"defaultMessage": "..."}` objects while `en.json` holds plain strings, so a
+naive diff reports **947 of 947 ids as different** and looks like catastrophe
+rather than a shape mismatch. And the extractor silently skips any
+`<FormattedMessage>` whose `id` is not a string literal (it warns, into a wall
+of other warnings), so a component building ids dynamically is invisible to it
+— which is part of why 243 catalogue keys look dead when some are not.
+
+One consequence for writing tests: a `<FormattedMessage>` with a literal `id`
+**inside a test file** is extracted into the shipped catalogue, because the
+glob is `src/**`. Use a variable for the id in tests.
+
+The fix belongs in the planned i18n gate: assert that every literal id in the
+source is defined in all nine catalogues, and that every catalogue key has a
+source reference. Until then the 95 grow with every batch.
+
 # Resolved
 
 ## 1x — A Stryker run leaves two things behind that nothing else guards
