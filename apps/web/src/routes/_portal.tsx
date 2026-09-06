@@ -21,7 +21,7 @@ import { PortalAccessGate } from '@/components/portal/portal-access-gate'
 import type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 import { generateThemeCSS, readFontSans } from '@/lib/shared/theme'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
-import { getPortalLocaleFn, loadPortalIntl } from '@/lib/server/functions/locale'
+import { loadPortalIntl } from '@/lib/server/functions/locale'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
 import {
   evaluateMyPortalAccessFn,
@@ -84,6 +84,10 @@ export const Route = createFileRoute('/_portal')({
   }),
   loader: async ({ context, deps, location }) => {
     const { session, settings, userRole, baseUrl, registeredAuthProviders } = context
+    // Resolved once per request by the bootstrap, from the teammate's own
+    // choice ahead of their browser's header, and the same value the SSR
+    // document's `<html lang>` is built from.
+    const resolvedLocale = context.resolvedLocale ?? DEFAULT_LOCALE
 
     // Document response header — only meaningful (and only cheap) during SSR;
     // client-side navigations skip the extra RPC.
@@ -129,7 +133,7 @@ export const Route = createFileRoute('/_portal')({
     const permissionKeysPromise = markHandled(
       isTeamMember(userRole) ? getMyPortalPermissionsFn() : Promise.resolve([] as PermissionKey[])
     )
-    const portalIntlPromise = markHandled(loadPortalIntl())
+    const portalIntlPromise = markHandled(loadPortalIntl(resolvedLocale))
 
     const accessResult = await accessResultPromise
     // Parse the portal-route auth-prompt params (signin, prompt, callbackUrl)
@@ -146,8 +150,9 @@ export const Route = createFileRoute('/_portal')({
       const brandingData = settings?.brandingData ?? null
       const brandingConfig = settings?.brandingConfig ?? {}
       const hasThemeConfig = brandingConfig.light || brandingConfig.dark
-      // Locale so the gate's auth dialog renders under PortalIntlProvider.
-      const locale = await getPortalLocaleFn().catch(() => DEFAULT_LOCALE)
+      // The same locale the document was built from, so the gate's auth dialog
+      // never speaks a different language than `<html lang>` claims.
+      const locale = resolvedLocale
       // Instant-SSO: when the workspace's only sign-in method is a single OIDC
       // provider, redirect anonymous visitors straight to the IdP. Skipped for
       // 'unauthorized' (signed-in non-member) — they already have a session and

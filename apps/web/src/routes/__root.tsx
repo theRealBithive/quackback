@@ -39,7 +39,7 @@ export interface RouterContext {
   prefersColorScheme?: BootstrapData['prefersColorScheme']
   managedFieldPaths?: string[]
   registeredAuthProviders?: string[]
-  acceptLanguageLocale?: SupportedLocale
+  resolvedLocale?: SupportedLocale
   updateBannerDismissedVersion?: BootstrapData['updateBannerDismissedVersion']
   billingEnabled?: boolean
   cloudEnabled?: boolean
@@ -73,7 +73,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       prefersColorScheme,
       managedFieldPaths,
       registeredAuthProviders,
-      acceptLanguageLocale,
+      resolvedLocale,
       updateBannerDismissedVersion,
       billingEnabled,
       cloudEnabled,
@@ -129,7 +129,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       prefersColorScheme,
       managedFieldPaths,
       registeredAuthProviders,
-      acceptLanguageLocale,
+      resolvedLocale,
       updateBannerDismissedVersion,
       billingEnabled,
       cloudEnabled,
@@ -235,8 +235,7 @@ class SafeRootDocument extends Component<{ children: ReactNode }, { hasError: bo
 const NON_PORTAL_PREFIXES = ['/admin', '/onboarding', '/api', '/complete-signup']
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
-  const { settings, themeCookie, prefersColorScheme, acceptLanguageLocale } =
-    Route.useRouteContext()
+  const { settings, themeCookie, prefersColorScheme, resolvedLocale } = Route.useRouteContext()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   // structuralSharing keeps the array reference stable across store updates that
   // don't change the matched routes, so RootDocument doesn't re-render every tick.
@@ -290,8 +289,8 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   // valid `?locale=` override wins, matching what the widget itself renders.
   const widgetOverride =
     routeIds.includes('/widget') && widgetLocaleParam ? normalizeLocale(widgetLocaleParam) : null
-  const resolvedLocale = widgetOverride ?? acceptLanguageLocale ?? DEFAULT_LOCALE
-  const { lang, dir } = htmlLangDir(documentLocale(routeIds, resolvedLocale))
+  const documentedLocale = widgetOverride ?? resolvedLocale ?? DEFAULT_LOCALE
+  const { lang, dir } = htmlLangDir(documentLocale(routeIds, documentedLocale))
 
   // suppressHydrationWarning stays: next-themes' inline script sets the theme
   // class on <html> before React hydrates, and for `system` without the client

@@ -41,7 +41,7 @@ export interface BootstrapData {
    *  teammate's own preference now outranks the header, and a preference
    *  naming a language we do not ship falls through to it. Resolved here so
    *  it rides the bootstrap request without a separate round-trip. */
-  acceptLanguageLocale: SupportedLocale
+  resolvedLocale: SupportedLocale
   /** Version string the admin update banner was dismissed for, read from the
    *  `update_banner_dismissed_version` cookie, or null if never dismissed.
    *  Threaded into the admin route the same way `themeCookie` is, so the
@@ -230,7 +230,7 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
   // A teammate's own choice outranks their browser; `resolveLocale` drops an
   // unsupported preference and reads the header instead, so picking a language
   // we do not ship never pins the interface to English (V3).
-  const acceptLanguageLocale = resolveLocale(
+  const resolvedLocale = resolveLocale(
     headers.get('accept-language'),
     preferredLanguage ?? undefined
   )
@@ -276,7 +276,7 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
     prefersColorScheme,
     managedFieldPaths: settings?.managedFieldPaths ?? [],
     registeredAuthProviders,
-    acceptLanguageLocale,
+    resolvedLocale,
     updateBannerDismissedVersion,
     billingEnabled: cloud.enabled && (cloud.canUpgrade || cloud.canManageBilling),
     cloudEnabled: cloud.enabled,

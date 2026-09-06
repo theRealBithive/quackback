@@ -134,10 +134,8 @@ async function resolveFor(options: {
   state.cookie =
     options.cookie !== undefined ? options.cookie : state.authenticated ? 'session=abc' : null
   const { getBootstrapData } = await import('../bootstrap')
-  const data = await (
-    getBootstrapData as unknown as () => Promise<{ acceptLanguageLocale: string }>
-  )()
-  return data.acceptLanguageLocale
+  const data = await (getBootstrapData as unknown as () => Promise<{ resolvedLocale: string }>)()
+  return data.resolvedLocale
 }
 
 beforeEach(() => {

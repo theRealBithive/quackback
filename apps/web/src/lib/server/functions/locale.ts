@@ -1,35 +1,25 @@
-import { createServerFn } from '@tanstack/react-start'
-import { resolveLocale, loadPortalMessages, type SupportedLocale } from '@/lib/shared/i18n'
+import { loadPortalMessages, type SupportedLocale } from '@/lib/shared/i18n'
 
 /**
- * Resolve the portal locale from the request's Accept-Language header.
+ * Load the portal's message catalogue for a locale the caller already knows.
  *
- * Shared by the standalone `/auth/*` routes so they render under the same
- * `PortalIntlProvider` the in-portal pages get from `_portal.tsx` — without
- * it `useIntl`/`<FormattedMessage>` in the auth forms would have no provider.
- */
-export const getPortalLocaleFn = createServerFn({ method: 'GET' }).handler(async () => {
-  const { getRequestHeaders } = await import('@tanstack/react-start/server')
-  const acceptLanguage = getRequestHeaders().get('accept-language')
-  return resolveLocale(acceptLanguage)
-})
-
-/**
- * Resolve the locale AND load its catalog for a route loader, so the page
- * renders translated during SSR (and hydrates from the same catalog) instead
- * of flashing English until the client fetches the messages.
+ * The locale is not resolved here, and deliberately so. The request bootstrap
+ * resolves it once — from the signed-in teammate's own choice first, then the
+ * `Accept-Language` header — and the SSR document's `<html lang>` is built from
+ * that same value. A second resolver in the portal would agree with it only
+ * for as long as nobody picks a language: the moment someone does, the header
+ * still says French and the document says German, and the page declares a
+ * language its text is not written in. One resolver, handed down through the
+ * route context, is what keeps those two from drifting apart.
  *
  * `loadPortalMessages` runs wherever the loader runs: server-side during SSR,
- * and client-side (cached, code-split chunk) on client navigation — only the
- * small locale lookup is ever an RPC. It returns just the portal slice of the
- * catalog (see PORTAL_MESSAGE_PREFIXES), so the SSR HTML doesn't carry the
- * admin/inbox strings the portal never renders.
+ * and client-side (cached, code-split chunk) on client navigation. It returns
+ * just the portal slice of the catalogue (see PORTAL_MESSAGE_PREFIXES), so the
+ * SSR HTML does not carry the admin/inbox strings the portal never renders.
  */
-export async function loadPortalIntl(): Promise<{
+export async function loadPortalIntl(locale: SupportedLocale): Promise<{
   locale: SupportedLocale
   messages: Record<string, string>
 }> {
-  const locale = await getPortalLocaleFn()
-  const messages = await loadPortalMessages(locale)
-  return { locale, messages }
+  return { locale, messages: await loadPortalMessages(locale) }
 }
