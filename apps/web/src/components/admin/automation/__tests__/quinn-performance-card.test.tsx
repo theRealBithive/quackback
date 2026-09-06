@@ -7,9 +7,9 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import type { ReactElement } from 'react'
-import { render, screen, cleanup } from '@testing-library/react'
+import { screen, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { IntlProvider } from 'react-intl'
+import { renderWithIntl } from '@/test/render-with-intl'
 
 const SUMMARY = {
   involvements: 4,
@@ -39,11 +39,7 @@ afterEach(cleanup)
 
 function renderWithClient(ui: ReactElement) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <IntlProvider locale="en" messages={{}} onError={() => {}}>
-      <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
-    </IntlProvider>
-  )
+  return renderWithIntl(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
 }
 
 describe('QuinnPerformanceCard', () => {

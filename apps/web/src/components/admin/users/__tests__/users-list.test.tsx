@@ -8,9 +8,9 @@
  *   - Optional Country column via the Columns menu
  */
 import { describe, it, expect, beforeEach, beforeAll } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { screen, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { IntlProvider } from 'react-intl'
+import { renderWithIntl } from '@/test/render-with-intl'
 import { UsersList } from '../users-list'
 import { installInMemoryLocalStorage } from '@/test/local-storage'
 import type { PortalUserListItemView, UsersFilters } from '@/lib/shared/types'
@@ -68,31 +68,29 @@ function renderList(
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
-    <IntlProvider locale="en" messages={{}}>
-      <QueryClientProvider client={queryClient}>
-        <UsersList
-          users={users}
-          hasMore={false}
-          isLoading={false}
-          isLoadingMore={false}
-          selectedUserId={null}
-          onSelectUser={noop}
-          onLoadMore={noop}
-          filters={FILTERS}
-          onFiltersChange={noop}
-          hasActiveFilters={false}
-          onClearFilters={noop}
-          total={users.length}
-          segments={[MANUAL_SEGMENT]}
-          selectedSegmentIds={[]}
-          onSelectSegment={noop}
-          onClearSegments={noop}
-          canManage
-          {...overrides}
-        />
-      </QueryClientProvider>
-    </IntlProvider>
+  return renderWithIntl(
+    <QueryClientProvider client={queryClient}>
+      <UsersList
+        users={users}
+        hasMore={false}
+        isLoading={false}
+        isLoadingMore={false}
+        selectedUserId={null}
+        onSelectUser={noop}
+        onLoadMore={noop}
+        filters={FILTERS}
+        onFiltersChange={noop}
+        hasActiveFilters={false}
+        onClearFilters={noop}
+        total={users.length}
+        segments={[MANUAL_SEGMENT]}
+        selectedSegmentIds={[]}
+        onSelectSegment={noop}
+        onClearSegments={noop}
+        canManage
+        {...overrides}
+      />
+    </QueryClientProvider>
   )
 }
 

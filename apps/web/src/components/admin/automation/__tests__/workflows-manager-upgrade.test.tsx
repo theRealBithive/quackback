@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { IntlProvider } from 'react-intl'
+import { renderWithIntl } from '@/test/render-with-intl'
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
@@ -35,12 +35,10 @@ const { WorkflowsManager } = await import('../workflows-manager')
 
 function renderManager(entitled: boolean) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <IntlProvider locale="en" defaultLocale="en" messages={{}}>
-      <QueryClientProvider client={queryClient}>
-        <WorkflowsManager entitled={entitled} />
-      </QueryClientProvider>
-    </IntlProvider>
+  return renderWithIntl(
+    <QueryClientProvider client={queryClient}>
+      <WorkflowsManager entitled={entitled} />
+    </QueryClientProvider>
   )
 }
 

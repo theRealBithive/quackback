@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { IntlProvider } from 'react-intl'
+import { renderWithIntl } from '@/test/render-with-intl'
 
 vi.mock('@/lib/server/functions/assistant-settings', () => ({
   getAssistantSettingsFn: vi.fn(),
@@ -17,15 +17,10 @@ afterEach(cleanup)
 
 it('shows deployment as a compact channel-level control', () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
-    <IntlProvider locale="en" messages={{}} onError={() => {}}>
-      <QueryClientProvider client={queryClient}>
-        <AssistantDeploymentCard
-          deployment={{ enabled: true, respond: false }}
-          onChange={() => {}}
-        />
-      </QueryClientProvider>
-    </IntlProvider>
+  renderWithIntl(
+    <QueryClientProvider client={queryClient}>
+      <AssistantDeploymentCard deployment={{ enabled: true, respond: false }} onChange={() => {}} />
+    </QueryClientProvider>
   )
 
   expect(screen.getByRole('heading', { name: 'Messenger replies' })).toBeInTheDocument()

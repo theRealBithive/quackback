@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { IntlProvider } from 'react-intl'
+import { renderWithIntl } from '@/test/render-with-intl'
 
 const config = {
   version: 3 as const,
@@ -44,12 +44,10 @@ afterEach(cleanup)
 
 it('presents writing guidelines with an accessible field label', async () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
-    <IntlProvider locale="en" messages={{}} onError={() => {}}>
-      <QueryClientProvider client={queryClient}>
-        <AdditionalInstructionsCard />
-      </QueryClientProvider>
-    </IntlProvider>
+  renderWithIntl(
+    <QueryClientProvider client={queryClient}>
+      <AdditionalInstructionsCard />
+    </QueryClientProvider>
   )
 
   expect(await screen.findByRole('heading', { name: 'Writing guidelines' })).toBeInTheDocument()
