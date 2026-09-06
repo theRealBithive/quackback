@@ -35,6 +35,7 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
   it('declares every mutation-graded file with the suites that pin it, and nothing else', () => {
     expect(manifest().graded).toEqual([
       { file: 'scripts/audit-policy.ts', suites: ['scripts/__tests__/audit-policy.test.ts'] },
+      { file: 'scripts/i18n-policy.ts', suites: ['scripts/__tests__/i18n-policy.test.ts'] },
       {
         file: 'scripts/diff-coverage-policy.ts',
         suites: ['scripts/__tests__/diff-coverage-policy.test.ts'],
