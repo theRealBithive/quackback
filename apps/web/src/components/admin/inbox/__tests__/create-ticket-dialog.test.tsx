@@ -13,10 +13,9 @@
  * fallback, and submits carrying edited suggestions.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { IntlProvider } from 'react-intl'
-import type { ReactNode } from 'react'
+import { renderWithIntl } from '@/test/render-with-intl'
 import type { TicketTypeDTO } from '@/lib/shared/tickets'
 
 const mocks = vi.hoisted(() => ({
@@ -127,21 +126,13 @@ const outageType: TicketTypeDTO = {
   archived: false,
 }
 
-function wrapper() {
+function renderDialog(props: Partial<Parameters<typeof CreateTicketDialog>[0]> = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return ({ children }: { children: ReactNode }) => (
+  return renderWithIntl(
     <QueryClientProvider client={qc}>
-      <IntlProvider locale="en" messages={{}}>
-        {children}
-      </IntlProvider>
+      <CreateTicketDialog open onOpenChange={vi.fn()} onCreated={vi.fn()} {...props} />
     </QueryClientProvider>
   )
-}
-
-function renderDialog(props: Partial<Parameters<typeof CreateTicketDialog>[0]> = {}) {
-  return render(<CreateTicketDialog open onOpenChange={vi.fn()} onCreated={vi.fn()} {...props} />, {
-    wrapper: wrapper(),
-  })
 }
 
 /** Open a Radix Select and pick one of its options by visible text. happy-dom

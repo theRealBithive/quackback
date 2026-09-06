@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { IntlProvider } from 'react-intl'
+import { renderWithIntl } from '@/test/render-with-intl'
 
 const updateCopilotKnowledge = vi.fn()
 const updateAgentKnowledge = vi.fn()
@@ -66,11 +66,7 @@ afterEach(() => {
 
 function renderWithProviders(node: React.ReactElement) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <IntlProvider locale="en" messages={{}} onError={() => {}}>
-      <QueryClientProvider client={queryClient}>{node}</QueryClientProvider>
-    </IntlProvider>
-  )
+  return renderWithIntl(<QueryClientProvider client={queryClient}>{node}</QueryClientProvider>)
 }
 
 describe('CopilotKnowledgeCard', () => {

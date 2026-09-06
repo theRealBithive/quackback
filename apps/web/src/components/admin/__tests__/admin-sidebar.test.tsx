@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { render, cleanup, screen } from '@testing-library/react'
-import { IntlProvider } from 'react-intl'
+import { cleanup, screen } from '@testing-library/react'
+import { renderWithIntl } from '@/test/render-with-intl'
 
 import { TooltipProvider } from '@/components/ui/tooltip'
 
@@ -78,12 +78,10 @@ function renderSidebar(userRole: 'admin' | 'member') {
     userRole,
     billingEnabled: mockBillingEnabled.current,
   })
-  return render(
-    <IntlProvider locale="en" messages={{}}>
-      <TooltipProvider>
-        <AdminSidebar />
-      </TooltipProvider>
-    </IntlProvider>
+  return renderWithIntl(
+    <TooltipProvider>
+      <AdminSidebar />
+    </TooltipProvider>
   )
 }
 

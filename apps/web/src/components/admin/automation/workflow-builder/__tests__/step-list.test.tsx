@@ -5,9 +5,9 @@
  * select/insert callbacks. Tree derivation itself is covered by tree-walk.test.ts.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { IntlProvider } from 'react-intl'
+import { renderWithIntl } from '@/test/render-with-intl'
 import {
   ROOT_LOCATION,
   createStep,
@@ -51,24 +51,22 @@ function renderList(props: Partial<Parameters<typeof StepList>[0]> = {}) {
   const onSelectNode = vi.fn()
   const onSelectInsertion = vi.fn()
   const onRemoveStep = vi.fn()
-  const utils = render(
-    <IntlProvider locale="en" defaultLocale="en" messages={{}}>
-      <QueryClientProvider client={queryClient}>
-        <WorkflowEntitiesProvider>
-          <StepList
-            tree={newTree()}
-            triggerLabel="New conversation"
-            triggerChannels={[]}
-            selection={null}
-            stepIssues={new Map()}
-            onSelectNode={onSelectNode}
-            onSelectInsertion={onSelectInsertion}
-            onRemoveStep={onRemoveStep}
-            {...props}
-          />
-        </WorkflowEntitiesProvider>
-      </QueryClientProvider>
-    </IntlProvider>
+  const utils = renderWithIntl(
+    <QueryClientProvider client={queryClient}>
+      <WorkflowEntitiesProvider>
+        <StepList
+          tree={newTree()}
+          triggerLabel="New conversation"
+          triggerChannels={[]}
+          selection={null}
+          stepIssues={new Map()}
+          onSelectNode={onSelectNode}
+          onSelectInsertion={onSelectInsertion}
+          onRemoveStep={onRemoveStep}
+          {...props}
+        />
+      </WorkflowEntitiesProvider>
+    </QueryClientProvider>
   )
   return { ...utils, onSelectNode, onSelectInsertion, onRemoveStep }
 }

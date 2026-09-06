@@ -876,6 +876,115 @@ migrations connects fine and turns every per-file probe into a skip.
 Still open: there is no `docker compose -f compose.test.yml up -d` to bring the
 database up in one command.
 
+## 1x — `en.json` is generated, stale, and nothing compares it to the source
+
+Measured on 2026-09-06 while building the shared intl render helper. `en.json`
+is not hand-written: `bun run intl:extract` regenerates it from every
+`defaultMessage` under `src/**`. It has not been re-run in a while, and three
+numbers fall out of comparing the two:
+
+|                                                | Count     |                                                               |
+| ---------------------------------------------- | --------- | ------------------------------------------------------------- |
+| ids in the source with **no** catalogue entry  | **95**    | render `defaultMessage`; untranslatable in all nine languages |
+| catalogue ids with no literal source reference | 243       | partly dynamic ids, partly dead keys — paid for nine times    |
+| shared ids whose **text differs**              | 27 of 947 | the catalogue is behind the source                            |
+
+At runtime the catalogue wins: `loadMessages` imports `en.json`, and an entry
+that exists beats the `defaultMessage` beside it. So for those 27 the product
+shows the older wording — mostly typography (`...` against an ellipsis,
+straight against curly quotes), but three are different sentences.
+
+No existing test can see any of this, and the reason is worth knowing before
+trusting the suite: `locale-parity.test.ts` compares the nine catalogues **to
+each other**, so an id missing from all nine is perfect parity. The
+`*-message-coverage` tests check that a used id falls under an allowed prefix,
+not that it is defined anywhere. The gap between those two is exactly where
+the 95 live.
+
+The mechanics of measuring it cost a run, twice over. `formatjs extract` takes
+`--flatten` and ignores it in this version — values come back as
+`{"defaultMessage": "..."}` objects while `en.json` holds plain strings, so a
+naive diff reports **947 of 947 ids as different** and looks like catastrophe
+rather than a shape mismatch. And the extractor silently skips any
+`<FormattedMessage>` whose `id` is not a string literal (it warns, into a wall
+of other warnings), so a component building ids dynamically is invisible to it
+— which is part of why 243 catalogue keys look dead when some are not.
+
+One consequence for writing tests: a `<FormattedMessage>` with a literal `id`
+**inside a test file** is extracted into the shipped catalogue, because the
+glob is `src/**`. Use a variable for the id in tests.
+
+The fix belongs in the planned i18n gate: assert that every literal id in the
+source is defined in all nine catalogues, and that every catalogue key has a
+source reference. Until then the 95 grow with every batch.
+
+## 1x — Stryker writes no mutant for a prop whose value is an imported name
+
+The shared intl render helper exists for one reason: it mounts the real
+`en.json` where the suites used to mount `{}`. Its mutation report reads
+100.00%, 4 of 4 killed — and none of those four is the one that matters.
+The mutants are three `BlockStatement`s and one `ObjectLiteral`, and the
+object literal is `{ wrapper: IntlWrapper }` in the render call, not the
+catalogue:
+
+```
+ObjectLiteral    line 56 -> '{}'   [Killed]   # { wrapper: IntlWrapper }
+BlockStatement   line 24, 28, 55   [Killed]
+```
+
+`messages={enMessages as Record<string, string>}` is an identifier with a
+cast. Stryker's `ObjectLiteral` mutator fires on literals, so there is no
+`messages={{}}` mutant, and the gate never asks the question the helper was
+written to answer. The test does discriminate — it was proven red against an
+empty catalogue by hand — but nothing holds that line automatically.
+
+This generalises past this file, and it is worth knowing before reading a
+score: a mutation report says every mutant it _generated_ was caught, which is
+not the same as every behaviour being pinned. Configuration-shaped code —
+a component that wires imported values into props, a module that passes a
+constant through — generates few mutants and reads high. The repo already
+documents two ways this gate can flatter a change (`NoCoverage` left out of the
+headline score, a crashed suite scored as `Survived`); this is a third, and the
+quietest, because it fails in the direction of a number that looks perfect.
+
+`grep -o '"mutatorName":"[^"]*"' .mutation-tmp/report.json | sort | uniq -c`
+lists what a run actually generated. Worth a look whenever a file passes with
+very few mutants.
+
+## 1x — A new import turns a committed graph snapshot red, and no local command says so
+
+Adding one file (`apps/web/src/test/render-with-intl.tsx`, which imports
+`@/lib/shared/i18n` and `@/locales/en.json`) failed shard 4/4 in CI on a test
+three directories away:
+
+```
+FAIL apps/web/src/lib/server/policy/dep-graph/__tests__/graph.test.ts
+     > golden graph document > matches the committed GRAPH.md snapshot
+- Edges (26):
++ Edges (28):
++ - test -> lib/shared
++ - test -> locales
+```
+
+`GRAPH.md` is a checked-in `toMatchFileSnapshot` of the bucket-level import
+graph, so **any** new cross-directory import is a deliberate red — the same
+shape as the migration ledger, and correct as a design. What is missing is the
+signal: nothing names it before CI does. Running the suites a change touches
+never reaches it, because the file that goes red is not near the file that
+changed, and the whole-suite run is 20 minutes.
+
+Fix is one command, and it belongs in the pre-push habit for any change that
+adds a file or an import:
+
+```bash
+bun x vitest run apps/web/src/lib/server/policy/dep-graph/__tests__/graph.test.ts
+# -u to accept, then read the diff: it should be only the edges you added
+```
+
+This will fire on most of the remaining language batches, since translating a
+directory means importing `react-intl` and the catalogue into buckets that did
+not reference them before.
+
 # Resolved
 
 ## 1x — A Stryker run leaves two things behind that nothing else guards

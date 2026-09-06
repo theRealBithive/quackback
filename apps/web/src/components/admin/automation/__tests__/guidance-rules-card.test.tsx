@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { IntlProvider } from 'react-intl'
+import { renderWithIntl } from '@/test/render-with-intl'
 
 const rules = [
   {
@@ -93,12 +93,10 @@ afterEach(() => {
 
 function renderCard(agent: 'agent' | 'copilot' = 'agent') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <IntlProvider locale="en" messages={{}} onError={() => {}}>
-      <QueryClientProvider client={queryClient}>
-        <GuidanceRulesCard agent={agent} />
-      </QueryClientProvider>
-    </IntlProvider>
+  return renderWithIntl(
+    <QueryClientProvider client={queryClient}>
+      <GuidanceRulesCard agent={agent} />
+    </QueryClientProvider>
   )
 }
 

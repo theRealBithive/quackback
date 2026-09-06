@@ -6,10 +6,10 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import type { ReactElement } from 'react'
-import { render, renderHook, screen, cleanup, waitFor } from '@testing-library/react'
+import { renderHook, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { IntlProvider } from 'react-intl'
+import { renderWithIntl } from '@/test/render-with-intl'
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
@@ -76,13 +76,11 @@ const GROUP = [
 function renderManager() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const ui: ReactElement = (
-    <IntlProvider locale="en" defaultLocale="en" messages={{}}>
-      <QueryClientProvider client={queryClient}>
-        <WorkflowsManager />
-      </QueryClientProvider>
-    </IntlProvider>
+    <QueryClientProvider client={queryClient}>
+      <WorkflowsManager />
+    </QueryClientProvider>
   )
-  return render(ui)
+  return renderWithIntl(ui)
 }
 
 describe('reorderGroup', () => {

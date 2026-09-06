@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
-import { IntlProvider } from 'react-intl'
+import { cleanup, screen } from '@testing-library/react'
+import { renderWithIntl } from '@/test/render-with-intl'
 import { WHO_REPLIES_FIRST } from '@/lib/shared/assistant/who-replies-first'
 
 const hoisted = vi.hoisted(() => ({
@@ -34,11 +34,7 @@ afterEach(() => {
 })
 
 function renderCard() {
-  return render(
-    <IntlProvider locale="en" defaultLocale="en" messages={{}}>
-      <WhoRepliesFirstCard />
-    </IntlProvider>
-  )
+  return renderWithIntl(<WhoRepliesFirstCard />)
 }
 
 describe('WHO_REPLIES_FIRST', () => {
