@@ -35,6 +35,14 @@
  *     reader is shown English instead of the language they chose; where none
  *     exists they are shown the id (I3). Both fail the run and the report says
  *     which, because they are not equally bad. [V6, V7]
+ * I11 An id the product assembles at runtime, in a namespace we claim as
+ *     translated, must have something in the catalogue it can resolve to. A
+ *     pattern no key can satisfy shows English in every language we offer, and
+ *     no id-by-id rule can see it: no line of source spells the id out, so I1
+ *     has nothing to look up and I4 reads the pattern as proof of use. [V16]
+ * I12 A namespace we have not claimed yet is reported by name rather than
+ *     failing the run. Claiming one is what turns its coverage into a promise,
+ *     and a claim can therefore only ever make the gate louder. [V14]
  */
 import { describe, it, expect } from 'vitest'
 import fc from 'fast-check'
@@ -43,6 +51,7 @@ import {
   isShippedSource,
   mergeScans,
   scanSource,
+  unclaimedPatterns,
   unusedExemptions,
   type Exemption,
   type SourceScan,
@@ -73,13 +82,20 @@ function grade(input: {
   scan?: SourceScan
   catalogues?: Record<string, Record<string, string>>
   exemptions?: Exemption[]
+  claimedPrefixes?: readonly string[]
 }) {
   return gradeCatalogues({
     scan: input.scan ?? EMPTY_SCAN,
     catalogues: input.catalogues ?? cataloguesOf({}),
     defaultLocale: 'en',
     exemptions: input.exemptions ?? [],
+    claimedPrefixes: input.claimedPrefixes ?? [],
   })
+}
+
+/** An assembled-id scan for one pattern, at a nameable place. */
+function assembledOf(pattern: string, file = 'selector.tsx', line = 7) {
+  return scanOf({ assembled: [{ pattern, file, line }] })
 }
 
 describe('catalogue completeness (I1)', () => {
@@ -361,6 +377,7 @@ describe('exemptions (I6, I7)', () => {
       scan: EMPTY_SCAN,
       catalogues: cataloguesOf({}),
       defaultLocale: 'en',
+      claimedPrefixes: [],
       exemptions: [{ id: 'gone.key', reason: 'Was removed upstream.' }],
     }
     expect(gradeCatalogues(input)).toEqual([])
@@ -372,6 +389,7 @@ describe('exemptions (I6, I7)', () => {
       scan: EMPTY_SCAN,
       catalogues: cataloguesOf({ 'dead.key': 'x' }),
       defaultLocale: 'en',
+      claimedPrefixes: [],
       exemptions: [{ id: 'dead.key', reason: 'Kept for the 0.14 rollback path.' }],
     }
     expect(unusedExemptions(input)).toEqual([])
@@ -383,9 +401,91 @@ describe('exemptions (I6, I7)', () => {
         scan: EMPTY_SCAN,
         catalogues: cataloguesOf({}),
         defaultLocale: 'en',
+        claimedPrefixes: [],
         exemptions: [{ id: 'x.y', reason: '' }],
       })
     ).toThrow(/reason/i)
+  })
+})
+
+describe('ids the product assembles at runtime (I11, I12)', () => {
+  it('reports a claimed pattern the catalogue can satisfy with nothing (I11)', () => {
+    const findings = grade({
+      // A namespace that is not empty and still answers nothing: the pattern
+      // needs a `.label` under it, and the one key there is reached by name.
+      scan: scanOf({
+        assembled: [
+          { pattern: 'onboarding.goal.*.label', file: 'use-case-selector.tsx', line: 138 },
+        ],
+        literals: ['onboarding.goal.groupLabel'],
+      }),
+      catalogues: cataloguesOf({ 'onboarding.goal.groupLabel': 'Workspace goal' }),
+      claimedPrefixes: ['onboarding.'],
+    })
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({
+      kind: 'unanswered-pattern',
+      id: 'onboarding.goal.*.label',
+      file: 'use-case-selector.tsx',
+      line: 138,
+    })
+  })
+
+  it('accepts a claimed pattern one key already answers (I11)', () => {
+    const findings = grade({
+      scan: assembledOf('onboarding.step.*'),
+      catalogues: cataloguesOf({ 'onboarding.step.1': 'Account' }),
+      claimedPrefixes: ['onboarding.'],
+    })
+    expect(findings).toEqual([])
+  })
+
+  it('leaves an unclaimed namespace to the report rather than the exit code (I12)', () => {
+    const scan = assembledOf('activation.task.*.*.title', 'getting-started.tsx', 432)
+    const input = {
+      scan,
+      catalogues: cataloguesOf({}),
+      defaultLocale: 'en',
+      exemptions: [],
+      claimedPrefixes: ['onboarding.'],
+    }
+
+    expect(gradeCatalogues(input)).toEqual([])
+    expect(unclaimedPatterns(input)).toEqual([
+      { pattern: 'activation.task.*.*.title', file: 'getting-started.tsx', line: 432 },
+    ])
+  })
+
+  it('does not report a claimed namespace as unclaimed, whether or not it fails (I12)', () => {
+    const claimed = {
+      scan: assembledOf('onboarding.goal.*.label'),
+      catalogues: cataloguesOf({}),
+      defaultLocale: 'en',
+      exemptions: [],
+      claimedPrefixes: ['onboarding.'],
+    }
+    expect(unclaimedPatterns(claimed)).toEqual([])
+  })
+
+  it('does not report a pattern the catalogue answers, claimed or not (I12)', () => {
+    const answered = {
+      scan: assembledOf('activation.goal.*'),
+      catalogues: cataloguesOf({ 'activation.goal.support': 'Support' }),
+      defaultLocale: 'en',
+      exemptions: [],
+      claimedPrefixes: [],
+    }
+    expect(unclaimedPatterns(answered)).toEqual([])
+  })
+
+  it('excuses a pattern the manifest names, with its reason (I6, I11)', () => {
+    const findings = grade({
+      scan: assembledOf('onboarding.goal.*.label'),
+      catalogues: cataloguesOf({}),
+      claimedPrefixes: ['onboarding.'],
+      exemptions: [{ id: 'onboarding.goal.*.label', reason: 'Filled from the board name.' }],
+    })
+    expect(findings).toEqual([])
   })
 })
 
@@ -617,6 +717,46 @@ describe('properties', () => {
     .tuple(fc.constantFrom('admin', 'portal', 'widget'), fc.stringMatching(/^[a-z]{1,8}$/))
     .map(([a, b]) => `${a}.${b}`)
 
+  it('claiming a namespace can only make the gate louder (I12)', () => {
+    // The promise a claim makes is one-way. If claiming could silence a
+    // finding, the manifest would be a way to pass by claiming more, which is
+    // the mirror image of passing by grading less.
+    fc.assert(
+      fc.property(
+        fc.array(idArb, { maxLength: 4 }),
+        fc.array(idArb, { maxLength: 4 }),
+        fc.array(fc.constantFrom('onboarding.', 'activation.', 'admin.'), { maxLength: 3 }),
+        (used, defined, claimedPrefixes) => {
+          const scan = scanOf({
+            references: used.map((u) => ref(u, true)),
+            assembled: defined.map((d, index) => ({
+              pattern: `${d.split('.')[0]}.*`,
+              file: 'x.tsx',
+              line: index + 1,
+            })),
+          })
+          const catalogues = cataloguesOf(Object.fromEntries(defined.map((d) => [d, 'text'])))
+          const base = gradeCatalogues({
+            scan,
+            catalogues,
+            defaultLocale: 'en',
+            exemptions: [],
+            claimedPrefixes: [],
+          })
+          const withClaims = gradeCatalogues({
+            scan,
+            catalogues,
+            defaultLocale: 'en',
+            exemptions: [],
+            claimedPrefixes,
+          })
+          const after = new Set(withClaims.map((f) => `${f.kind}\u0000${f.id}`))
+          return base.every((f) => after.has(`${f.kind}\u0000${f.id}`))
+        }
+      )
+    )
+  })
+
   it('an id reached in any of the three ways is never called removable (I2, I4, I5)', () => {
     fc.assert(
       fc.property(idArb, fc.constantFrom('reference', 'literal', 'assembled'), (id, how) => {
@@ -631,6 +771,7 @@ describe('properties', () => {
           scan,
           catalogues: cataloguesOf({ [id]: 'text' }),
           defaultLocale: 'en',
+          claimedPrefixes: [],
           exemptions: [],
         })
         return findings.every((f) => f.kind !== 'unreferenced-key')
@@ -649,12 +790,14 @@ describe('properties', () => {
             scan,
             catalogues: cataloguesOf({ [id]: 'original' }),
             defaultLocale: 'en',
+            claimedPrefixes: [],
             exemptions: [],
           })
           const reworded = gradeCatalogues({
             scan,
             catalogues: cataloguesOf({ [id]: 'original' }, { de: { [id]: text } }),
             defaultLocale: 'en',
+            claimedPrefixes: [],
             exemptions: [],
           })
           return JSON.stringify(base) === JSON.stringify(reworded)
@@ -671,6 +814,7 @@ describe('properties', () => {
             scan: scanOf({ references: [ref(id, true)] }),
             catalogues: cataloguesOf({ [id]: 'text' }),
             defaultLocale: 'en',
+            claimedPrefixes: [],
             exemptions: [{ id, reason: blank }],
           })
           return false
@@ -692,6 +836,7 @@ describe('properties', () => {
             scan: scanOf({ references: used.map((u) => ref(u, true)) }),
             catalogues,
             defaultLocale: 'en',
+            claimedPrefixes: [],
             exemptions: [],
           })
           const known = new Set([...used, ...defined])

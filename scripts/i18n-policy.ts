@@ -79,7 +79,11 @@ export interface SourceScan {
 }
 
 export type FindingKind =
-  'missing-from-catalogue' | 'unreferenced-key' | 'empty-without-english' | 'blank-translation'
+  | 'missing-from-catalogue'
+  | 'unreferenced-key'
+  | 'empty-without-english'
+  | 'blank-translation'
+  | 'unanswered-pattern'
 
 export interface Finding {
   kind: FindingKind
@@ -99,6 +103,15 @@ export interface CatalogueInput {
   catalogues: Record<string, Record<string, string>>
   defaultLocale: string
   exemptions: Exemption[]
+  /**
+   * The message namespaces we claim to have translated, as id prefixes. An
+   * entry is an assertion: every id the interface builds at runtime under this
+   * prefix resolves to something. Claiming one turns {@link unclaimedPatterns}
+   * reporting into a failing finding, so the list can only ever make the gate
+   * louder -- and it is asserted in full by `__tests__/i18n-scope.test.ts`, so
+   * it cannot shrink without a red test saying so.
+   */
+  claimedPrefixes: readonly string[]
 }
 
 /** Byte offset -> 1-based line number. */
@@ -251,6 +264,22 @@ function matchesPattern(id: string, pattern: string): boolean {
   return new RegExp(`^${parts.join('[A-Za-z0-9_.:-]+')}$`).test(id)
 }
 
+/** Whether any key in the catalogue can satisfy an assembled pattern. */
+function patternIsAnswered(catalogue: Record<string, string>, pattern: string): boolean {
+  return Object.keys(catalogue).some((id) => matchesPattern(id, pattern))
+}
+
+/** The runtime-built ids the gate reports on rather than fails for: nothing in
+ *  the catalogue can satisfy them, and we have not claimed their namespace. */
+export function unclaimedPatterns(input: CatalogueInput): AssembledId[] {
+  const catalogue = input.catalogues[input.defaultLocale] ?? {}
+  return input.scan.assembled.filter(
+    (assembled) =>
+      !patternIsAnswered(catalogue, assembled.pattern) &&
+      !input.claimedPrefixes.some((prefix) => assembled.pattern.startsWith(prefix))
+  )
+}
+
 /** The languages whose entry for an id is missing or reads as nothing. */
 function blankLocales(catalogues: Record<string, Record<string, string>>, id: string): string[] {
   return Object.keys(catalogues)
@@ -294,6 +323,21 @@ function gradeIgnoringExemptions(input: CatalogueInput): Finding[] {
       file: reference.file,
       line: reference.line,
       detail: `no entry in ${defaultLocale}.json, so it renders English in every language`,
+    })
+  }
+
+  // I11 — built at runtime in a namespace we claim, and answered by nothing.
+  // I1 cannot see this: no line of source spells such an id out, so there is
+  // nothing to look up, and I4 reads the pattern itself as proof of use.
+  for (const assembled of scan.assembled) {
+    if (!input.claimedPrefixes.some((prefix) => assembled.pattern.startsWith(prefix))) continue
+    if (patternIsAnswered(defaultCatalogue, assembled.pattern)) continue
+    findings.push({
+      kind: 'unanswered-pattern',
+      id: assembled.pattern,
+      file: assembled.file,
+      line: assembled.line,
+      detail: `no ${defaultLocale}.json key can satisfy it, so every id built here renders English`,
     })
   }
 

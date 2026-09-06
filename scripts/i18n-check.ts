@@ -22,6 +22,7 @@ import {
   isShippedSource,
   mergeScans,
   scanSource,
+  unclaimedPatterns,
   unusedExemptions,
   type CatalogueInput,
   type Exemption,
@@ -65,12 +66,16 @@ function readCatalogues(): Record<string, Record<string, string>> {
   return catalogues
 }
 
-function readExemptions(): Exemption[] {
+function readManifest(): { claimedPrefixes: string[]; exemptions: Exemption[] } {
   try {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-    return (manifest.exemptions ?? []) as Exemption[]
+    return {
+      claimedPrefixes: (manifest.claimedPrefixes ?? []) as string[],
+      exemptions: (manifest.exemptions ?? []) as Exemption[],
+    }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      return { claimedPrefixes: [], exemptions: [] }
     throw error
   }
 }
@@ -85,11 +90,13 @@ function main(): number {
   const scans: SourceScan[] = files.map((file) => scanSource(file, readFileSync(file, 'utf8')))
   const scan = mergeScans(scans)
   const catalogues = readCatalogues()
+  const manifest = readManifest()
   const input: CatalogueInput = {
     scan,
     catalogues,
     defaultLocale: DEFAULT_LOCALE,
-    exemptions: readExemptions(),
+    exemptions: manifest.exemptions,
+    claimedPrefixes: manifest.claimedPrefixes,
   }
 
   const locales = Object.keys(catalogues).sort()
@@ -103,15 +110,32 @@ function main(): number {
   const findings = gradeCatalogues(input)
   const removable = unusedExemptions(input)
 
+  // Every kind the policy can return. A kind graded and not printed fails the
+  // run with a count and names nothing, which is a finding nobody can act on.
   for (const kind of [
     'missing-from-catalogue',
+    'unanswered-pattern',
     'unreferenced-key',
     'empty-without-english',
+    'blank-translation',
   ] as const) {
     const group = findings.filter((f) => f.kind === kind)
     if (group.length === 0) continue
     console.log(`\n${kind} (${group.length}):`)
     for (const finding of group) console.log(describe(finding))
+  }
+
+  const unclaimed = unclaimedPatterns(input)
+  if (unclaimed.length > 0) {
+    console.log(
+      `\nNamespaces built at runtime that no catalogue answers, and that we do not claim yet (${unclaimed.length}):`
+    )
+    for (const pattern of unclaimed) {
+      console.log(
+        `  - ${pattern.pattern} (${path.relative(repoRoot, pattern.file)}:${pattern.line})`
+      )
+    }
+    console.log('  Claim one in the manifest once its surface is translated.')
   }
 
   if (removable.length > 0) {

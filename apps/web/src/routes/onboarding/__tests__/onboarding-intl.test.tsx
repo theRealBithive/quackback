@@ -114,6 +114,15 @@ describe('onboarding intl provider', () => {
     // The layout's stepper label goes through intl.formatMessage.
     expect(await screen.findByLabelText(label)).toBeInTheDocument()
 
+    // And the step names inside it, which are the one part of this screen
+    // whose ids are built at runtime (`onboarding.step.${index + 1}`). Nothing
+    // else asserts them: the gate can only see that *some* key answers the
+    // pattern, and the console.error mock above would swallow the missing
+    // translation react-intl logs for the ones that do not.
+    const firstStep = german['onboarding.step.1']
+    expect(firstStep).not.toBe('Account')
+    expect(await screen.findByText(firstStep)).toBeInTheDocument()
+
     const step = await screen.findByTestId('step')
     // The locale the request carried reaches the provider, and the catalogue
     // for that locale reaches it with them. This last line used to assert the
