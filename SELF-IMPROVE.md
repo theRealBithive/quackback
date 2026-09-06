@@ -99,7 +99,7 @@ generalising from "build fixtures inside the test" to **no call into anything
 mutable at module scope**, template tags included: a `sql` tagged template does
 not look like a call, and is one.
 
-## 4x — Local `typecheck` reports ~820 pre-existing errors
+## 5x — Local `typecheck` reports hundreds of pre-existing errors
 
 `bun run typecheck` yields around 820 `error TS` on a **clean** tree, almost all in
 `apps/web/src/routes/**`, because the generated route types are not built locally. Whether
@@ -138,6 +138,20 @@ clean tree now says 820, and five unexplained errors is exactly the shape of
 here** — the count drifts with every upstream sync, so a written-down figure
 ages into a false alarm. The grep-by-touched-file recipe above does not have
 this problem, which is the argument for using it instead of counting at all.
+
+Fifth occurrence, caused by that fourth note. It recorded "815 then, 820 now" as
+evidence that the baseline drifts — but the 820 was counted on a tree that
+already carried the change under test, and five of those errors were the
+change's own: a test file rendering a component that had just been given two new
+required props. The tree reads 815 again with them fixed. So the note that
+warned against reading a number from here supplied a new one, measured wrong,
+and a report went out saying "820, zero added" when the true answer was five
+added. **A total means nothing unless the tree is genuinely clean, and a branch
+with commits on it never is.** CI's `bun run --filter @quackback/web typecheck`
+names all five by file and line in seventy seconds and is the only cheap
+authority; locally, use the grep-by-touched-file recipe, which cannot be fooled
+this way. The figures in this entry are a record of how far the number moves —
+not something to compare against.
 
 ## 4x — Test suites are flaky under parallel load
 
@@ -356,6 +370,37 @@ same run had just run. Re-running the identical suites from the repo root
 turned that into `12 executed, 0 never executed`. The tell held: a file the run
 definitely executed was listed under "out of scope, although they look like
 source". Read that line before reading the holes.
+
+## 1x — A migration passes every local gate and fails CI on schema drift
+
+`bun run db:check-drift` is a CI step (inside the `test` shard, not `check`), and
+nothing in the local workflow points at it. It recreates a scratch database from
+the migrations and diffs it against the TS schema, and it caught something no
+test could: drizzle-kit reported
+
+```
+ALTER TABLE "changelog_entry_boards" DROP CONSTRAINT "changelog_entry_boards_pk";
+ALTER TABLE "changelog_entry_boards" ADD CONSTRAINT "changelog_entry_boards_pk"
+  PRIMARY KEY("board_id","changelog_entry_id");
+```
+
+— a drop and recreate of a constraint that is **already exactly that**. Postgres
+agreed with both sides: `pg_get_constraintdef` read back
+`PRIMARY KEY (board_id, changelog_entry_id)` under that name, and the TS schema
+declared the same name and the same order.
+
+The cause is that the composite key led with `board_id` while the table declared
+`changelog_entry_id` first. drizzle-kit compares a composite key against the
+table's **attribute order**, so a key deliberately ordered for the index it
+should serve reads as a difference. The link table it was modelled on does not
+trip this only because its key happens to match its column order. Fix: declare
+the columns in key order — the comment on the schema now says why, because it
+looks like cosmetics and is not.
+
+Two things worth doing: run `bun run db:check-drift` locally whenever a
+migration is added (it takes about a minute and needs only `DATABASE_URL`), and
+say so in CLAUDE.md's Migrations section next to the two tests that go red on
+purpose — the gate that fails here is silent until CI.
 
 ## 1x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 

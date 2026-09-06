@@ -16,8 +16,8 @@
 -- Inline, the entire file is absorbed by `IF NOT EXISTS` / `ON CONFLICT` and
 -- a replay is a genuine no-op.
 CREATE TABLE IF NOT EXISTS "changelog_entry_boards" (
-	"changelog_entry_id" uuid NOT NULL,
 	"board_id" uuid NOT NULL,
+	"changelog_entry_id" uuid NOT NULL,
 	CONSTRAINT "changelog_entry_boards_pk" PRIMARY KEY("board_id","changelog_entry_id"),
 	CONSTRAINT "changelog_entry_boards_entry_fk" FOREIGN KEY ("changelog_entry_id") REFERENCES "public"."changelog_entries"("id") ON DELETE cascade ON UPDATE no action,
 	CONSTRAINT "changelog_entry_boards_board_fk" FOREIGN KEY ("board_id") REFERENCES "public"."boards"("id") ON DELETE cascade ON UPDATE no action

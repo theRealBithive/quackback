@@ -104,8 +104,12 @@ export const changelogEntryPosts = pgTable(
 export const changelogEntryBoards = pgTable(
   'changelog_entry_boards',
   {
-    changelogEntryId: typeIdColumn('changelog')('changelog_entry_id').notNull(),
+    // `board_id` leads, matching the composite primary key below. Column order
+    // is not cosmetic here: drizzle-kit's drift check compares the key against
+    // the table's attribute order, and reports a key declared in a different
+    // order as a drop-and-recreate of an identical constraint.
     boardId: typeIdColumn('board')('board_id').notNull(),
+    changelogEntryId: typeIdColumn('changelog')('changelog_entry_id').notNull(),
   },
   // Constraint names and composite-PK column order match migration 0275.
   (table) => [
