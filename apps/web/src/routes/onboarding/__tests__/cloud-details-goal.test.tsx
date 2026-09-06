@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { IntlProvider } from 'react-intl'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { renderWithIntl } from '@/test/render-with-intl'
 import { CloudUseCaseForm } from '../_layout.usecase'
 import { CloudWorkspaceDetailsForm } from '../_layout.workspace'
 
@@ -24,7 +24,7 @@ function primaryButtons(): HTMLElement[] {
 describe('cloud post-handoff onboarding', () => {
   it('requires a friendly URL, hides the generated host, and has one primary action', async () => {
     const save = vi.fn().mockResolvedValue(undefined)
-    render(<CloudWorkspaceDetailsForm identity={IDENTITY} onSave={save} />)
+    renderWithIntl(<CloudWorkspaceDetailsForm identity={IDENTITY} onSave={save} />)
 
     expect(screen.getByLabelText('Workspace name')).toHaveValue('Untitled workspace')
     expect(screen.getByLabelText('Workspace URL')).toHaveValue('')
@@ -52,7 +52,7 @@ describe('cloud post-handoff onboarding', () => {
   })
 
   it('does not prefill a generated system host into the URL field', () => {
-    render(
+    renderWithIntl(
       <CloudWorkspaceDetailsForm
         identity={{
           ...IDENTITY,
@@ -67,7 +67,7 @@ describe('cloud post-handoff onboarding', () => {
   })
 
   it('keeps the Quackback suffix when a custom domain is canonical', () => {
-    render(
+    renderWithIntl(
       <CloudWorkspaceDetailsForm
         identity={{
           ...IDENTITY,
@@ -84,11 +84,7 @@ describe('cloud post-handoff onboarding', () => {
 
   it('keeps the outcome screen to one primary action', async () => {
     const save = vi.fn().mockResolvedValue(undefined)
-    render(
-      <IntlProvider locale="en" messages={{}}>
-        <CloudUseCaseForm onSave={save} />
-      </IntlProvider>
-    )
+    renderWithIntl(<CloudUseCaseForm onSave={save} />)
 
     expect(primaryButtons()).toHaveLength(1)
     const continueButton = screen.getByRole('button', { name: 'Continue' })

@@ -116,7 +116,7 @@ function ReadyStep() {
   )
 }
 
-function LaunchPreview({ tasks }: { tasks: LaunchTask[] }) {
+export function LaunchPreview({ tasks }: { tasks: LaunchTask[] }) {
   const firstOpen = tasks.findIndex((task) => !task.isCompleted)
   return (
     <ol className="mt-8 w-full divide-y divide-border/70 rounded-2xl border bg-card/60 px-1 text-left">
@@ -137,7 +137,10 @@ function LaunchPreview({ tasks }: { tasks: LaunchTask[] }) {
             </span>
             {task.availability === 'blocked' && (
               <Badge size="sm" shape="pill" variant="outline" className="ml-auto">
-                Needs attention
+                <FormattedMessage
+                  id="onboarding.bridge.needsAttention"
+                  defaultMessage="Needs attention"
+                />
               </Badge>
             )}
           </li>
@@ -148,11 +151,15 @@ function LaunchPreview({ tasks }: { tasks: LaunchTask[] }) {
 }
 
 function PreviewMark({ status }: { status: 'done' | 'current' | 'pending' }) {
+  const intl = useIntl()
   if (status === 'done') {
     return (
       <span
         className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
-        aria-label="Done"
+        aria-label={intl.formatMessage({
+          id: 'onboarding.bridge.mark.done',
+          defaultMessage: 'Done',
+        })}
       >
         <CheckIcon className="h-3 w-3" />
       </span>
@@ -162,9 +169,20 @@ function PreviewMark({ status }: { status: 'done' | 'current' | 'pending' }) {
     return (
       <span
         className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-primary bg-primary/10"
-        aria-label="Up next"
+        aria-label={intl.formatMessage({
+          id: 'onboarding.bridge.mark.next',
+          defaultMessage: 'Up next',
+        })}
       />
     )
   }
-  return <span className="h-5 w-5 shrink-0 rounded-full border border-border" aria-label="Later" />
+  return (
+    <span
+      className="h-5 w-5 shrink-0 rounded-full border border-border"
+      aria-label={intl.formatMessage({
+        id: 'onboarding.bridge.mark.later',
+        defaultMessage: 'Later',
+      })}
+    />
+  )
 }

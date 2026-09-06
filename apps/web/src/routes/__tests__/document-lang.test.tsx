@@ -126,6 +126,16 @@ describe('the language the document declares', () => {
     })
   })
 
+  it('is the resolved one on the onboarding wizard (L14)', async () => {
+    // The first screen a freshly provisioned workspace lands on, and the one
+    // where a wrong `lang` costs the most: every step's copy comes from the
+    // catalogue, so the document has to say so.
+    expect(await documentAttributes('/onboarding', '/onboarding')).toEqual({
+      lang: 'de',
+      dir: 'ltr',
+    })
+  })
+
   it('is English on a surface we have not translated (L14)', async () => {
     // The admin is not in the allowlist yet, and it must not be: `lang="de"`
     // over an English admin is the mislabeling V5 forbids, and worse than the
