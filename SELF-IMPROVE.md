@@ -549,6 +549,74 @@ reports **tail's** exit code. The gate printed `FAIL: 5 mutant(s) ... not
 caught` and the shell said `exited with code 0`. Redirect to a file and read it
 instead of piping, or the one signal CI acts on is the one you discard.
 
+## 1x — A gate's end-to-end test cannot kill a mutant in the policy it spawns
+
+`CLAUDE.md` prescribes the shape every gate here has: pure logic in
+`*-policy.ts`, the process around it in `*-check.ts`, and an end-to-end test
+that spawns the entry point against a fixture. The mutation manifest then pins
+the policy module to the suites that hold it — and for `i18n-policy.ts` that is
+the policy suite alone.
+
+So an assertion written in the spawn test grades nothing. The mutation run
+selects only the declared suites, the end-to-end file is not among them, and
+its assertion never executes against the mutant. The mutant survives while the
+repository contains a test that would obviously have caught it, which is the
+most confusing possible reading of a survivor.
+
+It cost a full mutation run: an emptied `detail` string survived, the fix went
+into the end-to-end test because that is where the report's wording is visible,
+and it survived again unchanged. Moving the same two lines into the policy
+suite killed it immediately.
+
+The rule that follows: a guarantee about what a policy module _returns_ belongs
+in the suite the manifest names. The end-to-end test is for the wiring — that
+the process finds its files, reads its manifest and picks an exit code — and
+nothing it asserts can be relied on to grade the policy.
+
+## 1x — Stale coverage reports from an earlier session merge into the gate silently
+
+`diff-coverage-check.ts` reads **every** `coverage-final.json` under `coverage/`,
+which is the right design — it is what lets CI's four shard reports and a local
+run go through the same code. It also means a report left behind by an earlier
+session is merged in as if it described the current tree.
+
+That is not a stale-but-harmless number. Line coverage is keyed by line, and
+the file has since been reformatted and rewritten, so an old report contributes
+executions at line numbers that now hold different code. The run reported nine
+lines as never executed, four of them inside JSX that the suite plainly renders,
+and the four were an artefact of a `coverage/a` and `coverage/b` from the day
+before. Deleting them and re-running turned the same command from nine phantom
+misses into two real ones.
+
+The failure is quiet in both directions and the dangerous one is the other way:
+a stale report can also mark a line as _executed_ that nothing executes now.
+
+`rm -rf coverage` before a measurement is the workaround. The fix is for the
+gate to say what it merged — the reports it found, and how old each is — or to
+refuse one written before the commit it is grading.
+
+## 1x — Undoing a probe with `git checkout --` discards the work in that file too
+
+The house method for proving a test binds is to inject the regression it is
+meant to catch, watch it go red, and put the file back. `git checkout -- <file>`
+is the obvious way to put it back, and it restores the file to **HEAD** — which
+throws away every uncommitted change in it, not just the probe.
+
+It cost two files in one batch: a source module that had just been rewritten for
+the change, and `de.json` with 34 hand-authored entries in it. Neither loss says
+anything at the time. The typechecker found one of them minutes later, by which
+point the obvious reading was that the edit had never been applied; the other
+surfaced as a gate that had passed and then failed for no reason the diff
+showed.
+
+What makes it easy to walk into: at that point in the work the change is
+deliberately _not_ committed yet, because it is the thing being verified.
+
+Two ways out, and the second is better: copy the file to the scratchpad first
+and copy it back, or commit the change before probing and use
+`git checkout HEAD -- <file>` knowingly — the probe is then genuinely the only
+thing that gets discarded.
+
 ## 1x — The coverage and mutation gates read HEAD, not the working tree
 
 Both gates ask git for the diff between the merge base and `HEAD`
