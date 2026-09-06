@@ -55,7 +55,6 @@ export function LanguageCard() {
   const preference = useQuery({
     queryKey: LANGUAGE_PREFERENCE_QUERY_KEY,
     queryFn: () => getMyLanguagePreferenceFn().then((result) => result.language),
-    staleTime: 5 * 60_000,
   })
 
   const save = useMutation({
@@ -87,7 +86,11 @@ export function LanguageCard() {
   const stored = preference.data ?? null
   const selected = selectedLanguageValue(stored)
   const options = languageOptions(stored, intl.locale)
-  const untranslated = options.find((option) => option.value === selected && !option.shipped)
+  // At most one entry on the list is a language we do not ship, and it is
+  // always the stored one -- which is always the selected one, because that is
+  // the only reason `languageOptions` puts it there. So this is the selected
+  // entry whenever there is one to find, without asking twice.
+  const untranslated = options.find((option) => !option.shipped)
 
   return (
     <div

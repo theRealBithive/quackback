@@ -294,6 +294,41 @@ describe('the mutations excused as equivalent (B6)', () => {
         replacement: 'false',
         why: expect.stringContaining('the same predicate written twice'),
       },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        mutator: 'StringLiteral',
+        line: "defaultMessage: 'Language saved.',",
+        replacement: '""',
+        why: expect.stringContaining('the catalogue always wins'),
+      },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        mutator: 'StringLiteral',
+        line: "defaultMessage: 'Your language could not be saved. Please try again.',",
+        replacement: '""',
+        why: expect.stringContaining('the catalogue always wins'),
+      },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        mutator: 'StringLiteral',
+        line: "defaultMessage: 'Interface language',",
+        replacement: '""',
+        why: expect.stringContaining('the catalogue always wins'),
+      },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        mutator: 'ObjectLiteral',
+        line: "style={{ animationDelay: '225ms' }}",
+        replacement: '{}',
+        why: expect.stringContaining('asserts the line against itself'),
+      },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        mutator: 'StringLiteral',
+        line: "style={{ animationDelay: '225ms' }}",
+        replacement: '""',
+        why: expect.stringContaining('fades in with its siblings'),
+      },
     ])
   })
 

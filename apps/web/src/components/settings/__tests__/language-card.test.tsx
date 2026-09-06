@@ -73,9 +73,13 @@ vi.mock('@/lib/server/functions/teammate-preferences', () => ({
   },
 }))
 
+// `userRole` is on the root context and nowhere else, so the stand-in answers
+// only for the root -- asking a different route for it has to come back
+// without one, the way it would in the running application.
 vi.mock('@tanstack/react-router', () => ({
-  useRouteContext: () => ({ userRole: state.role }),
-  useRouter: () => ({ invalidate: invalidateRouter }),
+  useRouteContext: ({ from }: { from?: string }) =>
+    from === '__root__' ? { userRole: state.role } : {},
+  useRouter: () => ({ invalidate: () => invalidateRouter() }),
 }))
 
 // Called through, rather than handed over: a `vi.mock` factory is hoisted
