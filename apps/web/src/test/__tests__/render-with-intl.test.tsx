@@ -15,6 +15,12 @@
  * T3 A message id that no catalogue defines renders its English fallback and
  *    does not fail the test. That is a finding about the repository, reported
  *    once by the i18n gate, not once per test that happens to render the id.
+ *    This is the one guarantee here the helper inherits rather than enforces:
+ *    react-intl reports a missing translation only when the active locale
+ *    differs from the default one, and this renders under `en`, which is both.
+ *    There is therefore no code in the helper for a mutant to break -- the
+ *    test pins the behaviour so that changing the locale or the provider here
+ *    cannot take it away without a red suite saying so.
  * T4 A number or a date a component renders is formatted for English, the
  *    language of the text around it -- the test-side reflection of V11, and
  *    what stops the helper from claiming a locale it does not actually apply.

@@ -918,6 +918,39 @@ The fix belongs in the planned i18n gate: assert that every literal id in the
 source is defined in all nine catalogues, and that every catalogue key has a
 source reference. Until then the 95 grow with every batch.
 
+## 1x — Stryker writes no mutant for a prop whose value is an imported name
+
+The shared intl render helper exists for one reason: it mounts the real
+`en.json` where the suites used to mount `{}`. Its mutation report reads
+100.00%, 4 of 4 killed — and none of those four is the one that matters.
+The mutants are three `BlockStatement`s and one `ObjectLiteral`, and the
+object literal is `{ wrapper: IntlWrapper }` in the render call, not the
+catalogue:
+
+```
+ObjectLiteral    line 56 -> '{}'   [Killed]   # { wrapper: IntlWrapper }
+BlockStatement   line 24, 28, 55   [Killed]
+```
+
+`messages={enMessages as Record<string, string>}` is an identifier with a
+cast. Stryker's `ObjectLiteral` mutator fires on literals, so there is no
+`messages={{}}` mutant, and the gate never asks the question the helper was
+written to answer. The test does discriminate — it was proven red against an
+empty catalogue by hand — but nothing holds that line automatically.
+
+This generalises past this file, and it is worth knowing before reading a
+score: a mutation report says every mutant it _generated_ was caught, which is
+not the same as every behaviour being pinned. Configuration-shaped code —
+a component that wires imported values into props, a module that passes a
+constant through — generates few mutants and reads high. The repo already
+documents two ways this gate can flatter a change (`NoCoverage` left out of the
+headline score, a crashed suite scored as `Survived`); this is a third, and the
+quietest, because it fails in the direction of a number that looks perfect.
+
+`grep -o '"mutatorName":"[^"]*"' .mutation-tmp/report.json | sort | uniq -c`
+lists what a run actually generated. Worth a look whenever a file passes with
+very few mutants.
+
 # Resolved
 
 ## 1x — A Stryker run leaves two things behind that nothing else guards
