@@ -25,10 +25,13 @@ import {
 } from '@tanstack/react-router'
 import { QueryClient } from '@tanstack/react-query'
 import { useIntl } from 'react-intl'
+import deMessages from '@/locales/de.json'
 import type { SupportedLocale } from '@/lib/shared/i18n'
 import type { RouterContext } from '@/routes/__root'
 import { Route as OnboardingRoute } from '@/routes/onboarding'
 import { Route as OnboardingLayoutRoute } from '@/routes/onboarding/_layout'
+
+const german = deMessages as Record<string, string>
 
 /** Stands in for a step route: any onboarding step calls useIntl like this. */
 function StepProbe() {
@@ -98,16 +101,27 @@ describe('onboarding intl provider', () => {
     render(<RouterProvider router={router} />)
 
     expect(screen.queryByTestId('route-error')?.textContent ?? null).toBeNull()
+
+    // Read back from the catalogue rather than repeated here, so a reworded
+    // string moves the test with it. Asserted German first: against an empty
+    // catalogue both would be the English written beside the id, and the test
+    // would prove nothing about the provider.
+    const label = german['onboarding.progress.label']
+    const title = german['onboarding.account.title']
+    expect(label).not.toBe('Setup progress')
+    expect(title).not.toBe('Create your account')
+
     // The layout's stepper label goes through intl.formatMessage.
-    expect(await screen.findByLabelText('Setup progress')).toBeInTheDocument()
+    expect(await screen.findByLabelText(label)).toBeInTheDocument()
 
     const step = await screen.findByTestId('step')
-    // The locale the request carried reaches the provider (so dates/numbers
-    // format for the visitor)...
+    // The locale the request carried reaches the provider, and the catalogue
+    // for that locale reaches it with them. This last line used to assert the
+    // inline English default on the grounds that no catalogue carried
+    // onboarding keys; nine of them do now, and a visitor sent here in German
+    // reads German.
     expect(step.dataset.locale).toBe('de')
-    // ...while the copy itself still renders its inline English default: no
-    // catalog carries onboarding keys yet.
-    expect(step.textContent).toBe('Create your account')
+    expect(step.textContent).toBe(title)
   })
 
   it('falls back to the default locale when the request carried none', async () => {
