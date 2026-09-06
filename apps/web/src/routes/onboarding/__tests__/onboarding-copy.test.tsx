@@ -26,10 +26,10 @@ import { IntlProvider } from 'react-intl'
 import type { ReactElement } from 'react'
 import deMessages from '@/locales/de.json'
 import enMessages from '@/locales/en.json'
-import type { LaunchTask } from '@/lib/shared/launch-checklist'
+import { buildLaunchTasks, type LaunchTask } from '@/lib/shared/launch-checklist'
 import { CloudUseCaseForm } from '../_layout.usecase'
 import { CloudIdentityUnavailable, CloudWorkspaceDetailsForm } from '../_layout.workspace'
-import { LaunchPreview } from '../_layout.complete'
+import { BridgeDescription, LaunchPreview } from '../_layout.complete'
 
 const german = deMessages as Record<string, string>
 const english = enMessages as Record<string, string>
@@ -182,7 +182,7 @@ describe('the onboarding wizard in German', () => {
   })
 
   it('translates the launch preview, badge and screen-reader marks alike (V5, V7)', () => {
-    renderInGerman(<LaunchPreview tasks={[blockedTask()]} />)
+    renderInGerman(<LaunchPreview tasks={[blockedTask()]} outcome="customer_support" />)
 
     expect(screen.getByText(translated('onboarding.bridge.needsAttention'))).toBeInTheDocument()
     // The marks carry no visible text at all -- their whole content is the
@@ -191,16 +191,61 @@ describe('the onboarding wizard in German', () => {
     expect(screen.getByLabelText(translated('onboarding.bridge.mark.next'))).toBeInTheDocument()
   })
 
+  it('translates the task names in the launch preview (V5, V7)', () => {
+    // The names arrive as English props out of `launch-checklist.ts`, which is
+    // the fallback source and stays English on purpose. A prop is invisible to
+    // a sweep for raw strings and does not change when the catalogue does, so
+    // the rendered text is the only thing that can tell the two apart.
+    const tasks = buildLaunchTasks(
+      { hasBoards: false, memberCount: 1, hasBranding: false },
+      'internal'
+    )
+    expect(tasks.length).toBeGreaterThan(0)
+
+    renderInGerman(<LaunchPreview tasks={tasks} outcome="internal" />)
+
+    for (const task of tasks) {
+      const name = translated(`activation.task.internal.${task.id}.title`)
+      expect(screen.getByText(name)).toBeInTheDocument()
+      expect(
+        screen.queryByText(task.title),
+        `the English name for ${task.id} is still on the page`
+      ).toBeNull()
+    }
+  })
+
+  it('translates the goal it reads into the opening sentence (V5, V7)', () => {
+    // The goal is a value inside a message rather than a message of its own,
+    // so it renders in the middle of a German line. An English word there
+    // reads as a product name and is the easiest kind to walk past.
+    renderInGerman(<BridgeDescription outcome="customer_support" />)
+
+    const goal = translated('activation.goal.customer_support')
+    const sentence = catalogued('onboarding.bridge.description').replace('{goal}', goal)
+
+    expect(screen.getByText(sentence)).toBeInTheDocument()
+    expect(screen.queryByText(/Customer support/)).toBeNull()
+  })
+
   it('marks a done and a later task for a screen reader, in German (V5, V7)', () => {
+    // Real task ids of this goal, because the names now resolve through the
+    // catalogue: an invented id would render its English fallback and the
+    // provider would report the missing translation as a failure.
     const done = {
       ...blockedTask(),
-      id: 'done',
+      id: 'invite-team',
       isCompleted: true,
       availability: 'complete' as const,
     }
-    const later = { ...blockedTask(), id: 'later', availability: 'available' as const }
+    const later = {
+      ...blockedTask(),
+      id: 'customize-branding',
+      availability: 'available' as const,
+    }
 
-    renderInGerman(<LaunchPreview tasks={[done, blockedTask(), later]} />)
+    renderInGerman(
+      <LaunchPreview tasks={[done, blockedTask(), later]} outcome="customer_support" />
+    )
 
     expect(screen.getByLabelText(translated('onboarding.bridge.mark.done'))).toBeInTheDocument()
     expect(screen.getByLabelText(translated('onboarding.bridge.mark.later'))).toBeInTheDocument()

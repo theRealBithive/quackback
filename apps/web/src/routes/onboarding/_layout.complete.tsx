@@ -17,6 +17,7 @@ import {
   type LaunchStatus,
   type LaunchTask,
 } from '@/lib/shared/launch-checklist'
+import type { OnboardingOutcome } from '@/lib/shared/db-types'
 import { cn } from '@/lib/shared/utils'
 
 export const Route = createFileRoute('/onboarding/_layout/complete')({
@@ -81,15 +82,9 @@ function ReadyStep() {
         <FormattedMessage id="onboarding.bridge.title" defaultMessage="Your workspace is ready" />
       </h1>
       {named ? <p className="mt-2 text-sm font-medium text-foreground/80">{named}</p> : null}
-      <p className="mt-2 max-w-sm text-balance text-sm text-muted-foreground">
-        <FormattedMessage
-          id="onboarding.bridge.description"
-          defaultMessage="Here’s what we’ll help you do first for {goal}."
-          values={{ goal: OUTCOME_TAB_LABEL[outcome] }}
-        />
-      </p>
+      <BridgeDescription outcome={outcome} />
 
-      {tasks.length > 0 ? <LaunchPreview tasks={tasks} /> : null}
+      {tasks.length > 0 ? <LaunchPreview tasks={tasks} outcome={outcome} /> : null}
 
       <div aria-live="polite" className="mt-4 w-full">
         {error ? (
@@ -116,7 +111,34 @@ function ReadyStep() {
   )
 }
 
-export function LaunchPreview({ tasks }: { tasks: LaunchTask[] }) {
+/** The sentence naming the goal the workspace picked. The goal reads into the
+ *  middle of it, so the name has to be translated before it is interpolated --
+ *  an English word inside a German line, rather than on a line of its own. */
+export function BridgeDescription({ outcome }: { outcome: OnboardingOutcome }) {
+  const intl = useIntl()
+  return (
+    <p className="mt-2 max-w-sm text-balance text-sm text-muted-foreground">
+      <FormattedMessage
+        id="onboarding.bridge.description"
+        defaultMessage="Here’s what we’ll help you do first for {goal}."
+        values={{
+          goal: intl.formatMessage({
+            id: `activation.goal.${outcome}`,
+            defaultMessage: OUTCOME_TAB_LABEL[outcome],
+          }),
+        }}
+      />
+    </p>
+  )
+}
+
+export function LaunchPreview({
+  tasks,
+  outcome,
+}: {
+  tasks: LaunchTask[]
+  outcome: OnboardingOutcome
+}) {
   const firstOpen = tasks.findIndex((task) => !task.isCompleted)
   return (
     <ol className="mt-8 w-full divide-y divide-border/70 rounded-2xl border bg-card/60 px-1 text-left">
@@ -133,7 +155,10 @@ export function LaunchPreview({ tasks }: { tasks: LaunchTask[] }) {
                 status === 'pending' && 'text-muted-foreground/60'
               )}
             >
-              {task.title}
+              <FormattedMessage
+                id={`activation.task.${outcome}.${task.id}.title`}
+                defaultMessage={task.title}
+              />
             </span>
             {task.availability === 'blocked' && (
               <Badge size="sm" shape="pill" variant="outline" className="ml-auto">

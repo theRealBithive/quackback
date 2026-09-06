@@ -180,7 +180,17 @@ export async function loadWidgetMessages(locale: SupportedLocale): Promise<Recor
  * re-derives the ids from source and fails if one falls outside this list,
  * so a new key can't silently render its English fallback.
  */
-const ONBOARDING_MESSAGE_PREFIXES = ['onboarding.', 'portal.auth.'] as const
+// The last screen previews the launch checklist, and builds its ids the same
+// way the getting-started page does, so the names live in that namespace
+// rather than as a second copy under `onboarding.`. Only the two runs the
+// wizard reads are seeded: the rest of `activation.` is the admin page's, and
+// slicing is the whole point of this list.
+const ONBOARDING_MESSAGE_PREFIXES = [
+  'onboarding.',
+  'portal.auth.',
+  'activation.goal.',
+  'activation.task.',
+] as const
 
 /** The prefix allowlist as a plain string[], for tests and iteration. */
 export const ONBOARDING_MESSAGE_PREFIX_LIST: readonly string[] = ONBOARDING_MESSAGE_PREFIXES
@@ -188,9 +198,9 @@ export const ONBOARDING_MESSAGE_PREFIX_LIST: readonly string[] = ONBOARDING_MESS
 /**
  * The onboarding wizard's slice of the message catalog, loaded in the
  * `/onboarding` layout loader. Mirrors {@link loadPortalMessages} and
- * {@link loadWidgetMessages}: the wizard renders only `onboarding.` ids, so
- * seeding the whole (portal + admin + widget) catalog would add ~80KB to the
- * SSR document of the first screen a new workspace ever sees. Slicing keeps
+ * {@link loadWidgetMessages}: the wizard renders a few dozen ids, so seeding
+ * the whole (portal + admin + widget) catalog would add ~80KB to the SSR
+ * document of the first screen a new workspace ever sees. Slicing keeps
  * that at the handful of keys the wizard can actually show, and the moment
  * translated onboarding copy lands in the catalogs it is picked up here with no
  * further change.
