@@ -177,7 +177,7 @@ no-op would quietly restore the number. CI cannot catch that rot on its own —
 the `check` job builds before it typechecks, and the build writes the same file
 — which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
 
-## 4x — Test suites are flaky under parallel load
+## 5x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -223,6 +223,17 @@ local run now ends with three red lines none of which mean anything until a
 control run has been done, and two of the three are known by name. Either pin a
 per-suite `testTimeout` for these two or make the scanner cache its walk; the
 alternative is that every full run ends in a diagnosis.
+
+Hit a fifth time, and this one was self-inflicted in a way worth naming: the
+coverage run and the full suite were started as two background jobs at the same
+time, to save wall clock. Four tests failed across them —
+`signup-policy.db.test.ts` twice, `settings.test.ts`, and a `beforeEach` timeout
+in `anonymous-feature-flags.test.ts` — none of them related to the change, and
+each passed alone afterwards. The coverage run also exited non-zero, which means
+**no report was written at all** and the gate reported that it graded nothing.
+So the two jobs cost three runs instead of saving one. On this machine the two
+heavy jobs are strictly sequential; there is no version of overlapping them that
+produces a readable result.
 
 ## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
 
