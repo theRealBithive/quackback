@@ -31,6 +31,10 @@
  *    not part of it, and a page is — including a page whose route name merely
  *    looks like a suite, which is a real shape here because routes are named
  *    flatly with dots. [V13]
+ * I10 A blank entry is not a translation. Where an English original exists the
+ *     reader is shown English instead of the language they chose; where none
+ *     exists they are shown the id (I3). Both fail the run and the report says
+ *     which, because they are not equally bad. [V6, V7]
  */
 import { describe, it, expect } from 'vitest'
 import fc from 'fast-check'
@@ -199,7 +203,12 @@ describe('blank translations (I3)', () => {
     expect(findings[0].detail).toContain('ar')
   })
 
-  it('accepts a blank entry when the reference carries its English original (I3)', () => {
+  it('calls a blank entry with an English original the milder finding, not this one (I3, I10)', () => {
+    // This said `toEqual([])` while I3 was the only rule about blanks: a blank
+    // that falls back to English shows the reader real words, so it was not a
+    // defect of the kind I3 is about. I10 then made every blank a finding, and
+    // the guarantee I3 still holds is the narrower one — that *this* kind is
+    // reserved for the case where nothing can be fallen back on.
     const findings = grade({
       scan: scanOf({ references: [ref('automation.nav.label', true)] }),
       catalogues: cataloguesOf(
@@ -207,7 +216,7 @@ describe('blank translations (I3)', () => {
         { ar: { 'automation.nav.label': '' } }
       ),
     })
-    expect(findings).toEqual([])
+    expect(findings.map((f) => f.kind)).toEqual(['blank-translation'])
   })
 
   it('treats whitespace as blank (I3)', () => {
@@ -266,6 +275,66 @@ describe('blank translations (I3)', () => {
     })
     expect(findings[0].detail).toContain('ar')
     expect(findings[0].detail).toContain('ru')
+  })
+})
+
+describe('blank translations that do fall back (I10)', () => {
+  it('reports a blank entry for an id that carries its English original (I10)', () => {
+    const findings = grade({
+      scan: scanOf({ references: [ref('x.y', true, 'card.tsx', 12)] }),
+      catalogues: cataloguesOf({ 'x.y': 'X' }, { de: { 'x.y': '' } }),
+    })
+    expect(findings).toEqual([
+      expect.objectContaining({ kind: 'blank-translation', id: 'x.y', file: 'card.tsx', line: 12 }),
+    ])
+  })
+
+  it('says the reader is shown English rather than their language (I10)', () => {
+    const findings = grade({
+      scan: scanOf({ references: [ref('x.y', true)] }),
+      catalogues: cataloguesOf({ 'x.y': 'X' }, { de: { 'x.y': '' } }),
+    })
+    expect(findings[0].detail).toContain('English original')
+    expect(findings[0].detail).toContain('de')
+  })
+
+  it('does not call the same id both broken and untranslated (I3, I10)', () => {
+    const findings = grade({
+      scan: scanOf({ references: [ref('x.y', false)] }),
+      catalogues: cataloguesOf({ 'x.y': 'X' }, { de: { 'x.y': '' } }),
+    })
+    expect(findings.map((f) => f.kind)).toEqual(['empty-without-english'])
+  })
+
+  it('does not call an unreachable key untranslated (I2, I10)', () => {
+    const findings = grade({
+      catalogues: cataloguesOf({ 'dead.key': 'Dead' }, { de: { 'dead.key': '' } }),
+    })
+    expect(findings.map((f) => f.kind)).toEqual(['unreferenced-key'])
+  })
+
+  it('says nothing when every language reads as text (I10)', () => {
+    const findings = grade({
+      scan: scanOf({ references: [ref('x.y', true)] }),
+      catalogues: cataloguesOf({ 'x.y': 'X' }),
+    })
+    expect(findings).toEqual([])
+  })
+
+  it('names the blank languages in a settled order (I10)', () => {
+    const findings = grade({
+      scan: scanOf({ references: [ref('x.y', true)] }),
+      catalogues: cataloguesOf({ 'x.y': 'X' }, { de: { 'x.y': '' }, ar: { 'x.y': '' } }),
+    })
+    expect(findings[0].detail).toContain('ar, de')
+  })
+
+  it('treats a language that does not define the key at all as blank (I10)', () => {
+    const findings = grade({
+      scan: scanOf({ references: [ref('x.y', true)] }),
+      catalogues: { en: { 'x.y': 'X' }, de: {} },
+    })
+    expect(findings.map((f) => f.kind)).toEqual(['blank-translation'])
   })
 })
 

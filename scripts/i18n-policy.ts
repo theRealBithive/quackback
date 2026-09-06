@@ -78,7 +78,8 @@ export interface SourceScan {
   literals: string[]
 }
 
-export type FindingKind = 'missing-from-catalogue' | 'unreferenced-key' | 'empty-without-english'
+export type FindingKind =
+  'missing-from-catalogue' | 'unreferenced-key' | 'empty-without-english' | 'blank-translation'
 
 export interface Finding {
   kind: FindingKind
@@ -250,6 +251,13 @@ function matchesPattern(id: string, pattern: string): boolean {
   return new RegExp(`^${parts.join('[A-Za-z0-9_.:-]+')}$`).test(id)
 }
 
+/** The languages whose entry for an id is missing or reads as nothing. */
+function blankLocales(catalogues: Record<string, Record<string, string>>, id: string): string[] {
+  return Object.keys(catalogues)
+    .filter((locale) => (catalogues[locale][id] ?? '').trim() === '')
+    .sort()
+}
+
 function assertReasons(exemptions: Exemption[]): void {
   for (const exemption of exemptions) {
     if (exemption.reason.trim() === '') {
@@ -309,9 +317,7 @@ function gradeIgnoringExemptions(input: CatalogueInput): Finding[] {
   for (const id of Object.keys(defaultCatalogue)) {
     if (!reached(id)) continue
     if (firstReference.get(id)?.carriesEnglish) continue
-    const blankIn = Object.keys(catalogues)
-      .filter((locale) => (catalogues[locale][id] ?? '').trim() === '')
-      .sort()
+    const blankIn = blankLocales(catalogues, id)
     if (blankIn.length === 0) continue
     const reference = firstReference.get(id)
     findings.push({
@@ -320,6 +326,25 @@ function gradeIgnoringExemptions(input: CatalogueInput): Finding[] {
       file: reference?.file,
       line: reference?.line,
       detail: `blank in ${blankIn.join(', ')} and used without ${ENGLISH_ORIGINAL}, so those readers see the id itself`,
+    })
+  }
+
+  // I10 — reached, blank, and with an English original to fall back on. Less
+  // severe than the case above and still not a translation: the reader is
+  // shown English rather than the language they chose.
+  for (const id of Object.keys(defaultCatalogue)) {
+    // A reference carrying the English original is itself proof the id is
+    // reached, so there is no separate reachability check here.
+    const reference = firstReference.get(id)
+    if (!reference?.carriesEnglish) continue
+    const blankIn = blankLocales(catalogues, id)
+    if (blankIn.length === 0) continue
+    findings.push({
+      kind: 'blank-translation',
+      id,
+      file: reference.file,
+      line: reference.line,
+      detail: `blank in ${blankIn.join(', ')}, so those readers see the English original instead of their own language`,
     })
   }
 
