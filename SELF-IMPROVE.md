@@ -5,6 +5,79 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
+## 6x — Test suites are flaky under parallel load
+
+`principals/__tests__/seat-usage.db.test.ts` and
+`tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
+the ~120 fixture-backed suites run together, and pass when run alone. Measured
+over nine full runs of that set: 3 failures in 6 runs on one branch, 1 in 3 on an
+unmodified tree — different files, same shape. `seat-usage` asserts
+`after.members === before.members + 2` against a database-wide count and saw +4,
+so something outside its own rolled-back transaction commits rows while it runs.
+
+The cost is not the flake itself, it is that it makes any change to shared test
+infrastructure unfalsifiable: proving a fixture change innocent took six 75-second
+full-set runs plus a stash-and-compare, because a single red run says nothing.
+Either make the whole-DB counts workspace-scoped, or serialise the suites that
+count globally.
+
+Hit again while measuring what coverage costs a shard. Locally, shard 1/4 with
+coverage failed 4 tests and without coverage failed 1 — which reads as "coverage
+broke the suite" until you notice the one failure is in both runs
+(`singletons-not-shared.test.ts`, a 20s timeout) and the other three are
+`channel-accounts/__tests__/channel-account.service.test.ts`, a real-DB suite,
+two of them with `Cannot access '__vite_ssr_import_4__' before initialization`.
+All four CI shards passed with coverage on 4 vCPU. So the local failures are load
+— this laptop runs vitest 11-way with Postgres on the same box — but ruling that
+out took a second full 3-minute shard run as a control. That is the cost of the
+flakiness: no single run means anything, so every measurement needs a twin.
+
+Hit a third time, and this one is not a DB suite at all:
+`lib/client/mutations/__tests__/settings.test.ts` times out (`Test timed out in
+20000ms`) whenever it runs inside a wider selection, and passes alone. The reason
+is visible once measured: alone it needs 16.7s of test time against the 20s
+`testTimeout` in `vitest.config.ts`, so it has 3s of headroom and any contention
+eats it. It cost two full runs plus a stash-and-compare to prove it was not the
+change under test — the same twin-measurement tax as above, now for a suite that
+touches no database. A suite that close to the timeout is a failure waiting for a
+busy machine; the fix is to find what takes 16s in there, not to raise the limit.
+
+Hit a fourth time, in the one run a final report actually rests on: the whole
+suite, 1429 files. `settings.test.ts` timed out again and took
+`policy/module-state/__tests__/module-state.test.ts` with it — that suite walks
+the source tree, needed 32s under the load of a full run, and lives under the
+same 20s ceiling. Both pass in seconds when the two of them run alone. So a full
+local run now ends with three red lines none of which mean anything until a
+control run has been done, and two of the three are known by name. Either pin a
+per-suite `testTimeout` for these two or make the scanner cache its walk; the
+alternative is that every full run ends in a diagnosis.
+
+Hit a fifth time, and this one was self-inflicted in a way worth naming: the
+coverage run and the full suite were started as two background jobs at the same
+time, to save wall clock. Four tests failed across them —
+`signup-policy.db.test.ts` twice, `settings.test.ts`, and a `beforeEach` timeout
+in `anonymous-feature-flags.test.ts` — none of them related to the change, and
+each passed alone afterwards. The coverage run also exited non-zero, which means
+**no report was written at all** and the gate reported that it graded nothing.
+So the two jobs cost three runs instead of saving one. On this machine the two
+heavy jobs are strictly sequential; there is no version of overlapping them that
+produces a readable result.
+
+Hit a sixth time, and it moved the diagnosis: this run was **not** parallel with
+anything. One directory, `lib/server/functions/__tests__`, 106 files, nothing
+else on the machine — and `anonymous-feature-flags.test.ts` still timed out in
+its `beforeEach` at 10s. So the entry's own title undersells it: the load that
+breaks these suites is vitest's own 11-way fan-out inside a single run, not two
+jobs competing. Narrowing the run to the four suites that actually reach the
+change passed in 43 seconds, which is the practical move and also the honest
+one — a directory-wide run buys nothing when the gate grades specific lines.
+
+That narrowing is worth stating as a rule, because the wrong instinct is to run
+wider for safety: a red suite means **no coverage report is written at all**,
+so a run wide enough to include a known flake grades nothing, while the narrow
+run grades exactly what the change touched. Wide is not safer here, it is
+strictly worse.
+
 ## 5x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
 Measured while checking whether the hand-rolled mutation script can be replaced.
@@ -177,106 +250,7 @@ no-op would quietly restore the number. CI cannot catch that rot on its own —
 the `check` job builds before it typechecks, and the build writes the same file
 — which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
 
-## 5x — Test suites are flaky under parallel load
-
-`principals/__tests__/seat-usage.db.test.ts` and
-`tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
-the ~120 fixture-backed suites run together, and pass when run alone. Measured
-over nine full runs of that set: 3 failures in 6 runs on one branch, 1 in 3 on an
-unmodified tree — different files, same shape. `seat-usage` asserts
-`after.members === before.members + 2` against a database-wide count and saw +4,
-so something outside its own rolled-back transaction commits rows while it runs.
-
-The cost is not the flake itself, it is that it makes any change to shared test
-infrastructure unfalsifiable: proving a fixture change innocent took six 75-second
-full-set runs plus a stash-and-compare, because a single red run says nothing.
-Either make the whole-DB counts workspace-scoped, or serialise the suites that
-count globally.
-
-Hit again while measuring what coverage costs a shard. Locally, shard 1/4 with
-coverage failed 4 tests and without coverage failed 1 — which reads as "coverage
-broke the suite" until you notice the one failure is in both runs
-(`singletons-not-shared.test.ts`, a 20s timeout) and the other three are
-`channel-accounts/__tests__/channel-account.service.test.ts`, a real-DB suite,
-two of them with `Cannot access '__vite_ssr_import_4__' before initialization`.
-All four CI shards passed with coverage on 4 vCPU. So the local failures are load
-— this laptop runs vitest 11-way with Postgres on the same box — but ruling that
-out took a second full 3-minute shard run as a control. That is the cost of the
-flakiness: no single run means anything, so every measurement needs a twin.
-
-Hit a third time, and this one is not a DB suite at all:
-`lib/client/mutations/__tests__/settings.test.ts` times out (`Test timed out in
-20000ms`) whenever it runs inside a wider selection, and passes alone. The reason
-is visible once measured: alone it needs 16.7s of test time against the 20s
-`testTimeout` in `vitest.config.ts`, so it has 3s of headroom and any contention
-eats it. It cost two full runs plus a stash-and-compare to prove it was not the
-change under test — the same twin-measurement tax as above, now for a suite that
-touches no database. A suite that close to the timeout is a failure waiting for a
-busy machine; the fix is to find what takes 16s in there, not to raise the limit.
-
-Hit a fourth time, in the one run a final report actually rests on: the whole
-suite, 1429 files. `settings.test.ts` timed out again and took
-`policy/module-state/__tests__/module-state.test.ts` with it — that suite walks
-the source tree, needed 32s under the load of a full run, and lives under the
-same 20s ceiling. Both pass in seconds when the two of them run alone. So a full
-local run now ends with three red lines none of which mean anything until a
-control run has been done, and two of the three are known by name. Either pin a
-per-suite `testTimeout` for these two or make the scanner cache its walk; the
-alternative is that every full run ends in a diagnosis.
-
-Hit a fifth time, and this one was self-inflicted in a way worth naming: the
-coverage run and the full suite were started as two background jobs at the same
-time, to save wall clock. Four tests failed across them —
-`signup-policy.db.test.ts` twice, `settings.test.ts`, and a `beforeEach` timeout
-in `anonymous-feature-flags.test.ts` — none of them related to the change, and
-each passed alone afterwards. The coverage run also exited non-zero, which means
-**no report was written at all** and the gate reported that it graded nothing.
-So the two jobs cost three runs instead of saving one. On this machine the two
-heavy jobs are strictly sequential; there is no version of overlapping them that
-produces a readable result.
-
-## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
-
-Three wasted turns diagnosing an env-leakage question, all of them spent on the
-test runner rather than the question:
-
-- `--reporter=basic` is gone in vitest 4 and fails as
-  `Failed to load custom Reporter from basic`, which reads like a missing file.
-- `--poolOptions.forks.singleFork` is gone too — `Unknown option --poolOptions`.
-  Sequential-in-one-worker is now `--maxWorkers=1 --fileParallelism=false`.
-- `console.log` inside a test never reaches the terminal, even with
-  `--silent=false`. A throwaway probe has to _assert_ what it wants to report
-  and read the value out of the assertion diff.
-
-Worth knowing while writing such a probe: the `forks` pool leaves `isolate` at
-its default, so every test file gets a fresh process and **no** `process.env`
-write crosses files — not even a raw one. Measured, not assumed: a control file
-that stubbed the env and never restored it left the next file untouched, and the
-two files reported different pids. Env hygiene between files is therefore not a
-real hazard here, and `vi.stubEnv` is worth using for the day someone sets
-`isolate: false`, not for today.
-
-Second run, a different corner of the same tool. A `globalSetup` file resolves
-its own imports **from its own location**, not from the config that registers
-it — and bun workspaces do not hoist third-party dependencies to the repo root,
-so a setup file at the root cannot import `drizzle-orm` at all
-(`ERR_MODULE_NOT_FOUND`, raised before the setup body runs, which breaks every
-suite in the repo at once). The workspace packages are worse: `node_modules/@quackback/`
-does not exist, and `@quackback/db/client` resolves **only** through the `alias`
-block in `vitest.config.ts`, which applies to test modules and not to
-globalSetup. A file shared by both configs therefore has to live inside
-`apps/web` and import `../../packages/db/src/client` by path. Three turns.
-
-Third run, the coverage options. **Setting `coverage.exclude` replaces vitest's
-default exclude list rather than adding to it**, and the defaults are what keep
-test files, config files and build output out of the report. On the command
-line there is no way to spread `coverageConfigDefaults.exclude`, so a
-`--coverage.exclude=...` flag silently pulls every test file into scope — and
-for a gate that grades coverage, test files counting as source is exactly the
-kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
-whole coverage block in `vitest.config.ts`, where the defaults can be spread.
-
-## 3x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
+## 4x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
 An entry declares a whole file, and the gate fails on any survivor in it. A change that
 adds three lines to an upstream file therefore has to pin **every** branch that file
@@ -337,6 +311,71 @@ was a POST, nothing passed `credentials: undefined` — which is what the
 framework actually passes when no platform credentials are stored
 (`credentials ?? undefined`), so the optional chaining that mutant removed is
 load-bearing rather than defensive.
+
+Fourth occurrence, and the largest so far, on the notification names of the
+i18n work. The change added four exports to `notifications/catalog.ts` — three
+id builders and a group-label map — and declaring that file produced **57
+survivors plus 7 mutants nothing executed**, against 0 for everything else in
+the run. None of the 57 were in the four new exports. They were upstream's
+25-row data table: every `surfaces: ['admin', 'portal']` as `[]` and as `''`,
+because nothing in the repository asserts which settings surface renders which
+notification row, and `catalogByGroup`, which the suite beside the module never
+calls.
+
+The workaround recorded above worked again, and it is now the third time:
+the four exports moved into `notifications/message-ids.ts`, its suite pins it
+whole, and `catalog.ts` went back to **byte-identical to upstream** — which is
+worth as much as the grading, because it is a file that no longer appears in a
+sync. 459 mutants, 453 killed, 6 excused, 0 ungraded.
+
+The thing to take from the fourth occurrence is that the decision is cheap to
+get right and expensive to get wrong in only one direction. Declaring a file
+costs a gate run (~8 minutes here) to find out whether the claim was true, and
+the answer arrives as a survivor count that says nothing about which half it
+came from until you read every line number. Reading the file first and asking
+"does the suite I wrote assert the parts of this I am not touching" takes a
+minute. For an upstream file with a data table in it, the answer is no.
+
+## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
+
+Three wasted turns diagnosing an env-leakage question, all of them spent on the
+test runner rather than the question:
+
+- `--reporter=basic` is gone in vitest 4 and fails as
+  `Failed to load custom Reporter from basic`, which reads like a missing file.
+- `--poolOptions.forks.singleFork` is gone too — `Unknown option --poolOptions`.
+  Sequential-in-one-worker is now `--maxWorkers=1 --fileParallelism=false`.
+- `console.log` inside a test never reaches the terminal, even with
+  `--silent=false`. A throwaway probe has to _assert_ what it wants to report
+  and read the value out of the assertion diff.
+
+Worth knowing while writing such a probe: the `forks` pool leaves `isolate` at
+its default, so every test file gets a fresh process and **no** `process.env`
+write crosses files — not even a raw one. Measured, not assumed: a control file
+that stubbed the env and never restored it left the next file untouched, and the
+two files reported different pids. Env hygiene between files is therefore not a
+real hazard here, and `vi.stubEnv` is worth using for the day someone sets
+`isolate: false`, not for today.
+
+Second run, a different corner of the same tool. A `globalSetup` file resolves
+its own imports **from its own location**, not from the config that registers
+it — and bun workspaces do not hoist third-party dependencies to the repo root,
+so a setup file at the root cannot import `drizzle-orm` at all
+(`ERR_MODULE_NOT_FOUND`, raised before the setup body runs, which breaks every
+suite in the repo at once). The workspace packages are worse: `node_modules/@quackback/`
+does not exist, and `@quackback/db/client` resolves **only** through the `alias`
+block in `vitest.config.ts`, which applies to test modules and not to
+globalSetup. A file shared by both configs therefore has to live inside
+`apps/web` and import `../../packages/db/src/client` by path. Three turns.
+
+Third run, the coverage options. **Setting `coverage.exclude` replaces vitest's
+default exclude list rather than adding to it**, and the defaults are what keep
+test files, config files and build output out of the report. On the command
+line there is no way to spread `coverageConfigDefaults.exclude`, so a
+`--coverage.exclude=...` flag silently pulls every test file into scope — and
+for a gate that grades coverage, test files counting as source is exactly the
+kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
+whole coverage block in `vitest.config.ts`, where the defaults can be spread.
 
 ## 3x — Coverage had to be re-installed for every measurement
 
@@ -483,6 +522,71 @@ same run had just run. Re-running the identical suites from the repo root
 turned that into `12 executed, 0 never executed`. The tell held: a file the run
 definitely executed was listed under "out of scope, although they look like
 source". Read that line before reading the holes.
+
+## 2x — Mounting a real route in a test: three traps, none of which say so
+
+`routes/__tests__/document-lang.test.tsx` puts a memory router around the real
+`__root` to read the `lang` and `dir` a document ends up with. It cost four
+rounds, one per trap, and none of the failures named its cause.
+
+- **Everything redirects to `/onboarding`.** The root's `beforeLoad` sends any
+  non-exempt path there unless `settings.settings.setupState` parses as a
+  _complete v2_ state, and complete is strict: `version: 2`, `steps.core`,
+  `steps.workspace`, and a `startingPoint` whose `outcome`, `resourceType`,
+  `source`, `resolution` and `completedAt` all satisfy `normalizeSetupStateV2`.
+  A near miss returns `null`, which reads as a fresh install. The symptom is a
+  match list of just `["__root__"]`; nothing mentions setup state.
+- **A route that never matched still renders a document.** The not-found page
+  renders inside the root document, so `<html lang>` is set anyway — to `en`.
+  Half the assertions in a lang test expect `en`, so the suite goes green having
+  mounted nothing. It did. Assert the route id is in `router.state.matches`
+  before reading anything off the document.
+- **React 19 hoists the document.** A route's own `<html>`/`<head>`/`<body>` land
+  on the real `document.documentElement`, not inside the container `render()`
+  returns, so `container.querySelector('html')` finds nothing. They also outlive
+  `cleanup()`, so clear the attributes before each render or a test reads back
+  the previous one's.
+
+A pathless layout route built by hand — `createRoute({ getParentRoute, id:
+'_portal' })` with a child under it — never matched at all, and that one is
+still unexplained; the way around it was to use a path-shaped localized route
+(`/auth/recovery`) instead. A documented "mount a route in a test" helper would
+have retired all four.
+
+**Second occurrence, and it produced the missing recipe.** A test for
+`/auth/auth-complete` needed the same mounting, and the two obvious ways in both
+fail:
+
+- `RootRoute.addChildren([AuthCompleteRoute])` throws `Duplicate routes found
+with id: __root__`. A file route imported from `routes/*.tsx` already carries
+  its parent, so adding it under the root registers the root twice. The message
+  names the root, not the child that caused it.
+- `import { routeTree } from '@/routeTree.gen'` works — until it does not.
+  The file is **generated and gitignored** (`apps/web/.gitignore:12`), written
+  only by `typecheck` and the build, so the suite passes alone on a machine that
+  has built and fails with `Failed to resolve import` inside a wider run or on a
+  fresh checkout. It also costs about forty seconds of import, because it pulls
+  every route in the application.
+
+What works is rebuilding the one route from the file route's own options, which
+keeps `Route.useLoaderData()` resolving (it matches by route id, so the path has
+to stay the same) and drops the suite from 44 seconds to 7:
+
+```tsx
+routeTree: RootRoute.addChildren([
+  createRoute({
+    getParentRoute: () => RootRoute,
+    path: '/auth/auth-complete',
+    validateSearch: AuthCompleteRoute.options.validateSearch,
+    loader: AuthCompleteRoute.options.loader,
+    component: AuthCompleteRoute.options.component,
+  }),
+]),
+```
+
+Both traps and this recipe belong in the helper the first occurrence asked for.
+Every remaining batch of the language work mounts routes, so the helper is now
+the cheaper thing to build.
 
 ## 1x — A migration passes every local gate and fails CI on schema drift
 
@@ -1152,36 +1256,6 @@ a rule with a mechanism behind it, unlike an allowlist entry, and it stays
 checkable: an id missing from a catalogue does not get the excuse, and the
 survivor stands.
 
-## 1x — Mounting a real route in a test: three traps, none of which say so
-
-`routes/__tests__/document-lang.test.tsx` puts a memory router around the real
-`__root` to read the `lang` and `dir` a document ends up with. It cost four
-rounds, one per trap, and none of the failures named its cause.
-
-- **Everything redirects to `/onboarding`.** The root's `beforeLoad` sends any
-  non-exempt path there unless `settings.settings.setupState` parses as a
-  _complete v2_ state, and complete is strict: `version: 2`, `steps.core`,
-  `steps.workspace`, and a `startingPoint` whose `outcome`, `resourceType`,
-  `source`, `resolution` and `completedAt` all satisfy `normalizeSetupStateV2`.
-  A near miss returns `null`, which reads as a fresh install. The symptom is a
-  match list of just `["__root__"]`; nothing mentions setup state.
-- **A route that never matched still renders a document.** The not-found page
-  renders inside the root document, so `<html lang>` is set anyway — to `en`.
-  Half the assertions in a lang test expect `en`, so the suite goes green having
-  mounted nothing. It did. Assert the route id is in `router.state.matches`
-  before reading anything off the document.
-- **React 19 hoists the document.** A route's own `<html>`/`<head>`/`<body>` land
-  on the real `document.documentElement`, not inside the container `render()`
-  returns, so `container.querySelector('html')` finds nothing. They also outlive
-  `cleanup()`, so clear the attributes before each render or a test reads back
-  the previous one's.
-
-A pathless layout route built by hand — `createRoute({ getParentRoute, id:
-'_portal' })` with a child under it — never matched at all, and that one is
-still unexplained; the way around it was to use a path-shaped localized route
-(`/auth/recovery`) instead. A documented "mount a route in a test" helper would
-have retired all four.
-
 ## 1x — A catalogue edit breaks suites nowhere near it
 
 Adding the missing `onboarding.` keys turned
@@ -1229,3 +1303,29 @@ because it is the obvious one. When a message interpolates a value, the test
 that matters is the one about the slot the value sits in — not the one that
 rebuilds the sentence. And any locale check worth having reads all nine files:
 a defect that lives inside a string is invisible to every suite that reads one.
+
+## 1x — A green `diff-coverage` says nothing about whether the mutation manifest's own suite reaches the code
+
+Both gates read the same lines and disagreed, on the same commit and in the same
+direction every time: `diff-coverage` reported **237 added lines executed, 0
+missed**, while the mutation gate reported five mutants in
+`apps/web/src/test/render-with-intl.tsx` as `never executed`.
+
+There is no contradiction, and the reason generalises. Coverage merges every
+report under `coverage/`, so a line counts as covered when **any** suite in the
+run touched it — and those lines were reached by the seven consumer suites that
+import the helper. A manifest entry names **one** suite and asserts that it, on
+its own, holds the file; Stryker runs only that suite, and the helper's own suite
+never called the half the batch added. So the entry was false while coverage read
+perfect.
+
+Which means: **coverage cannot validate a manifest entry, and a `never executed`
+mutant is the only thing that reports one as false.** It is also easy to
+misread — Stryker leaves `NoCoverage` out of the score it prints largest, which
+is the reason `CLAUDE.md` has the gate fail on it separately. The check worth
+doing before declaring a file is to read the named suite and ask which exports it
+actually calls, not whether the lines show up green somewhere.
+
+The repair is always in the named suite, never in the suite list: widening the
+list to include the consumers would make the entry true by weakening it to "some
+combination of eight suites holds this", which is not a claim anyone can act on.
