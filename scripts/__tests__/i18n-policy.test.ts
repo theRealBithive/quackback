@@ -1585,6 +1585,17 @@ describe('a call whose whole job is to show its argument (I15)', () => {
   })
 })
 
+describe('an argument that is not a word in the source (I15)', () => {
+  it('is left alone, and the words around it are not', () => {
+    // The editor hands `toast.error` the sentence it has just built from the
+    // catalogue. There is nothing on that line to ask for, and reading the
+    // name of the variable would report the very thing this gate asks for.
+    expect(
+      stillReported(`    <button onClick={() => toast.error(uploadFailed)}>Retry now</button>`)
+    ).toEqual(['Retry now'])
+  })
+})
+
 describe('an attribute with no value at all (I15)', () => {
   it('is not a word', () => {
     // `<img alt />` is a readable attribute written as a flag. There is no

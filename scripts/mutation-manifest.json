@@ -345,6 +345,13 @@
       "line": "return SHOWING_FUNCTIONS.has(c.property.name ?? '')",
       "replacement": "\"Stryker was here!\"",
       "why": "The same shape one line down, for a method reached by a computed key such as `toast['error']`, where the property has no name. The set holds three names and any other string answers the same, so the empty string is not distinguishable from another absent name."
+    },
+    {
+      "file": "scripts/i18n-policy.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (node.type === 'BinaryExpression') {",
+      "replacement": "true",
+      "why": "Forced true, every node still reaching this line enters the branch, and the line inside it sends back an empty list for anything whose operator is not `+`. The one other node that carries `+` as an operator is a unary plus, which has no `left` and no `right`, so it spreads two empty lists -- the same empty list the fall-through below returns. The condition was split out of an `&&` for this record's sake: joined, three mutants shared the line and the manifest addresses a line by its text."
     }
   ]
 }

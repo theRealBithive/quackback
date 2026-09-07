@@ -576,6 +576,52 @@ the minute spent working out whether the red line was mine. It was not: the
 same test is red on `origin/main`. Checking the fixture in would have made
 that answer free.
 
+## 2x — A mutation survivor is reported by line, and a line can hold several mutants
+
+The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that
+holds more than one mutable sub-expression that does not say which one, and the two
+readings lead to opposite conclusions. Both of these cost a mutate-run-restore cycle in
+one session:
+
+- `issue-move.ts:54` reads as a type assertion (`{ instanceUrl?: string }`, erased at
+  runtime and therefore genuinely equivalent). It was the argument to
+  `db.query.integrations.findFirst({ where: ... })` — a real gap, where dropping the
+  `where` returns _an_ integration instead of _the_ one.
+- `issue-move.resolver.ts:47` reads as the ternary on the next line. It was the arrow
+  body inside `.find((r) => r.boardId === boardId)` on line 47 itself.
+
+The column is in the detail section further up the report, but the summary is what you act
+on, and reading the source line at that number is the natural next move — which is exactly
+what misleads. **Print the trimmed source line beside each survivor**, the way an
+`equivalents` record already addresses its line by text. It costs one `readFileSync` in
+`mutation-policy.ts` and removes the ambiguity at the point of use.
+
+Until then: never mutate from the summary alone. Take the `file:line:col` out of the
+detail block, and confirm the mutant by applying it by hand and watching the suite go red.
+
+Hit again while grading the i18n gate, with two consequences the first run did not
+reach.
+
+**"Killed by hand, survived in the report" is not a bug in the report.** A hand-check
+of `if (!expression || typeof expression !== 'object') return []` mutated the whole
+condition to `false` and the suite went red, while the gate called the mutant
+survived. Both were right: the reported mutant was the _right operand_ forced to
+`false`, and the test that kills the whole-condition form passes `null`, which the
+`||` short-circuits on -- so that test never evaluates the operand and Stryker
+correctly leaves it out of `coveredBy`. Reproducing a sub-expression mutant means
+mutating that sub-expression, not the line.
+
+**An `equivalents` record cannot address one mutant on such a line.** `excusing()` in
+`mutation-policy.ts` matches on file, mutator, replacement and the trimmed text of the
+line, and **not** on the column. `if (node.type === 'BinaryExpression' && node.operator
+=== '+')` carried three `ConditionalExpression -> true` mutants — the whole condition,
+each operand — of which one was unkillable and two were killed by real tests. One
+record would have excused all three, so a future edit could have broken those two tests
+without the gate saying anything. It was written as two `if`s instead, one mutant to a
+line. That is a workaround: the matcher should carry the column, or refuse a record that
+matches more than one mutant, so a genuine `&&` does not have to be split to be graded
+honestly.
+
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
 `scripts/mutation-manifest.json` and the `toEqual` in
@@ -986,29 +1032,6 @@ Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and
 and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
 that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
 read as untested until proven otherwise.
-
-## 1x — A mutation survivor is reported by line, and a line can hold several mutants
-
-The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that
-holds more than one mutable sub-expression that does not say which one, and the two
-readings lead to opposite conclusions. Both of these cost a mutate-run-restore cycle in
-one session:
-
-- `issue-move.ts:54` reads as a type assertion (`{ instanceUrl?: string }`, erased at
-  runtime and therefore genuinely equivalent). It was the argument to
-  `db.query.integrations.findFirst({ where: ... })` — a real gap, where dropping the
-  `where` returns _an_ integration instead of _the_ one.
-- `issue-move.resolver.ts:47` reads as the ternary on the next line. It was the arrow
-  body inside `.find((r) => r.boardId === boardId)` on line 47 itself.
-
-The column is in the detail section further up the report, but the summary is what you act
-on, and reading the source line at that number is the natural next move — which is exactly
-what misleads. **Print the trimmed source line beside each survivor**, the way an
-`equivalents` record already addresses its line by text. It costs one `readFileSync` in
-`mutation-policy.ts` and removes the ambiguity at the point of use.
-
-Until then: never mutate from the summary alone. Take the `file:line:col` out of the
-detail block, and confirm the mutant by applying it by hand and watching the suite go red.
 
 ## 1x — postgres.js encodes a JSON _string_ parameter into jsonb a second time
 

@@ -390,6 +390,13 @@ describe('the mutations excused as equivalent (B6)', () => {
         replacement: '"Stryker was here!"',
         why: expect.stringContaining("toast['error']"),
       },
+      {
+        file: 'scripts/i18n-policy.ts',
+        mutator: 'ConditionalExpression',
+        line: "if (node.type === 'BinaryExpression') {",
+        replacement: 'true',
+        why: expect.stringContaining('a unary plus, which has no `left` and no `right`'),
+      },
     ])
   })
 

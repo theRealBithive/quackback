@@ -279,7 +279,11 @@ function writtenName(node: unknown): string | null {
  * those would report the very thing this gate asks for.
  */
 function displayValues(expression: unknown): { text: string; start: number }[] {
-  if (!expression || typeof expression !== 'object') return []
+  // Every caller hands in one of the parser's nodes or nothing at all -- an
+  // attribute with no value, a branch a shape does not have. So the guard is
+  // for the nothing; a check that the something is an object would be a branch
+  // no call site can take.
+  if (!expression) return []
   const node = expression as Record<string, unknown> & { type?: string; start?: number }
 
   const literal = stringOf(node)
@@ -301,7 +305,12 @@ function displayValues(expression: unknown): { text: string; start: number }[] {
     return [...displayValues(node.left), ...displayValues(node.right)]
   }
 
-  if (node.type === 'BinaryExpression' && node.operator === '+') {
+  if (node.type === 'BinaryExpression') {
+    // Two conditions and not one `&&`, because a record in the mutation
+    // manifest is addressed by the text of its line: the joined form put three
+    // mutants on one line that the manifest cannot tell apart, so excusing the
+    // one that no test can catch would have excused the two that tests do.
+    if (node.operator !== '+') return []
     return [...displayValues(node.left), ...displayValues(node.right)]
   }
 
