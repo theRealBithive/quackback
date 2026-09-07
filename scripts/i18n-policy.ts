@@ -98,6 +98,278 @@ export interface Exemption {
   reason: string
 }
 
+// ============================================================================
+// The second rule class: text written into the source instead of the catalogue
+// ============================================================================
+
+/**
+ * The attributes a person actually reads.
+ *
+ * Deliberately short. Every name added here is a name the rule will read on
+ * every element in every checked file, and the cost of getting one wrong is
+ * not a missed string -- it is a report full of class lists and node types,
+ * which is how a gate stops being read.
+ */
+const READABLE_ATTRIBUTES = new Set(['title', 'aria-label', 'placeholder', 'alt', 'label'])
+
+/** Objects whose every method exists to show the string handed to it. */
+const SHOWING_OBJECTS = new Set(['toast'])
+
+/** Functions of the same kind, called with or without `window.`. */
+const SHOWING_FUNCTIONS = new Set(['prompt', 'confirm', 'alert'])
+
+/** The marker that excuses a line, and the reason it demands. */
+const EXCUSE = /^\s*i18n-allow\b\s*:?\s*(.*)$/s
+
+/** Whether a string holds a word, in any script. A separator, a number and a
+ *  bare symbol are not language, and a rule that reports them teaches people
+ *  to switch it off (I19). */
+function holdsAWord(text: string): boolean {
+  return /\p{L}/u.test(text)
+}
+
+export interface DisplayString {
+  /** The text as a reader would see it, trimmed. */
+  text: string
+  file: string
+  line: number
+  /** Where it sat: `text` between tags, an attribute name, or the call it was
+   *  handed to. The rule is about position, so the report says the position. */
+  where: string
+}
+
+export interface DisplayExcuse {
+  file: string
+  line: number
+  /** Empty when the note gave none, which is refused rather than honoured. */
+  reason: string
+  /** Whether the note stood alone on its line, which decides how far it
+   *  reaches. See {@link standsAlone}. */
+  ownLine: boolean
+}
+
+export interface DisplayScan {
+  strings: DisplayString[]
+  excuses: DisplayExcuse[]
+}
+
+export interface DisplayFinding {
+  kind: 'untranslated-string' | 'excuse-without-reason'
+  text: string
+  file: string
+  line: number
+  where: string
+  detail: string
+}
+
+/**
+ * Whether a note stood alone on its line.
+ *
+ * This decides how far it reaches, and the two forms are not interchangeable.
+ * Inside JSX the only comment syntax is `{/* ... *\/}`, which cannot sit after
+ * the text it speaks for -- a `//` line among JSX children is text on the page,
+ * not a comment (measured; the parser reports it as part of the text node). So
+ * a note alone on its line speaks for the line below it. A note *after* a word
+ * speaks for that word only: letting the trailing form reach further silences
+ * the next string as well, which is a hole it would open on every single use.
+ * A property test found that, having been written before the rule was.
+ */
+function standsAlone(text: string, start: number, end: number): boolean {
+  const before = text.slice(text.lastIndexOf('\n', start - 1) + 1, start)
+  const lineEnd = text.indexOf('\n', end)
+  const after = text.slice(end, lineEnd < 0 ? text.length : lineEnd)
+  return /^[\s{]*$/.test(before) && /^[\s}]*$/.test(after)
+}
+
+/** The name a call is made under, for the report and for the decision. */
+function calleeName(callee: unknown): string | null {
+  const c = callee as {
+    type?: string
+    name?: string
+    object?: { name?: string }
+    property?: { name?: string }
+  }
+  if (c?.type === 'Identifier') return c.name ?? null
+  if (c?.type !== 'MemberExpression') return null
+  const object = c.object?.name
+  const property = c.property?.name
+  if (!property) return null
+  return object ? `${object}.${property}` : property
+}
+
+/** Whether a call's string arguments are shown to a reader. */
+function showsItsArgument(callee: unknown): boolean {
+  const c = callee as {
+    type?: string
+    name?: string
+    object?: { name?: string }
+    property?: { name?: string }
+  }
+  if (c?.type === 'Identifier') return SHOWING_FUNCTIONS.has(c.name ?? '')
+  if (c?.type !== 'MemberExpression') return false
+  if (SHOWING_OBJECTS.has(c.object?.name ?? '')) return true
+  return SHOWING_FUNCTIONS.has(c.property?.name ?? '')
+}
+
+/**
+ * Read every word a reader can see out of one source file, and every note
+ * excusing one.
+ *
+ * The whole rule is about *position*: the same word is a label in one place, a
+ * class name in another and a node type in a third. So nothing here looks at
+ * what a string says -- only at where it sits, and whether it holds a word at
+ * all (I15, I19).
+ *
+ * A person's own words never appear, and not by a special case: they reach the
+ * page through an expression, and an expression is not a literal. Where our
+ * sentence carries their words inside it -- a template literal -- the pieces
+ * we wrote are read and the holes are not (I20).
+ */
+export function scanDisplayText(file: string, text: string): DisplayScan {
+  const parsed = parseSync(file, text)
+  const lineOf = lineIndex(text)
+  const strings: DisplayString[] = []
+
+  /** The line the word itself sits on, not the line the node opens on. A
+   *  report that points at the element above the text is a report nobody
+   *  trusts, and JSX text starts at the previous tag. */
+  const lineOfWord = (raw: string, start: number): number => {
+    const offset = raw.search(/\p{L}/u)
+    return lineOf(start + (offset < 0 ? 0 : offset))
+  }
+
+  const record = (raw: string, start: number, where: string) => {
+    if (!holdsAWord(raw)) return
+    strings.push({ text: raw.trim(), file, line: lineOfWord(raw, start), where })
+  }
+
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return
+    const n = node as Record<string, unknown> & { type?: string; start?: number }
+
+    switch (n.type) {
+      case 'JSXText': {
+        record(String(n.value ?? ''), n.start ?? 0, 'text')
+        break
+      }
+      case 'JSXAttribute': {
+        const name = (n.name as { name?: string })?.name
+        if (!name || !READABLE_ATTRIBUTES.has(name)) break
+        const value = attributeValue(n as { value?: unknown })
+        const literal = stringOf(value)
+        if (literal !== null) {
+          record(literal, (value as { start?: number })?.start ?? n.start ?? 0, name)
+          break
+        }
+        // Our sentence with their words inside it: the pieces we wrote.
+        const template = value as {
+          type?: string
+          quasis?: { value: { raw: string }; start?: number }[]
+        }
+        if (template?.type !== 'TemplateLiteral') break
+        for (const quasi of template.quasis ?? []) {
+          record(quasi.value.raw, quasi.start ?? n.start ?? 0, name)
+        }
+        break
+      }
+      case 'CallExpression': {
+        if (!showsItsArgument(n.callee)) break
+        const where = calleeName(n.callee) ?? 'call'
+        for (const argument of n.arguments as unknown[]) {
+          const literal = stringOf(argument)
+          if (literal !== null) record(literal, (argument as { start?: number }).start ?? 0, where)
+        }
+        break
+      }
+    }
+
+    for (const value of Object.values(n)) visit(value)
+  }
+
+  visit(parsed.program)
+
+  const comments =
+    (parsed as { comments?: { value: string; start: number; end: number }[] }).comments ?? []
+  const excuses: DisplayExcuse[] = []
+  for (const comment of comments) {
+    const matched = EXCUSE.exec(comment.value)
+    if (!matched) continue
+    excuses.push({
+      file,
+      line: lineOf(comment.start),
+      reason: matched[1].trim(),
+      ownLine: standsAlone(text, comment.start, comment.end),
+    })
+  }
+
+  return { strings, excuses }
+}
+
+/** Whether a note speaks for a given word: on its line always, and on the line
+ *  below only when the note stood alone (see {@link standsAlone}). */
+function excuses(excuse: DisplayExcuse, string: DisplayString): boolean {
+  if (excuse.file !== string.file) return false
+  if (excuse.line === string.line) return true
+  return excuse.ownLine && excuse.line === string.line - 1
+}
+
+/** The notes that carry a reason, which are the only ones that silence
+ *  anything: a note without one is refused (I17). */
+function reasonedExcuses(scan: DisplayScan): DisplayExcuse[] {
+  return scan.excuses.filter((excuse) => excuse.reason !== '')
+}
+
+/**
+ * Grade the text found in the checked files.
+ *
+ * Only the files handed in are graded, and each finding keeps the file it came
+ * from: the manifest decides what is checked, not this function (I16).
+ */
+export function gradeDisplayText(scans: readonly DisplayScan[]): DisplayFinding[] {
+  const findings: DisplayFinding[] = []
+  for (const scan of scans) {
+    const silencing = reasonedExcuses(scan)
+    for (const string of scan.strings) {
+      if (silencing.some((excuse) => excuses(excuse, string))) continue
+      findings.push({
+        kind: 'untranslated-string',
+        text: string.text,
+        file: string.file,
+        line: string.line,
+        where: string.where,
+        detail:
+          `read by a person as ${string.where === 'text' ? 'text on the page' : `the ${string.where}`}` +
+          ', so it belongs in the catalogue rather than in the source',
+      })
+    }
+    for (const excuse of scan.excuses) {
+      if (excuse.reason !== '') continue
+      findings.push({
+        kind: 'excuse-without-reason',
+        text: '',
+        file: excuse.file,
+        line: excuse.line,
+        where: 'note',
+        detail:
+          'an excuse with no reason is an allowlist entry, so it is refused rather than honoured',
+      })
+    }
+  }
+  return findings
+}
+
+/** The notes that no longer speak for anything. Reported and not fatal, so the
+ *  list cannot rot into stale claims without anyone seeing it (I18). */
+export function unusedExcuses(scans: readonly DisplayScan[]): DisplayExcuse[] {
+  const stale: DisplayExcuse[] = []
+  for (const scan of scans) {
+    for (const excuse of reasonedExcuses(scan)) {
+      if (!scan.strings.some((string) => excuses(excuse, string))) stale.push(excuse)
+    }
+  }
+  return stale
+}
+
 export interface CatalogueInput {
   scan: SourceScan
   catalogues: Record<string, Record<string, string>>

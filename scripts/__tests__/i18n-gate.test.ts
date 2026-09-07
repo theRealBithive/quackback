@@ -27,7 +27,9 @@ function writeFixture(
   name: string,
   source: string,
   catalogues: Record<string, Record<string, string>>,
-  claimedPrefixes: readonly string[] = []
+  claimedPrefixes: readonly string[] = [],
+  /** Whether the fixture's own file is claimed to hold no text of its own. */
+  claimTheFile = false
 ) {
   const root = path.join(fixtureRoot, name)
   const src = path.join(root, 'src')
@@ -40,7 +42,11 @@ function writeFixture(
   }
   writeFileSync(
     path.join(root, 'manifest.json'),
-    JSON.stringify({ claimedPrefixes, exemptions: [] })
+    JSON.stringify({
+      claimedPrefixes,
+      exemptions: [],
+      checkedFiles: claimTheFile ? [path.join(src, 'card.tsx')] : [],
+    })
   )
   return { src, locales, manifest: path.join(root, 'manifest.json') }
 }
@@ -156,6 +162,79 @@ describe('the i18n gate as a process', () => {
     expect(stdout).toContain('activation.task.*.title')
     expect(stdout).toContain('PASS')
     expect(exitCode).toBe(0)
+  })
+
+  it('fails and names text written into a claimed file (I14)', async () => {
+    const paths = writeFixture(
+      'own-text',
+      `export const C = () => <button title="Bold">Delete row</button>`,
+      { en: {}, de: {} },
+      [],
+      true
+    )
+
+    const { exitCode, stdout } = await runGate(paths)
+
+    expect(stdout).toContain('untranslated-string')
+    expect(stdout).toContain('Delete row')
+    expect(stdout).toContain('Bold')
+    expect(exitCode).toBe(1)
+  })
+
+  it('passes a claimed file whose text sits in the catalogue (I14)', async () => {
+    const paths = writeFixture(
+      'own-text-clean',
+      `export const C = () => <FormattedMessage id="ui.editor.bold" defaultMessage="Bold" />`,
+      { en: { 'ui.editor.bold': 'Bold' }, de: { 'ui.editor.bold': 'Fett' } },
+      [],
+      true
+    )
+
+    const { exitCode, stdout } = await runGate(paths)
+
+    expect(stdout).toContain('PASS')
+    expect(exitCode).toBe(0)
+  })
+
+  it('honours a note with a reason and refuses one without (I17)', async () => {
+    const excused = writeFixture(
+      'excused',
+      `export const C = () => <em title="Quackback" /* i18n-allow: our own name */ />`,
+      { en: {}, de: {} },
+      [],
+      true
+    )
+    const bare = writeFixture(
+      'excused-bare',
+      `export const C = () => <em title="Quackback" /* i18n-allow */ />`,
+      { en: {}, de: {} },
+      [],
+      true
+    )
+
+    const good = await runGate(excused)
+    const bad = await runGate(bare)
+
+    expect(good.exitCode).toBe(0)
+    expect(bad.stdout).toContain('excuse-without-reason')
+    expect(bad.exitCode).toBe(1)
+  })
+
+  it('fails on a claimed file that is not there rather than skipping it (I16)', async () => {
+    const paths = writeFixture('missing-claim', `export const C = () => null`, { en: {}, de: {} })
+    writeFileSync(
+      paths.manifest,
+      JSON.stringify({
+        claimedPrefixes: [],
+        exemptions: [],
+        checkedFiles: [path.join(paths.src, 'gone.tsx')],
+      })
+    )
+
+    const { exitCode, stdout } = await runGate(paths)
+
+    expect(stdout).toContain('names 1 file(s) that are not there')
+    expect(exitCode).toBe(1)
   })
 
   it('fails and names a blank translation a reader would see as an id (I3)', async () => {

@@ -52,11 +52,57 @@
  *     `activation.goal.product_feedback` resolves to nothing. The report gets
  *     shorter as the hole gets bigger, which is the direction nobody checks.
  *     [V16]
+ *
+ * I14 to I20 are the second rule class: not "is this id answered for", but
+ * "was this text written into the source instead of the catalogue". The two
+ * are independent, and only the first was built at the time -- so V13 was a
+ * claim with nothing enforcing it, and a string added to a translated surface
+ * after the fact was shown in English to every reader in every language while
+ * the gate stayed green.
+ *
+ * I14 A word a reader can see, written into a claimed file rather than into
+ *     the catalogue, fails the run naming the file, the line and the word.
+ *     [V13]
+ * I15 What counts as a word a reader can see is decided by where it sits, not
+ *     by what it looks like: text between tags, the value of one of the few
+ *     attributes a person actually reads (a tooltip, a name a screen reader
+ *     announces, a placeholder, the text behind an image), and a message
+ *     handed to something whose whole job is to show it -- a toast, a browser
+ *     prompt. A class name, a URL in a link, an icon name and a node type are
+ *     not that, however English they look. [V13]
+ * I16 A file is checked because the manifest names it, not because of where it
+ *     lives. Adding one asserts that it holds no untranslated text, and the
+ *     list is asserted in full, so it cannot shrink into a shorter report.
+ *     [V14]
+ * I17 A string that genuinely must not be translated -- a product name, a
+ *     specimen URL, a code example -- is excused by a note at the line itself,
+ *     with the reason. An excuse without a reason is refused rather than
+ *     honoured, for the same reason an exemption is. At the line and not in
+ *     the manifest, so it travels with the line and retires when the line is
+ *     edited. [V14]
+ * I18 An excuse that matches nothing is reported as removable and does not
+ *     fail the run, so the notes cannot rot into a list of stale claims. [V14]
+ * I19 Something with no word in it is not text: a separator, a number, a
+ *     symbol. The rule is about language, and a rule that flags an em dash
+ *     teaches people to switch it off. [V13]
+ * I20 A value the source does not contain is not a string this rule can ask
+ *     for. Where a sentence the product owns carries a person's own words
+ *     inside it, the rule holds the sentence and never the words. [V13, V17]
+ *
+ * V17 is the guarantee those last two serve, and it is the reader's side of
+ * the same thing: text a person wrote is shown as they wrote it. Nothing a
+ * user brings in -- what they type, a link they paste, a name, a file they
+ * uploaded -- is translated, reworded, or rewritten into one of our sentences.
+ * Where our own frame surrounds their words, the frame is translated and their
+ * words are not.
  */
 import { describe, it, expect } from 'vitest'
 import fc from 'fast-check'
 import {
   gradeCatalogues,
+  gradeDisplayText,
+  scanDisplayText,
+  unusedExcuses,
   isShippedSource,
   mergeScans,
   scanSource,
@@ -1024,6 +1070,256 @@ describe('properties', () => {
           })
           const known = new Set([...used, ...defined])
           return findings.every((f) => known.has(f.id))
+        }
+      )
+    )
+  })
+})
+
+// ============================================================================
+// The second rule class: text written into the source instead of the catalogue
+// ============================================================================
+
+/** A file whose every shape the rules below have an opinion about. Built by a
+ *  function rather than held at module scope: a mutant that crashes a fixture
+ *  during collection is reported as survived, because the suite never runs. */
+function editorLike(): string {
+  return `
+export function Toolbar({ alt, organisation }: { alt: string; organisation: string }) {
+  return (
+    <div className="flex items-center gap-2" role="toolbar" aria-label="Image options">
+      <button title="Bold (Cmd+B)" onClick={() => editor.isActive('bold')}>
+        Delete row
+      </button>
+      <img alt={alt} src="https://cdn.example.com/x.png" />
+      <input placeholder="https://example.com" />
+      <span>—</span>
+      <span>2026</span>
+      <em aria-label={\`\${organisation} Member\`}>{organisation}</em>
+    </div>
+  )
+}
+`
+}
+
+function scan(source: string, file = 'apps/web/src/components/ui/toolbar.tsx') {
+  return scanDisplayText(file, source)
+}
+
+function reportedText(source: string): string[] {
+  return scan(source)
+    .strings.map((s) => s.text)
+    .sort()
+}
+
+describe('text written into the source instead of the catalogue (I14, I15)', () => {
+  it('names the file, the line and the word (I14)', () => {
+    const found = scan(editorLike()).strings.find((s) => s.text === 'Delete row')
+
+    expect(found).toBeDefined()
+    expect(found?.file).toBe('apps/web/src/components/ui/toolbar.tsx')
+    expect(found?.where).toBe('text')
+    // The line of the word itself, not of the element that opens above it:
+    // a report that points at the wrong line is a report nobody trusts.
+    expect(editorLike().split('\n')[(found?.line ?? 0) - 1]).toContain('Delete row')
+  })
+
+  it('reads a tooltip, a screen-reader name, a placeholder and an image text (I15)', () => {
+    const texts = reportedText(editorLike())
+
+    expect(texts).toContain('Bold (Cmd+B)')
+    expect(texts).toContain('Image options')
+    expect(texts).toContain('https://example.com')
+  })
+
+  it('leaves alone what only looks like language (I15)', () => {
+    const texts = reportedText(editorLike())
+
+    // A class list, a node type handed to the editor, and the address of an
+    // asset. All English, none of it read by anyone.
+    expect(texts).not.toContain('flex items-center gap-2')
+    expect(texts).not.toContain('bold')
+    expect(texts).not.toContain('https://cdn.example.com/x.png')
+    expect(texts).not.toContain('toolbar')
+  })
+
+  it('reads a sentence handed to something whose job is to show it (I15)', () => {
+    const source = `
+function f() {
+  toast.error("Couldn't upload image. Try again.")
+  const url = window.prompt('Paste YouTube video URL:')
+  logger.warn('upload failed for asset')
+  return url
+}
+`
+    const texts = reportedText(source)
+
+    expect(texts).toContain("Couldn't upload image. Try again.")
+    expect(texts).toContain('Paste YouTube video URL:')
+    // A log line is read by an operator in a log, not by a reader on a page.
+    expect(texts).not.toContain('upload failed for asset')
+  })
+})
+
+describe('what is not language (I19)', () => {
+  it('passes over a separator, a number and whitespace (I19)', () => {
+    const texts = reportedText(editorLike())
+
+    expect(texts).not.toContain('—')
+    expect(texts).not.toContain('2026')
+    expect(texts.filter((t) => t.trim() === '')).toEqual([])
+  })
+
+  it('has something to report at all, so the check above is not vacuous (I19)', () => {
+    expect(reportedText(editorLike()).length).toBeGreaterThan(3)
+  })
+})
+
+describe('a person’s own words inside our sentence (I20)', () => {
+  it('never asks for a value the source does not contain (I20)', () => {
+    const texts = reportedText(editorLike())
+
+    // `alt={alt}` is whatever the person typed when they uploaded, and
+    // `{organisation}` is what they named their own workspace.
+    expect(texts.some((t) => t.includes('organisation'))).toBe(false)
+    expect(texts).not.toContain('alt')
+  })
+
+  it('holds the frame around those words, and only the frame (I20)', () => {
+    const found = scan(editorLike()).strings.filter((s) => s.text.includes('Member'))
+
+    expect(found).toHaveLength(1)
+    expect(found[0].text.trim()).toBe('Member')
+    expect(found[0].where).toBe('aria-label')
+  })
+})
+
+describe('excusing a string that must not be translated (I17, I18)', () => {
+  const withExcuse = `
+export function X() {
+  return (
+    <div>
+      {/* i18n-allow: the product's own name is the same in every language */}
+      Quackback
+      <input placeholder="https://example.com" /* i18n-allow: a specimen address is not language */ />
+    </div>
+  )
+}
+`
+
+  it('honours a note at the line, in both forms (I17)', () => {
+    const findings = gradeDisplayText([scan(withExcuse)])
+
+    expect(findings.filter((f) => f.kind === 'untranslated-string')).toEqual([])
+  })
+
+  it('refuses a note with no reason rather than honouring it (I17)', () => {
+    const source = withExcuse.replace(
+      "i18n-allow: the product's own name is the same in every language",
+      'i18n-allow'
+    )
+
+    const findings = gradeDisplayText([scan(source)])
+
+    expect(findings.map((f) => f.kind)).toContain('excuse-without-reason')
+    // And the string it tried to excuse is still reported, so a silenced
+    // string cannot slip through on a malformed note.
+    expect(findings.some((f) => f.kind === 'untranslated-string' && f.text === 'Quackback')).toBe(
+      true
+    )
+  })
+
+  it('reports a note that matches nothing as removable, without failing (I18)', () => {
+    const source = `
+export function X() {
+  // i18n-allow: nothing here needs it any more
+  return <div className="x" />
+}
+`
+    const scanned = scan(source)
+
+    expect(unusedExcuses([scanned])).toHaveLength(1)
+    expect(gradeDisplayText([scanned])).toEqual([])
+  })
+
+  it('does not read a stray mention of the word as a note (I17)', () => {
+    // The line below is text on a page, not an instruction to the gate.
+    const source = `
+export function X() {
+  return <div title="Ask an admin about i18n-allow settings" />
+}
+`
+    const findings = gradeDisplayText([scan(source)])
+
+    expect(findings.some((f) => f.kind === 'untranslated-string')).toBe(true)
+  })
+})
+
+describe('only the files handed in are graded (I16)', () => {
+  it('grades nothing when nothing is handed in (I16)', () => {
+    expect(gradeDisplayText([])).toEqual([])
+    expect(unusedExcuses([])).toEqual([])
+  })
+
+  it('keeps each finding with the file it came from (I16)', () => {
+    const findings = gradeDisplayText([
+      scan(editorLike(), 'apps/web/src/components/ui/a.tsx'),
+      scan(editorLike(), 'apps/web/src/components/ui/b.tsx'),
+    ])
+
+    expect(new Set(findings.map((f) => f.file))).toEqual(
+      new Set(['apps/web/src/components/ui/a.tsx', 'apps/web/src/components/ui/b.tsx'])
+    )
+  })
+})
+
+describe('properties of the display-text rule', () => {
+  it('never reports a class list, whatever it says (I15)', () => {
+    fc.assert(
+      fc.property(fc.stringMatching(/^[a-z][a-z0-9 :/-]{0,40}$/), (classes) => {
+        const source = `export const X = () => <div className=${JSON.stringify(classes)} />`
+
+        expect(scan(source).strings).toEqual([])
+      })
+    )
+  })
+
+  it('never reports text with no word in it (I19)', () => {
+    fc.assert(
+      fc.property(
+        fc.stringMatching(/^[-—·:;.,!?()[\]{}0-9\s]{1,30}$/).filter((s) => !s.includes('}')),
+        (noise) => {
+          const source = `export const X = () => <div>${noise}</div>`
+
+          expect(scan(source).strings).toEqual([])
+        }
+      )
+    )
+  })
+
+  it('excusing a line removes that string and leaves the others (I17)', () => {
+    fc.assert(
+      fc.property(
+        fc.stringMatching(/^[A-Z][a-z]{2,10}( [a-z]{2,10}){0,3}$/),
+        fc.stringMatching(/^[a-z][a-z ]{5,40}$/),
+        (word, reason) => {
+          const bare = `export const X = () => (
+  <div>
+    <span title=${JSON.stringify(word)} />
+    <span title="Kept as it was" />
+  </div>
+)`
+          const excused = `export const X = () => (
+  <div>
+    <span title=${JSON.stringify(word)} /* i18n-allow: ${reason} */ />
+    <span title="Kept as it was" />
+  </div>
+)`
+
+          expect(gradeDisplayText([scan(bare)]).map((f) => f.text).sort()).toEqual(
+            [word, 'Kept as it was'].sort()
+          )
+          expect(gradeDisplayText([scan(excused)]).map((f) => f.text)).toEqual(['Kept as it was'])
         }
       )
     )

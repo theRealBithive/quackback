@@ -19,12 +19,17 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   gradeCatalogues,
+  gradeDisplayText,
   isShippedSource,
   mergeScans,
+  scanDisplayText,
   scanSource,
   unclaimedPatterns,
+  unusedExcuses,
   unusedExemptions,
   type CatalogueInput,
+  type DisplayFinding,
+  type DisplayScan,
   type Exemption,
   type Finding,
   type SourceScan,
@@ -66,18 +71,53 @@ function readCatalogues(): Record<string, Record<string, string>> {
   return catalogues
 }
 
-function readManifest(): { claimedPrefixes: string[]; exemptions: Exemption[] } {
+function readManifest(): {
+  claimedPrefixes: string[]
+  exemptions: Exemption[]
+  checkedFiles: string[]
+} {
   try {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
     return {
       claimedPrefixes: (manifest.claimedPrefixes ?? []) as string[],
       exemptions: (manifest.exemptions ?? []) as Exemption[],
+      checkedFiles: (manifest.checkedFiles ?? []) as string[],
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-      return { claimedPrefixes: [], exemptions: [] }
+      return { claimedPrefixes: [], exemptions: [], checkedFiles: [] }
     throw error
   }
+}
+
+function describeDisplay(finding: DisplayFinding): string {
+  const where = `${path.relative(repoRoot, finding.file)}:${finding.line}`
+  const what = finding.text === '' ? '(no reason given)' : JSON.stringify(finding.text)
+  return `  - ${what} (${where})\n      ${finding.detail}`
+}
+
+/**
+ * A file the manifest names but that is not there any more fails the run
+ * rather than being skipped. A list of paths is exactly the kind of list that
+ * rots after a rename, and a missing file would otherwise be a file that
+ * silently stopped being checked -- the way this gate would pass by checking
+ * less.
+ */
+function readCheckedFiles(names: readonly string[]): { scans: DisplayScan[]; missing: string[] } {
+  const scans: DisplayScan[] = []
+  const missing: string[] = []
+  for (const name of names) {
+    // Resolved, not joined: an entry is repo-relative in this repository and
+    // absolute in the end-to-end fixture, and `resolve` takes both.
+    const full = path.resolve(repoRoot, name)
+    try {
+      scans.push(scanDisplayText(full, readFileSync(full, 'utf8')))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      missing.push(name)
+    }
+  }
+  return { scans, missing }
 }
 
 function describe(finding: Finding): string {
@@ -143,11 +183,47 @@ function main(): number {
     for (const exemption of removable) console.log(`  - ${exemption.id}`)
   }
 
-  if (findings.length === 0) {
-    console.log('\nPASS: every message the interface can show is answered for in every catalogue.')
+  // The second rule class, over the files the manifest claims hold no
+  // untranslated text. It is a separate report because it is a separate
+  // question: the rules above ask whether an id is answered for, this one asks
+  // whether the text was written into the source instead of the catalogue.
+  const { scans: displayScans, missing } = readCheckedFiles(manifest.checkedFiles)
+  if (missing.length > 0) {
+    // Reported as a finding with an exit code, not as a thrown stack: a gate
+    // that crashes reads as broken, and this one has something to say.
+    console.log(`\nFAIL: the manifest names ${missing.length} file(s) that are not there:`)
+    for (const name of missing) console.log(`  - ${name}`)
+    return 1
+  }
+  const displayFindings = gradeDisplayText(displayScans)
+  const staleExcuses = unusedExcuses(displayScans)
+  const displayStrings = displayScans.reduce((n, scan) => n + scan.strings.length, 0)
+  console.log(
+    `Checked ${manifest.checkedFiles.length} claimed file(s) for text of their own: ${displayStrings} readable string(s) found.`
+  )
+
+  for (const kind of ['untranslated-string', 'excuse-without-reason'] as const) {
+    const group = displayFindings.filter((f) => f.kind === kind)
+    if (group.length === 0) continue
+    console.log(`\n${kind} (${group.length}):`)
+    for (const finding of group) console.log(describeDisplay(finding))
+  }
+
+  if (staleExcuses.length > 0) {
+    console.log(`\nNotes that no longer excuse anything (${staleExcuses.length}), remove them:`)
+    for (const excuse of staleExcuses) {
+      console.log(`  - ${path.relative(repoRoot, excuse.file)}:${excuse.line} — ${excuse.reason}`)
+    }
+  }
+
+  const total = findings.length + displayFindings.length
+  if (total === 0) {
+    console.log(
+      '\nPASS: every message the interface can show is answered for in every catalogue, and no claimed file holds text of its own.'
+    )
     return 0
   }
-  console.log(`\nFAIL: ${findings.length} finding(s).`)
+  console.log(`\nFAIL: ${total} finding(s).`)
   return 1
 }
 
