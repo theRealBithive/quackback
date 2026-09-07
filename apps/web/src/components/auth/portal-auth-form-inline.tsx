@@ -31,7 +31,7 @@ import {
 import { authClient } from '@/lib/client/auth-client'
 import { stashSsoAttempt, takeSsoAttempt } from '@/lib/client/sso-attempt-stash'
 import { startProviderLink } from '@/lib/client/start-provider-link'
-import { AUTH_BLOCK_MESSAGES } from '@/lib/server/auth/redirect-errors'
+import { authBlockMessage } from '@/components/auth/auth-block-message'
 import type { LinkConflictContext } from './auth-popover-context'
 import { isTeamCallback } from '@/lib/shared/routing'
 import { signinErrorLanding } from '@/lib/shared/auth-prompt'
@@ -270,13 +270,7 @@ export function PortalAuthFormInline({
         setView({ stage: 'link-conflict' })
         return
       }
-      setError(
-        AUTH_BLOCK_MESSAGES[code as keyof typeof AUTH_BLOCK_MESSAGES] ??
-          intl.formatMessage({
-            id: 'portal.auth.error.generic',
-            defaultMessage: 'Something went wrong. Please try again.',
-          })
-      )
+      setError(authBlockMessage(intl, code))
     },
   })
 

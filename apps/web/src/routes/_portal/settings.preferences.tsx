@@ -4,12 +4,13 @@ import { Cog6ToothIcon } from '@heroicons/react/24/solid'
 import { PageHeader } from '@/components/shared/page-header'
 import { ThemeSwitcher } from '@/components/theme-switcher'
 import { NotificationMatrixForm } from '@/components/settings/notification-matrix-form'
+import { LanguageCard } from '@/components/settings/language-card'
 
 export const Route = createFileRoute('/_portal/settings/preferences')({
   component: PreferencesPage,
 })
 
-function PreferencesPage() {
+export function PreferencesPage() {
   const intl = useIntl()
 
   return (
@@ -54,6 +55,8 @@ function PreferencesPage() {
           <ThemeSwitcher />
         </div>
       </div>
+
+      <LanguageCard />
 
       {/* Notifications */}
       <div

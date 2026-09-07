@@ -57,7 +57,7 @@ export const Route = createFileRoute('/admin')({
       principal: NonNullable<typeof context.principal>
     }
 
-    const locale = context.acceptLanguageLocale ?? DEFAULT_LOCALE
+    const locale = context.resolvedLocale ?? DEFAULT_LOCALE
     const [avatarData, latestRelease, planNotice, messages] = await Promise.all([
       fetchUserAvatar({
         data: { userId: user.id, fallbackImageUrl: user.image },

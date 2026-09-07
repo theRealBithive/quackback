@@ -35,6 +35,7 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
   it('declares every mutation-graded file with the suites that pin it, and nothing else', () => {
     expect(manifest().graded).toEqual([
       { file: 'scripts/audit-policy.ts', suites: ['scripts/__tests__/audit-policy.test.ts'] },
+      { file: 'scripts/i18n-policy.ts', suites: ['scripts/__tests__/i18n-policy.test.ts'] },
       {
         file: 'scripts/diff-coverage-policy.ts',
         suites: ['scripts/__tests__/diff-coverage-policy.test.ts'],
@@ -125,6 +126,26 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
       {
         file: 'apps/web/src/test/render-with-intl.tsx',
         suites: ['apps/web/src/test/__tests__/render-with-intl.test.tsx'],
+      },
+      {
+        file: 'apps/web/src/lib/shared/language-choice.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/language-choice.test.ts'],
+      },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        suites: ['apps/web/src/components/settings/__tests__/language-card.test.tsx'],
+      },
+      {
+        file: 'apps/web/src/lib/shared/auth-block-messages.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/auth-block-messages.test.ts'],
+      },
+      {
+        file: 'apps/web/src/components/auth/auth-block-message.ts',
+        suites: ['apps/web/src/components/auth/__tests__/auth-block-message.test.tsx'],
+      },
+      {
+        file: 'apps/web/src/lib/shared/notifications/message-ids.ts',
+        suites: ['apps/web/src/lib/shared/notifications/__tests__/catalog-ids.test.ts'],
       },
     ])
   })
@@ -284,6 +305,48 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: 'if (filter.boardIds.length === 0) return sql`NOT ${assigned}`',
         replacement: 'false',
         why: expect.stringContaining('the same predicate written twice'),
+      },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        mutator: 'StringLiteral',
+        line: "defaultMessage: 'Language saved.',",
+        replacement: '""',
+        why: expect.stringContaining('the catalogue always wins'),
+      },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        mutator: 'StringLiteral',
+        line: "defaultMessage: 'Your language could not be saved. Please try again.',",
+        replacement: '""',
+        why: expect.stringContaining('the catalogue always wins'),
+      },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        mutator: 'StringLiteral',
+        line: "defaultMessage: 'Interface language',",
+        replacement: '""',
+        why: expect.stringContaining('the catalogue always wins'),
+      },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        mutator: 'ObjectLiteral',
+        line: "style={{ animationDelay: '225ms' }}",
+        replacement: '{}',
+        why: expect.stringContaining('asserts the line against itself'),
+      },
+      {
+        file: 'apps/web/src/components/settings/language-card.tsx',
+        mutator: 'StringLiteral',
+        line: "style={{ animationDelay: '225ms' }}",
+        replacement: '""',
+        why: expect.stringContaining('fades in with its siblings'),
+      },
+      {
+        file: 'apps/web/src/components/auth/auth-block-message.ts',
+        mutator: 'StringLiteral',
+        line: "'Sign-in failed. Try again or contact your administrator if the problem persists.',",
+        replacement: '""',
+        why: expect.stringContaining('the catalogue always wins'),
       },
     ])
   })

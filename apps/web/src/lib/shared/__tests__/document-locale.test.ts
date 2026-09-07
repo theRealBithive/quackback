@@ -13,6 +13,16 @@ describe('documentLocale', () => {
     expect(documentLocale(['__root__', '/auth/reset-password'], 'zh-cn')).toBe('zh-cn')
     expect(documentLocale(['__root__', '/widget'], 'ar')).toBe('ar')
   })
+  it('localizes the onboarding wizard, on the parent route every step matches', () => {
+    // This used to sit with the untranslated routes, and it was true there:
+    // the wizard's ids resolved to nothing, so every screen rendered the
+    // English written beside them. The catalogues answer for them now, which
+    // makes `lang="en"` a statement about German text.
+    expect(documentLocale(['__root__', '/onboarding', '/onboarding/_layout'], 'de')).toBe('de')
+    expect(documentLocale(['__root__', '/onboarding', '/onboarding/_layout/complete'], 'ar')).toBe(
+      'ar'
+    )
+  })
   it('keeps untranslated auth utility pages on the default locale', () => {
     // These render hard-coded English with no IntlProvider — labeling them
     // `lang="ar" dir="rtl"` would misstate the language and flip the layout.
@@ -27,7 +37,6 @@ describe('documentLocale', () => {
     // it stays English until that copy is localized.
     expect(documentLocale(['__root__', '/admin/login'], 'ar')).toBe('en')
     expect(documentLocale(['__root__', '/admin/posts'], 'zh-cn')).toBe('en')
-    expect(documentLocale(['__root__', '/onboarding'], 'ar')).toBe('en')
     expect(documentLocale(['__root__', '/apps'], 'zh-cn')).toBe('en')
     expect(documentLocale(['__root__', '/unsubscribe'], 'zh-cn')).toBe('en')
     expect(documentLocale(['__root__', '/verify-magic-link'], 'zh-cn')).toBe('en')

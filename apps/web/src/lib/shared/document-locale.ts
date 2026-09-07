@@ -6,9 +6,17 @@ const PORTAL_LAYOUT_ROUTE_ID = '/_portal'
 
 // Standalone routes (outside the portal layout) that render translated content
 // from their first paint. Everything NOT in this set and NOT under the portal
-// layout renders hard-coded English: the admin app, onboarding, and the auth
-// utility pages like /auth/two-factor and /admin/login.
-const LOCALIZED_ROUTE_IDS = new Set(['/auth/recovery', '/auth/reset-password', '/widget'])
+// layout renders hard-coded English: the admin app and the auth utility pages
+// like /auth/two-factor and /admin/login.
+//
+// `/onboarding` is the parent route every wizard step matches under, so the one
+// entry covers the whole flow.
+const LOCALIZED_ROUTE_IDS = new Set([
+  '/auth/recovery',
+  '/auth/reset-password',
+  '/onboarding',
+  '/widget',
+])
 
 /**
  * The locale the SSR document's `<html lang>`/`dir` should advertise, decided

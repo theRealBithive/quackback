@@ -1,0 +1,197 @@
+/**
+ * The launch checklist's names, as guarantees rather than as code.
+ *
+ * `launch-checklist.ts` stays English on purpose: it is the source of the
+ * `defaultMessage` that both surfaces showing the checklist pass along, so a
+ * reader whose language we do not ship still sees a readable sentence. What
+ * has to exist beside it is a catalogue entry per name, and nothing in the
+ * module itself can say whether one does.
+ *
+ * These refine V7 and V16 of the confirmed language contract for that module.
+ * They are numbered L because the checklist is one surface, not the gate.
+ *
+ * L1 Every task name the wizard or the getting-started page can show has an
+ *    entry in the shipped catalogue, so neither page shows an English task
+ *    list inside an otherwise translated screen -- and that entry says what
+ *    the checklist says. Presence alone is not enough: the catalogue wins over
+ *    the `defaultMessage` at runtime, so an entry that drifted from the module
+ *    keeps showing the older wording on both surfaces with nothing red.
+ *    [V7, V16]
+ * L2 A task's name does not depend on the state of the workspace. That is what
+ *    lets a single catalogue entry hold it: a name that changed with state
+ *    would be pinned to whichever wording happened to be translated first,
+ *    and the other wordings would silently stop being shown. [V16]
+ * L3 The goal a workspace picked has an entry of its own. The wizard reads it
+ *    into the middle of a sentence, so an untranslated goal puts an English
+ *    word inside a translated line rather than on a line of its own. [V7]
+ * L4 The catalogue carries no task name the checklist cannot produce. A task
+ *    upstream removes would otherwise leave an entry behind that is paid for
+ *    in nine languages and shown to nobody -- and the gate's own rule for
+ *    unreachable keys cannot see it, because the pattern that builds these
+ *    ids reads as reaching every one of them. [V16]
+ * L5 A goal name is read into a sentence as an apposition, never into the
+ *    sentence's own grammar. It is one fixed noun phrase per language, so a
+ *    slot behind a preposition inflects it in every language that marks case:
+ *    German renders "bei Internes Feedback" where the case asks for
+ *    "internem", and French drops the article it needs. Introducing it after a
+ *    colon or inside quotation marks is the one slot no language inflects.
+ *    [V7]
+ *
+ * L1, L3 and L4 read `en.json` alone. `locale-parity.test.ts` already holds
+ * the nine catalogues to the same key set, so a key present in English and
+ * missing in German is that suite's finding, not this one's. L5 is the
+ * exception and reads all nine by necessity: it is a statement about each
+ * language's grammar, and parity cannot see grammar.
+ */
+import { describe, it, expect } from 'vitest'
+import fc from 'fast-check'
+import enMessages from '@/locales/en.json'
+import { buildLaunchTasks, type LaunchStatus } from '@/lib/shared/launch-checklist'
+// The canonical list, not four literals repeated here: an outcome upstream adds
+// has to walk into these checks rather than past them.
+import { ONBOARDING_OUTCOMES } from '@/lib/shared/db-types'
+
+const catalogue = enMessages as Record<string, string>
+
+// All nine catalogues, derived from the files on disk the way
+// `locale-parity.test.ts` derives them: a language added later is covered by
+// dropping its file in, with no edit here.
+const catalogueModules = import.meta.glob('../../../locales/*.json', {
+  eager: true,
+  import: 'default',
+})
+const catalogues: Record<string, Record<string, string>> = Object.fromEntries(
+  Object.entries(catalogueModules).map(([path, messages]) => [
+    /([^/]+)\.json$/.exec(path)?.[1] ?? path,
+    messages as Record<string, string>,
+  ])
+)
+
+/** What a language may introduce an apposition with: a colon in either width,
+ *  or an opening quotation mark. This is the general set, not the set the
+ *  catalogues happen to use -- a language reaching for something else is a
+ *  finding to look at, not a mark to add here quietly. */
+const APPOSITION_MARKS = [':', '：', '«', '„', '“', '"', '‘', '「', '『']
+
+/** The messages of one catalogue that read a goal name in. */
+function goalSentences(messages: Record<string, string>): [string, string][] {
+  return Object.entries(messages).filter(([, text]) => text.includes('{goal}'))
+}
+
+function introducesAsApposition(text: string): boolean {
+  const before = text.slice(0, text.indexOf('{goal}')).trimEnd()
+  return APPOSITION_MARKS.some((mark) => before.endsWith(mark))
+}
+
+const TITLE_KEY = /^activation\.task\.[^.]+\.[^.]+\.title$/
+
+/** A workspace that has done nothing yet. Built here rather than at module
+ *  scope: a mutant that crashes a fixture during collection is reported as
+ *  survived, because the suite never runs and so nothing fails. */
+function freshWorkspace(): LaunchStatus {
+  return { hasBoards: false, memberCount: 1, hasBranding: false }
+}
+
+/** Every task name the checklist can produce, as id and English text. */
+function reachableTitles(): Map<string, string> {
+  const titles = new Map<string, string>()
+  for (const outcome of ONBOARDING_OUTCOMES) {
+    for (const task of buildLaunchTasks(freshWorkspace(), outcome)) {
+      titles.set(`activation.task.${outcome}.${task.id}.title`, task.title)
+    }
+  }
+  return titles
+}
+
+describe('launch checklist names in the catalogue (L1, L3, L4)', () => {
+  it('defines every task name the checklist can produce (L1)', () => {
+    const missing = [...reachableTitles().keys()].filter((id) => !catalogue[id])
+
+    expect(missing).toEqual([])
+  })
+
+  it('says what the checklist says, so the catalogue cannot drift (L1)', () => {
+    const drifted = [...reachableTitles()]
+      .filter(([id, title]) => catalogue[id] !== undefined && catalogue[id] !== title)
+      .map(([id, title]) => `${id}: catalogue "${catalogue[id]}" vs checklist "${title}"`)
+
+    expect(drifted).toEqual([])
+  })
+
+  it('produces the names it claims to, so the check is not empty (L1)', () => {
+    // Without this the assertion above would pass against a checklist that
+    // built no tasks at all, and prove nothing.
+    expect(reachableTitles().size).toBe(19)
+  })
+
+  it('defines a name for every goal a workspace can pick (L3)', () => {
+    const missing = ONBOARDING_OUTCOMES.filter(
+      (outcome) => !catalogue[`activation.goal.${outcome}`]
+    )
+
+    expect(missing).toEqual([])
+  })
+
+  it('carries no task name the checklist cannot produce (L4)', () => {
+    const reachable = reachableTitles()
+    const stale = Object.keys(catalogue).filter((id) => TITLE_KEY.test(id) && !reachable.has(id))
+
+    expect(stale).toEqual([])
+  })
+})
+
+describe('what a task name is allowed to depend on (L2)', () => {
+  it('gives a task the same name whatever the workspace has done (L2)', () => {
+    // The one that decides the id scheme. A name that moved with the state
+    // would need the state in its id, and a single entry per task would pin
+    // the checklist to one wording. Descriptions do move -- which is why this
+    // module authors names and leaves descriptions to their own change.
+    const flag = fc.boolean()
+    fc.assert(
+      fc.property(
+        fc.record({
+          hasBoards: flag,
+          hasPublicBoard: flag,
+          hasInternalBoard: flag,
+          hasWidgetInstalled: flag,
+          hasWidgetEnabled: flag,
+          hasHelpArticle: flag,
+          hasIntegration: flag,
+          hasFirstWin: flag,
+          hasBranding: flag,
+          memberCount: fc.integer({ min: 0, max: 5 }),
+        }),
+        fc.constantFrom(...ONBOARDING_OUTCOMES),
+        (partial, outcome) => {
+          const status: LaunchStatus = { ...partial }
+          const fresh = reachableTitles()
+
+          return buildLaunchTasks(status, outcome).every(
+            (task) => fresh.get(`activation.task.${outcome}.${task.id}.title`) === task.title
+          )
+        }
+      )
+    )
+  })
+})
+
+describe('how a goal name is read into a sentence (L5)', () => {
+  it('reads a goal into a sentence in every language, so the check is not empty (L5)', () => {
+    const silent = Object.keys(catalogues).filter(
+      (locale) => goalSentences(catalogues[locale]).length === 0
+    )
+
+    expect(silent).toEqual([])
+  })
+
+  it('introduces the goal as an apposition in every language (L5)', () => {
+    const inflected: string[] = []
+    for (const [locale, messages] of Object.entries(catalogues)) {
+      for (const [id, text] of goalSentences(messages)) {
+        if (!introducesAsApposition(text)) inflected.push(`${locale} ${id}: ${text}`)
+      }
+    }
+
+    expect(inflected).toEqual([])
+  })
+})

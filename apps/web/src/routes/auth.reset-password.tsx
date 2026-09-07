@@ -9,13 +9,14 @@ import { authClient } from '@/lib/client/auth-client'
 import { PortalAuthShell } from '@/components/auth/portal-auth-shell'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
 import { loadPortalIntl } from '@/lib/server/functions/locale'
+import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
 
 export const Route = createFileRoute('/auth/reset-password')({
   validateSearch: (search: Record<string, unknown>) => ({
     token: (search.token as string) || '',
     error: (search.error as string) || '',
   }),
-  loader: async () => await loadPortalIntl(),
+  loader: async ({ context }) => await loadPortalIntl(context.resolvedLocale ?? DEFAULT_LOCALE),
   component: ResetPasswordPage,
 })
 

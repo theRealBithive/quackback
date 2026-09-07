@@ -3,6 +3,8 @@ import { render, type RenderResult } from '@testing-library/react'
 import { IntlProvider, type IntlConfig } from 'react-intl'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
 import enMessages from '@/locales/en.json'
+import deMessages from '@/locales/de.json'
+import frMessages from '@/locales/fr.json'
 
 /**
  * Fail the test on any intl error.
@@ -25,7 +27,11 @@ const failOnIntlError: NonNullable<IntlConfig['onError']> = (error) => {
   throw error
 }
 
-function IntlWrapper({ children }: { children: ReactNode }) {
+/** The same provider, for `renderHook`, which takes a wrapper rather than an
+ *  element. A hook that formats a message needs the catalogue as much as a
+ *  component does, and mounting a bare `IntlProvider` beside it would be the
+ *  empty-catalogue problem this file exists to close. */
+export function IntlWrapper({ children }: { children: ReactNode }) {
   return (
     <IntlProvider
       locale={DEFAULT_LOCALE}
@@ -54,4 +60,53 @@ function IntlWrapper({ children }: { children: ReactNode }) {
  */
 export function renderWithIntl(ui: ReactElement): RenderResult {
   return render(ui, { wrapper: IntlWrapper })
+}
+
+/**
+ * The same, under a second shipped catalogue.
+ *
+ * English rendering cannot tell a translated string from an untranslated one:
+ * the `defaultMessage` beside every id is English, so a surface nobody
+ * translated still reads correctly. Under a second locale it does not --
+ * react-intl reports a missing entry, and `failOnIntlError` turns that into a
+ * failing test rather than a console line.
+ *
+ * German is the usual choice, because it is the one language this fork reads
+ * by hand, so a counterexample is one somebody can judge. It is not always the
+ * language that can witness a difference, though: German keeps a good many
+ * English words ("Feedback", "Support", "Changelog"), and a screen made only
+ * of those renders identically whether the catalogue was consulted or not.
+ * French is here for those, and picking it is a statement that the German
+ * entries are loanwords rather than a gap.
+ */
+const CATALOGUES: Record<'de' | 'fr', Record<string, string>> = {
+  de: deMessages as Record<string, string>,
+  fr: frMessages as Record<string, string>,
+}
+
+export type TestLocale = keyof typeof CATALOGUES
+
+export function IntlWrapperFor(locale: TestLocale) {
+  return function LocalisedIntlWrapper({ children }: { children: ReactNode }) {
+    return (
+      <IntlProvider
+        locale={locale}
+        defaultLocale={DEFAULT_LOCALE}
+        messages={CATALOGUES[locale]}
+        onError={failOnIntlError}
+      >
+        {children}
+      </IntlProvider>
+    )
+  }
+}
+
+export const GermanIntlWrapper = IntlWrapperFor('de')
+
+export function renderInLocale(locale: TestLocale, ui: ReactElement): RenderResult {
+  return render(ui, { wrapper: IntlWrapperFor(locale) })
+}
+
+export function renderInGerman(ui: ReactElement): RenderResult {
+  return renderInLocale('de', ui)
 }
