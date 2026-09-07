@@ -1126,7 +1126,7 @@
   "onboarding.account.ssoRetry": "Повторить вход через SSO",
   "onboarding.account.title": "Добро пожаловать в Quackback",
   "onboarding.bridge.continue": "Открыть рабочее пространство",
-  "onboarding.bridge.description": "Вот с чего мы поможем начать для цели «{goal}».",
+  "onboarding.bridge.description": "Ваша цель: «{goal}». Вот с чего мы поможем начать.",
   "onboarding.bridge.eyebrow": "Готово",
   "onboarding.bridge.mark.done": "Готово",
   "onboarding.bridge.mark.later": "Позже",

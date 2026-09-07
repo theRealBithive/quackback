@@ -1126,7 +1126,7 @@
   "onboarding.account.ssoRetry": "Réessayer le SSO",
   "onboarding.account.title": "Bienvenue sur Quackback",
   "onboarding.bridge.continue": "Ouvrir votre espace de travail",
-  "onboarding.bridge.description": "Voici ce que nous vous aiderons à faire d’abord pour {goal}.",
+  "onboarding.bridge.description": "Votre objectif : {goal}. Voici ce que nous vous aiderons à faire en premier.",
   "onboarding.bridge.eyebrow": "Prêt",
   "onboarding.bridge.mark.done": "Terminé",
   "onboarding.bridge.mark.later": "Plus tard",

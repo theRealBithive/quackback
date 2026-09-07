@@ -1126,7 +1126,7 @@
   "onboarding.account.ssoRetry": "重試 SSO",
   "onboarding.account.title": "歡迎使用 Quackback",
   "onboarding.bridge.continue": "開啟你的工作區",
-  "onboarding.bridge.description": "以下是我們會先幫你完成的事情，目標：{goal}。",
+  "onboarding.bridge.description": "你的目標：{goal}。以下是我們會先幫你完成的事情。",
   "onboarding.bridge.eyebrow": "就緒",
   "onboarding.bridge.mark.done": "已完成",
   "onboarding.bridge.mark.later": "稍後",

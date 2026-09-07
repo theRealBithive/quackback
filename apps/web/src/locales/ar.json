@@ -1126,7 +1126,7 @@
   "onboarding.account.ssoRetry": "إعادة محاولة الدخول الموحّد",
   "onboarding.account.title": "مرحباً بك في Quackback",
   "onboarding.bridge.continue": "افتح مساحة العمل",
-  "onboarding.bridge.description": "إليك ما سنساعدك على فعله أولاً من أجل {goal}.",
+  "onboarding.bridge.description": "هدفك: {goal}. إليك ما سنساعدك على فعله أولاً.",
   "onboarding.bridge.eyebrow": "جاهز",
   "onboarding.bridge.mark.done": "تم",
   "onboarding.bridge.mark.later": "لاحقاً",

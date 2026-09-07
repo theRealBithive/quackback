@@ -111,16 +111,20 @@ function ReadyStep() {
   )
 }
 
-/** The sentence naming the goal the workspace picked. The goal reads into the
- *  middle of it, so the name has to be translated before it is interpolated --
- *  an English word inside a German line, rather than on a line of its own. */
+/** The sentence naming the goal the workspace picked. Two things about it are
+ *  deliberate. The name has to be translated before it is interpolated, or the
+ *  line carries an English word inside a German sentence. And the name is
+ *  introduced as an apposition rather than placed inside the sentence's
+ *  grammar: it is one fixed noun phrase per language, so a slot behind a
+ *  preposition inflects it wherever case is marked. See L5 in
+ *  `lib/shared/__tests__/launch-checklist-ids.test.ts`. */
 export function BridgeDescription({ outcome }: { outcome: OnboardingOutcome }) {
   const intl = useIntl()
   return (
     <p className="mt-2 max-w-sm text-balance text-sm text-muted-foreground">
       <FormattedMessage
         id="onboarding.bridge.description"
-        defaultMessage="Here’s what we’ll help you do first for {goal}."
+        defaultMessage="Your goal: {goal}. Here’s what we’ll help you do first."
         values={{
           goal: intl.formatMessage({
             id: `activation.goal.${outcome}`,

@@ -1126,7 +1126,7 @@
   "onboarding.account.ssoRetry": "Tentar SSO novamente",
   "onboarding.account.title": "Boas-vindas ao Quackback",
   "onboarding.bridge.continue": "Abrir seu workspace",
-  "onboarding.bridge.description": "Veja o que vamos ajudar você a fazer primeiro para {goal}.",
+  "onboarding.bridge.description": "Seu objetivo: {goal}. Veja o que vamos ajudar você a fazer primeiro.",
   "onboarding.bridge.eyebrow": "Pronto",
   "onboarding.bridge.mark.done": "Concluído",
   "onboarding.bridge.mark.later": "Depois",
