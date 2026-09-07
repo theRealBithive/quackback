@@ -1199,3 +1199,33 @@ run, eight minutes of wall clock, and would otherwise have surfaced in CI.
 `apps/web/src/locales/*.json` means running the whole suite before committing,
 not the suites near the change — worth saying in `CLAUDE.md` beside the coverage
 advice, because the instinct is that a JSON file of strings cannot break a test.
+
+## 1x — A translation test that rebuilds the sentence from the catalogue proves only the wiring
+
+`routes/onboarding/__tests__/onboarding-copy.test.tsx` checks a translated line
+by reading the catalogue entry and doing the substitution itself:
+`catalogued('onboarding.bridge.description').replace('{goal}', goal)`. It then
+asserts the page renders that. It always will — both sides read the same string
+and perform the same substitution, so the assertion is satisfied by
+construction for any content whatsoever.
+
+What it does catch is real but narrow: an id that never reached the catalogue,
+a value that was not passed, a component that rendered the `defaultMessage`
+instead. What it cannot catch is any defect **inside** the string. The German
+sentence read `bei {goal}` and the goal names are fixed nominative noun
+phrases, so the page rendered "bei Hilfecenter" and "bei Internes Feedback" —
+case errors in four of nine languages, under a test that was green, in a
+catalogue `locale-parity` also passes because parity is about key sets.
+
+It cost nothing to find here only because a reviewer read the four sentences.
+There is no automated version of "read it", so the answer is to assert the
+**structure** the wording has to have rather than the wording: L5 in
+`lib/shared/__tests__/launch-checklist-ids.test.ts` requires an interpolated
+name to be introduced after a colon or a quotation mark, in all nine
+catalogues, and went red naming six of them.
+
+**Every batch of this i18n work will write more tests of the first shape**,
+because it is the obvious one. When a message interpolates a value, the test
+that matters is the one about the slot the value sits in — not the one that
+rebuilds the sentence. And any locale check worth having reads all nine files:
+a defect that lives inside a string is invisible to every suite that reads one.
