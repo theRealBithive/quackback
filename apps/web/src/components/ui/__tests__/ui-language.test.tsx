@@ -65,6 +65,7 @@ vi.mock('@tanstack/react-router', () => ({
 import type { Editor } from '@tiptap/core'
 import { RichTextEditor, getSlashMenuItems } from '../rich-text-editor'
 import { MentionPicker, type MentionItem } from '../mention-picker'
+import { DateTimePicker } from '../datetime-picker'
 
 const german = germanMessages as Record<string, string>
 const french = frenchMessages as Record<string, string>
@@ -560,6 +561,39 @@ describe('the slash-command menu (U1)', () => {
 
     expect(hoisted.toastError).toHaveBeenCalledWith(german['ui.editor.image.uploadFailed'])
     vi.restoreAllMocks()
+  })
+})
+
+describe('a date the picker shows (V11)', () => {
+  it('is written the way the reader’s language writes one', () => {
+    // The oracle is `Intl` asked for German outright, and the check below it
+    // is what keeps this from passing on a date both languages agree on: what
+    // is asserted is that the German form is on the page and the English one
+    // is not, which is exactly what a hard-coded `MMM d, yyyy` got wrong.
+    const when = new Date('2026-09-07T12:00:00Z')
+    const fields = { day: 'numeric', month: 'short', year: 'numeric' } as const
+    const inGerman = new Intl.DateTimeFormat('de', fields).format(when)
+    const inEnglish = new Intl.DateTimeFormat('en', fields).format(when)
+    expect(inGerman).not.toBe(inEnglish)
+
+    renderInGerman(<DateTimePicker value={when} onChange={() => {}} dateOnly />)
+
+    expect(screen.getByText(inGerman)).toBeInTheDocument()
+    expect(screen.queryByText(inEnglish)).toBeNull()
+  })
+
+  it('keeps the separator between a date and a time it shows together', () => {
+    const when = new Date('2026-09-07T12:00:00Z')
+
+    renderInGerman(<DateTimePicker value={when} onChange={() => {}} />)
+
+    // The time half is the runtime's zone, so this names the shape rather than
+    // the hour: the date is the reader's, the `·` is the design's.
+    expect(screen.getByText(/·/)).toHaveTextContent(
+      new Intl.DateTimeFormat('de', { day: 'numeric', month: 'short', year: 'numeric' }).format(
+        when
+      )
+    )
   })
 })
 
