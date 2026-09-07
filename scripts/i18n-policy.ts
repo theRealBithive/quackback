@@ -394,7 +394,12 @@ export function scanDisplayText(file: string, text: string): DisplayScan {
     if (!matched) continue
     excuses.push({
       file,
-      line: lineOf(comment.start),
+      // The line the note *finishes* on. A reason worth writing rarely fits on
+      // one line, and anchoring on the line it opens on would excuse a line
+      // still inside the note -- so a real reason would read as a broken excuse
+      // while a short, reasonless one worked. For a note that does fit on one
+      // line, and for the trailing form, start and end are the same line.
+      line: lineOf(comment.end),
       reason: matched[1].trim(),
       ownLine: standsAlone(text, comment.start, comment.end),
     })

@@ -1089,6 +1089,8 @@ const slashItems = [
   {
     title: 'Bullet List',
     description: 'Unordered list',
+    'aria-label': 'Insert a bullet list',
+    [dynamicKey]: 'Not a name we can read',
     icon: <List className="size-4" />,
     command: 'bulletList',
   },
@@ -1199,6 +1201,19 @@ describe('text written into the source instead of the catalogue (I14, I15)', () 
 
     expect(texts).toContain('Bullet List')
     expect(texts).toContain('Unordered list')
+  })
+
+  it('reads a display field whose name has to be quoted (I15)', () => {
+    // `aria-label` is not a valid identifier, so in an object it can only ever
+    // be written quoted. A rule that reads only bare names would miss every
+    // screen-reader name held in a table.
+    expect(reportedText(editorLike())).toContain('Insert a bullet list')
+  })
+
+  it('leaves alone a name it cannot read (I15)', () => {
+    // A computed key is a name decided at runtime. The gate grades the few
+    // names it knows, so a key it cannot read is not one of them.
+    expect(reportedText(editorLike())).not.toContain('Not a name we can read')
   })
 
   it('leaves alone the machine field beside it (I15)', () => {
@@ -1338,6 +1353,46 @@ export function X() {
     const findings = gradeDisplayText([scan(source)])
 
     expect(findings.some((f) => f.kind === 'untranslated-string')).toBe(true)
+  })
+})
+
+describe('a note that takes more than one line (I17)', () => {
+  it('speaks for the line below where it ends, not below where it starts', () => {
+    // A reason worth writing is usually longer than a line, and this is the
+    // form every later batch will copy. Anchoring on the line the note opens on
+    // would excuse a line still inside the note and leave the string beneath it
+    // reported -- so a real reason would read as a broken excuse and the short,
+    // reasonless one would work.
+    const source = `
+export function Field() {
+  return (
+    <input
+      /* i18n-allow: a specimen showing the shape of the input rather than
+         language, and a translated example would name a domain we do not
+         hold. */
+      placeholder="https://example.com"
+    />
+  )
+}
+`
+    expect(gradeDisplayText([scan(source)])).toEqual([])
+  })
+
+  it('still refuses a multi-line note with no reason (I17)', () => {
+    const source = `
+export function Field() {
+  return (
+    <input
+      /* i18n-allow
+       */
+      placeholder="https://example.com"
+    />
+  )
+}
+`
+    const kinds = gradeDisplayText([scan(source)]).map((f) => f.kind)
+
+    expect(kinds).toContain('excuse-without-reason')
   })
 })
 
