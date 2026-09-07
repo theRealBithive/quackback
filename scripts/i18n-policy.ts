@@ -110,7 +110,14 @@ export interface Exemption {
  * not a missed string -- it is a report full of class lists and node types,
  * which is how a gate stops being read.
  */
-const READABLE_ATTRIBUTES = new Set(['title', 'aria-label', 'placeholder', 'alt', 'label'])
+const READABLE_ATTRIBUTES = new Set([
+  'title',
+  'aria-label',
+  'placeholder',
+  'alt',
+  'label',
+  'description',
+])
 
 /** Objects whose every method exists to show the string handed to it. */
 const SHOWING_OBJECTS = new Set(['toast'])
@@ -225,6 +232,65 @@ function showsItsArgument(callee: unknown): boolean {
  * sentence carries their words inside it -- a template literal -- the pieces
  * we wrote are read and the holes are not (I20).
  */
+/**
+ * The name a property or a binding carries, when it is written out rather than
+ * computed. A computed key is a name we cannot read, so it is not one of the
+ * few we grade.
+ */
+function writtenName(node: unknown): string | null {
+  const n = node as { computed?: boolean; type?: string; name?: string; value?: unknown }
+  if (!n || typeof n !== 'object') return null
+  if (n.computed) return null
+  if (n.type === 'Identifier') return n.name ?? null
+  const literal = stringOf(n)
+  return literal
+}
+
+/**
+ * The words a display position would actually render, out of the expression
+ * sitting in it.
+ *
+ * A reader sees the value, not the syntax: `{isActive ? 'Update' : 'Add'}`
+ * shows one of two words we wrote, and `title={busy ? 'Saving' : 'Save'}` is a
+ * tooltip either way. So the descent follows the shapes that only *choose*
+ * between values -- a conditional, an `||`/`??`/`&&` chain -- and reads the
+ * pieces of our own sentence out of a template literal, leaving the holes for
+ * a person's own words alone (I20).
+ *
+ * Both sides of a logical chain are read rather than only the one that can be
+ * rendered. A string literal on the left of `&&` or `??` is dead either way,
+ * and an operator table here would be a second thing to keep true for no
+ * finding it could add.
+ *
+ * It stops at a call. A call in a display position is graded by the rule for
+ * calls, which knows the short list of functions whose whole job is to show
+ * their argument -- and every other call there is as likely to be
+ * `formatMessage({ id })`, whose argument is an id rather than a word. Reading
+ * those would report the very thing this gate asks for.
+ */
+function displayValues(expression: unknown): { text: string; start: number }[] {
+  if (!expression || typeof expression !== 'object') return []
+  const node = expression as Record<string, unknown> & { type?: string; start?: number }
+
+  const literal = stringOf(node)
+  if (literal !== null) return [{ text: literal, start: node.start ?? 0 }]
+
+  if (node.type === 'TemplateLiteral') {
+    const quasis = (node.quasis ?? []) as { value: { raw: string }; start?: number }[]
+    return quasis.map((quasi) => ({ text: quasi.value.raw, start: quasi.start ?? node.start ?? 0 }))
+  }
+
+  if (node.type === 'ConditionalExpression') {
+    return [...displayValues(node.consequent), ...displayValues(node.alternate)]
+  }
+
+  if (node.type === 'LogicalExpression') {
+    return [...displayValues(node.left), ...displayValues(node.right)]
+  }
+
+  return []
+}
+
 export function scanDisplayText(file: string, text: string): DisplayScan {
   const parsed = parseSync(file, text)
   const lineOf = lineIndex(text)
@@ -243,6 +309,11 @@ export function scanDisplayText(file: string, text: string): DisplayScan {
     strings.push({ text: raw.trim(), file, line: lineOfWord(raw, start), where })
   }
 
+  /** Containers an attribute already answered for; see the attribute case. An
+   *  attribute is always visited before the container inside it, because each
+   *  node is graded before the walk descends into it. */
+  const gradedAsAttribute = new Set<unknown>()
+
   const visit = (node: unknown): void => {
     if (!node || typeof node !== 'object') return
     const n = node as Record<string, unknown> & { type?: string; start?: number }
@@ -253,22 +324,49 @@ export function scanDisplayText(file: string, text: string): DisplayScan {
         break
       }
       case 'JSXAttribute': {
+        // Claimed before the allowlist is consulted, not after. The walk below
+        // reaches this attribute's own container too, and the case for a
+        // container has no way to ask what it is sitting in -- so an attribute
+        // that is *not* a display position has to claim its container as well,
+        // or `className={busy ? 'a' : 'b'}` would be read as text on the page.
+        const container = (n as { value?: unknown }).value
+        if ((container as { type?: string })?.type === 'JSXExpressionContainer') {
+          gradedAsAttribute.add(container)
+        }
         const name = (n.name as { name?: string })?.name
         if (!name || !READABLE_ATTRIBUTES.has(name)) break
-        const value = attributeValue(n as { value?: unknown })
-        const literal = stringOf(value)
-        if (literal !== null) {
-          record(literal, (value as { start?: number })?.start ?? n.start ?? 0, name)
-          break
+        for (const word of displayValues(attributeValue(n as { value?: unknown }))) {
+          record(word.text, word.start, name)
         }
-        // Our sentence with their words inside it: the pieces we wrote.
-        const template = value as {
-          type?: string
-          quasis?: { value: { raw: string }; start?: number }[]
+        break
+      }
+      case 'JSXExpressionContainer': {
+        // Between the tags rather than in an attribute: a word in braces is a
+        // word on the page.
+        if (gradedAsAttribute.has(node)) break
+        for (const word of displayValues(n.expression)) record(word.text, word.start, 'text')
+        break
+      }
+      case 'Property': {
+        // A tooltip is a tooltip whether it is written `title=` in the markup
+        // or `title:` in a row of a menu the markup renders from a table. The
+        // same short list of names decides, for the same reason: the name says
+        // a person reads the value, and the property beside it holding a node
+        // type or a command says nobody does.
+        const key = writtenName((n as { key?: unknown }).key)
+        if (!key || !READABLE_ATTRIBUTES.has(key)) break
+        for (const word of displayValues((n as { value?: unknown }).value)) {
+          record(word.text, word.start, key)
         }
-        if (template?.type !== 'TemplateLiteral') break
-        for (const quasi of template.quasis ?? []) {
-          record(quasi.value.raw, quasi.start ?? n.start ?? 0, name)
+        break
+      }
+      case 'AssignmentPattern': {
+        // The word a display prop falls back to. It is what most readers
+        // actually see, because most callers pass nothing.
+        const bound = writtenName((n as { left?: unknown }).left)
+        if (!bound || !READABLE_ATTRIBUTES.has(bound)) break
+        for (const word of displayValues((n as { right?: unknown }).right)) {
+          record(word.text, word.start, bound)
         }
         break
       }

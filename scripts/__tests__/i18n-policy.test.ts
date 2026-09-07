@@ -1085,7 +1085,24 @@ describe('properties', () => {
  *  during collection is reported as survived, because the suite never runs. */
 function editorLike(): string {
   return `
-export function Toolbar({ alt, organisation }: { alt: string; organisation: string }) {
+const slashItems = [
+  {
+    title: 'Bullet List',
+    description: 'Unordered list',
+    icon: <List className="size-4" />,
+    command: 'bulletList',
+  },
+]
+
+export function Toolbar({
+  alt,
+  organisation,
+  placeholder = 'Write something...',
+}: {
+  alt: string
+  organisation: string
+  placeholder?: string
+}) {
   return (
     <div className="flex items-center gap-2" role="toolbar" aria-label="Image options">
       <button title="Bold (Cmd+B)" onClick={() => editor.isActive('bold')}>
@@ -1096,6 +1113,10 @@ export function Toolbar({ alt, organisation }: { alt: string; organisation: stri
       <span>—</span>
       <span>2026</span>
       <em aria-label={\`\${organisation} Member\`}>{organisation}</em>
+      <button onClick={applyLink} className={isActive ? 'border-primary' : 'border-muted'}>{isActive ? 'Update' : 'Add'}</button>
+      <span title={isActive ? 'Linked' : 'Not linked yet'}>{organisation || 'Team'}</span>
+      <span>{\`Signed in as \${organisation}\`}</span>
+      <span>{formatCount('items left')}</span>
     </div>
   )
 }
@@ -1132,6 +1153,66 @@ describe('text written into the source instead of the catalogue (I14, I15)', () 
     expect(texts).toContain('https://example.com')
   })
 
+  it('reads a word a display position chooses between (I15)', () => {
+    // The reader sees the value, not the syntax. Both branches of a conditional
+    // reach the screen, and so does the word behind an `||` -- which is the
+    // shape that hid `'Team'` in `mention-picker.tsx` from the first version of
+    // this rule.
+    const texts = reportedText(editorLike())
+
+    expect(texts).toContain('Update')
+    expect(texts).toContain('Add')
+    expect(texts).toContain('Team')
+  })
+
+  it('reads a chosen word in a readable attribute too, not only between tags (I15)', () => {
+    // The same hole, on the other display position: a tooltip that picks
+    // between two words we wrote is two tooltips we wrote.
+    const texts = reportedText(editorLike())
+
+    expect(texts).toContain('Linked')
+    expect(texts).toContain('Not linked yet')
+  })
+
+  it('reads our half of a sentence assembled between tags (I15, I20)', () => {
+    const texts = reportedText(editorLike())
+
+    expect(texts).toContain('Signed in as')
+  })
+
+  it('stops at a call rather than reading what it was passed (I15)', () => {
+    // A call in a display position is graded by the rule for calls, which knows
+    // the short list of functions whose job is to show their argument. Reading
+    // every other call's arguments here would report `formatMessage({ id })` --
+    // the very thing this gate asks for -- as untranslated text.
+    const texts = reportedText(editorLike())
+
+    expect(texts).not.toContain('items left')
+  })
+
+  it('reads a display field in a table of items (I15)', () => {
+    // A tooltip is a tooltip whether it is written `title=` in the markup or
+    // `title:` in a row of a menu the markup renders. This is where two thirds
+    // of this editor's words actually live -- its slash-command menu -- and the
+    // first version of the rule saw none of them.
+    const texts = reportedText(editorLike())
+
+    expect(texts).toContain('Bullet List')
+    expect(texts).toContain('Unordered list')
+  })
+
+  it('leaves alone the machine field beside it (I15)', () => {
+    // Same object, one property along: the name of the command to run. Reading
+    // it would put an editor node type in the catalogue.
+    expect(reportedText(editorLike())).not.toContain('bulletList')
+  })
+
+  it('reads the word a display prop falls back to (I15)', () => {
+    // A default is what most readers actually see, because most callers pass
+    // nothing.
+    expect(reportedText(editorLike())).toContain('Write something...')
+  })
+
   it('leaves alone what only looks like language (I15)', () => {
     const texts = reportedText(editorLike())
 
@@ -1141,6 +1222,11 @@ describe('text written into the source instead of the catalogue (I14, I15)', () 
     expect(texts).not.toContain('bold')
     expect(texts).not.toContain('https://cdn.example.com/x.png')
     expect(texts).not.toContain('toolbar')
+    // A class name a conditional picks between. It reaches the same expression
+    // shape a tooltip does, and an attribute nobody reads is still an attribute
+    // nobody reads.
+    expect(texts).not.toContain('border-primary')
+    expect(texts).not.toContain('border-muted')
   })
 
   it('reads a sentence handed to something whose job is to show it (I15)', () => {
@@ -1316,9 +1402,11 @@ describe('properties of the display-text rule', () => {
   </div>
 )`
 
-          expect(gradeDisplayText([scan(bare)]).map((f) => f.text).sort()).toEqual(
-            [word, 'Kept as it was'].sort()
-          )
+          expect(
+            gradeDisplayText([scan(bare)])
+              .map((f) => f.text)
+              .sort()
+          ).toEqual([word, 'Kept as it was'].sort())
           expect(gradeDisplayText([scan(excused)]).map((f) => f.text)).toEqual(['Kept as it was'])
         }
       )
