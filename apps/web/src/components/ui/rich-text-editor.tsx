@@ -797,7 +797,18 @@ interface SlashMenuListProps {
   command: (item: SlashMenuItem) => void
 }
 
-const SlashMenuList = forwardRef<SlashMenuListRef, SlashMenuListProps>(
+/**
+ * The list the slash popup mounts, as a component of its own.
+ *
+ * Exported for the language tests. The popup opens on a caret position that
+ * `posAtCoords` cannot answer for without layout, so the list is unreachable
+ * through the editor in a test environment -- and it holds text of its own,
+ * both the group headings and the sentence for a search that matched nothing.
+ * It is mounted through `ReactRenderer`, which registers with the editor's
+ * `contentComponent` and therefore renders inside the provider tree, so
+ * rendering it directly is the same context it has in the product.
+ */
+export const SlashMenuList = forwardRef<SlashMenuListRef, SlashMenuListProps>(
   ({ items, command }, ref) => {
     const intl = useIntl()
     const [selectedIndex, setSelectedIndex] = useState(0)
@@ -1773,8 +1784,14 @@ export function RichTextEditor(props: RichTextEditorProps) {
 
 /**
  * Handle image drop events in the editor.
+ *
+ * Exported for the language tests. ProseMirror reaches this handler only after
+ * it has resolved the drop position with `posAtCoords`, which needs a laid-out
+ * document -- so in a test environment the drop never gets here, and the
+ * sentence a failed upload shows would go ungraded. The paste handler beside
+ * it needs no such door: paste carries no coordinates.
  */
-function handleImageDrop(
+export function handleImageDrop(
   intl: IntlShape,
   onImageUpload: (file: File) => Promise<string>
 ): (

@@ -63,7 +63,12 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 import type { Editor } from '@tiptap/core'
-import { RichTextEditor, getSlashMenuItems } from '../rich-text-editor'
+import {
+  RichTextEditor,
+  getSlashMenuItems,
+  SlashMenuList,
+  handleImageDrop,
+} from '../rich-text-editor'
 import { MentionPicker, type MentionItem } from '../mention-picker'
 import { DateTimePicker } from '../datetime-picker'
 
@@ -561,6 +566,59 @@ describe('the slash-command menu (U1)', () => {
 
     expect(hoisted.toastError).toHaveBeenCalledWith(german['ui.editor.image.uploadFailed'])
     vi.restoreAllMocks()
+  })
+})
+
+describe('the list the slash popup mounts (U1)', () => {
+  /** A German intl outside React, for the rows the list is handed. */
+  function germanIntl() {
+    return createIntl({ locale: 'de', messages: german })
+  }
+
+  it('names its groups and its rows in the reader’s language', () => {
+    const rows = getSlashMenuItems(germanIntl(), { headings: true, tables: true })
+
+    renderInGerman(<SlashMenuList items={rows} command={() => {}} />)
+
+    // `Listen` and `Überschrift 1` rather than `Text`, which German keeps as
+    // it is and which is both a group name and a row title.
+    expect(screen.getByText(german['ui.editor.slash.group.lists'])).toBeInTheDocument()
+    expect(screen.getByText(german['ui.editor.slash.heading1.title'])).toBeInTheDocument()
+    expect(screen.queryByText('Lists')).toBeNull()
+    expect(screen.queryByText('Heading 1')).toBeNull()
+  })
+
+  it('says so in the reader’s language when nothing matched what was typed', () => {
+    renderInGerman(<SlashMenuList items={[]} command={() => {}} />)
+
+    expect(screen.getByText(german['ui.editor.slash.empty'])).toBeInTheDocument()
+    expect(screen.queryByText('No matching commands')).toBeNull()
+  })
+})
+
+describe('an image dropped into the editor (U1)', () => {
+  it('says an upload failed in the reader’s language', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const drop = handleImageDrop(createIntl({ locale: 'de', messages: german }), () =>
+      Promise.reject(new Error('no'))
+    )
+    // Enough of a view for the handler to reach the upload: the failing path
+    // never gets as far as inserting a node.
+    const view = { state: { schema: { nodes: {} } }, posAtCoords: () => ({ pos: 1, inside: 0 }) }
+    const event = {
+      preventDefault: () => {},
+      clientX: 0,
+      clientY: 0,
+      dataTransfer: { files: [new File(['x'], 'a.png', { type: 'image/png' })] },
+    }
+
+    expect(drop(view as never, event as never, null, false)).toBe(true)
+
+    await waitFor(() =>
+      expect(hoisted.toastError).toHaveBeenCalledWith(german['ui.editor.image.uploadFailed'])
+    )
+    expect(hoisted.toastError).not.toHaveBeenCalledWith("Couldn't upload image. Try again.")
+    errors.mockRestore()
   })
 })
 
