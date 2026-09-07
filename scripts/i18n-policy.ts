@@ -188,34 +188,40 @@ function standsAlone(text: string, start: number, end: number): boolean {
   return /^[\s{]*$/.test(before) && /^[\s}]*$/.test(after)
 }
 
-/** The name a call is made under, for the report and for the decision. */
+/** What a call is written as, as far as the two rules below care: a bare name,
+ *  or a name on something. A callee is always one of the parser's nodes, so
+ *  there is no guard for a missing one -- it would be a branch no source can
+ *  take. */
+type Callee = {
+  type: string
+  name: string
+  object: { name?: string }
+  property: { name?: string }
+}
+
+/**
+ * The name a call is made under, for the report.
+ *
+ * Reached only for a callee {@link showsItsArgument} accepted, so the type is
+ * one of the two below. `null` is for the shape that has no name to print: a
+ * method reached by a computed key, where the report says `call` instead.
+ */
 function calleeName(callee: unknown): string | null {
-  const c = callee as {
-    type?: string
-    name?: string
-    object?: { name?: string }
-    property?: { name?: string }
-  }
-  if (c?.type === 'Identifier') return c.name ?? null
-  if (c?.type !== 'MemberExpression') return null
-  const object = c.object?.name
-  const property = c.property?.name
+  const c = callee as Callee
+  if (c.type === 'Identifier') return c.name
+  const object = c.object.name
+  const property = c.property.name
   if (!property) return null
   return object ? `${object}.${property}` : property
 }
 
 /** Whether a call's string arguments are shown to a reader. */
 function showsItsArgument(callee: unknown): boolean {
-  const c = callee as {
-    type?: string
-    name?: string
-    object?: { name?: string }
-    property?: { name?: string }
-  }
-  if (c?.type === 'Identifier') return SHOWING_FUNCTIONS.has(c.name ?? '')
-  if (c?.type !== 'MemberExpression') return false
-  if (SHOWING_OBJECTS.has(c.object?.name ?? '')) return true
-  return SHOWING_FUNCTIONS.has(c.property?.name ?? '')
+  const c = callee as Callee
+  if (c.type === 'Identifier') return SHOWING_FUNCTIONS.has(c.name)
+  if (c.type !== 'MemberExpression') return false
+  if (SHOWING_OBJECTS.has(c.object.name ?? '')) return true
+  return SHOWING_FUNCTIONS.has(c.property.name ?? '')
 }
 
 /**
@@ -238,12 +244,11 @@ function showsItsArgument(callee: unknown): boolean {
  * few we grade.
  */
 function writtenName(node: unknown): string | null {
-  const n = node as { computed?: boolean; type?: string; name?: string; value?: unknown }
-  if (!n || typeof n !== 'object') return null
-  if (n.computed) return null
+  // Both callers hand in a key or a binding that exists, so there is no guard
+  // for a missing one: it would be a branch no input can take.
+  const n = node as { type?: string; name?: string; value?: unknown }
   if (n.type === 'Identifier') return n.name ?? null
-  const literal = stringOf(n)
-  return literal
+  return stringOf(n)
 }
 
 /**
@@ -252,15 +257,20 @@ function writtenName(node: unknown): string | null {
  *
  * A reader sees the value, not the syntax: `{isActive ? 'Update' : 'Add'}`
  * shows one of two words we wrote, and `title={busy ? 'Saving' : 'Save'}` is a
- * tooltip either way. So the descent follows the shapes that only *choose*
- * between values -- a conditional, an `||`/`??`/`&&` chain -- and reads the
- * pieces of our own sentence out of a template literal, leaving the holes for
- * a person's own words alone (I20).
+ * tooltip either way. So the descent follows the shapes whose words are the
+ * words in their parts -- a conditional, an `||`/`??`/`&&` chain, and a `+`
+ * that joins one part to another -- and reads the pieces of our own sentence
+ * out of a template literal, leaving the holes for a person's own words alone
+ * (I20).
  *
  * Both sides of a logical chain are read rather than only the one that can be
- * rendered. A string literal on the left of `&&` or `??` is dead either way,
- * and an operator table here would be a second thing to keep true for no
- * finding it could add.
+ * rendered: a string literal on the left of `&&` or `??` is dead either way,
+ * and an operator table there would be a second thing to keep true for no
+ * finding it could add. A binary operator is a different matter, and `+` is
+ * the only one of them that gets read: it is the one whose result is its parts
+ * put together, exactly as a template literal is. Every other binary operator
+ * answers a question about a value rather than showing it, and reading
+ * `position === 'top'` would report the name of a setting as a sentence.
  *
  * It stops at a call. A call in a display position is graded by the rule for
  * calls, which knows the short list of functions whose whole job is to show
@@ -276,8 +286,11 @@ function displayValues(expression: unknown): { text: string; start: number }[] {
   if (literal !== null) return [{ text: literal, start: node.start ?? 0 }]
 
   if (node.type === 'TemplateLiteral') {
-    const quasis = (node.quasis ?? []) as { value: { raw: string }; start?: number }[]
-    return quasis.map((quasi) => ({ text: quasi.value.raw, start: quasi.start ?? node.start ?? 0 }))
+    // Every piece of a template literal is a node of its own and carries its
+    // own position, so there is no fallback here: it would be a branch no
+    // source can take.
+    const quasis = node.quasis as { value: { raw: string }; start: number }[]
+    return quasis.map((quasi) => ({ text: quasi.value.raw, start: quasi.start }))
   }
 
   if (node.type === 'ConditionalExpression') {
@@ -285,6 +298,10 @@ function displayValues(expression: unknown): { text: string; start: number }[] {
   }
 
   if (node.type === 'LogicalExpression') {
+    return [...displayValues(node.left), ...displayValues(node.right)]
+  }
+
+  if (node.type === 'BinaryExpression' && node.operator === '+') {
     return [...displayValues(node.left), ...displayValues(node.right)]
   }
 
@@ -299,10 +316,11 @@ export function scanDisplayText(file: string, text: string): DisplayScan {
   /** The line the word itself sits on, not the line the node opens on. A
    *  report that points at the element above the text is a report nobody
    *  trusts, and JSX text starts at the previous tag. */
-  const lineOfWord = (raw: string, start: number): number => {
-    const offset = raw.search(/\p{L}/u)
-    return lineOf(start + (offset < 0 ? 0 : offset))
-  }
+  const lineOfWord = (raw: string, start: number): number =>
+    // `record` below only reaches here for a string that holds a word, so the
+    // search always finds one; a fallback for -1 would be a branch no input
+    // can take.
+    lineOf(start + raw.search(/\p{L}/u))
 
   const record = (raw: string, start: number, where: string) => {
     if (!holdsAWord(raw)) return
@@ -320,7 +338,9 @@ export function scanDisplayText(file: string, text: string): DisplayScan {
 
     switch (n.type) {
       case 'JSXText': {
-        record(String(n.value ?? ''), n.start ?? 0, 'text')
+        // A text node is the string it holds, so neither a conversion nor a
+        // fallback here can be reached.
+        record(n.value as string, n.start as number, 'text')
         break
       }
       case 'JSXAttribute': {
@@ -330,10 +350,12 @@ export function scanDisplayText(file: string, text: string): DisplayScan {
         // that is *not* a display position has to claim its container as well,
         // or `className={busy ? 'a' : 'b'}` would be read as text on the page.
         const container = (n as { value?: unknown }).value
-        if ((container as { type?: string })?.type === 'JSXExpressionContainer') {
-          gradedAsAttribute.add(container)
-        }
-        const name = (n.name as { name?: string })?.name
+        // Claimed whatever the value turns out to be. Only a container is ever
+        // looked up again, so a quoted value or a valueless attribute lands in
+        // here and is never asked for -- and a test for the difference would be
+        // a test of the set rather than of the report.
+        gradedAsAttribute.add(container)
+        const name = (n.name as { name?: string }).name
         if (!name || !READABLE_ATTRIBUTES.has(name)) break
         for (const word of displayValues(attributeValue(n as { value?: unknown }))) {
           record(word.text, word.start, name)
@@ -353,6 +375,13 @@ export function scanDisplayText(file: string, text: string): DisplayScan {
         // same short list of names decides, for the same reason: the name says
         // a person reads the value, and the property beside it holding a node
         // type or a command says nobody does.
+        //
+        // `computed` sits on the property rather than on its key, which is
+        // where this check used to be and therefore never fired: `{[title]: x}`
+        // is a name decided at runtime that reads exactly like `title:` in the
+        // source, and grading it would report a word by the name of a variable
+        // instead of by where it sits.
+        if (n.computed) break
         const key = writtenName((n as { key?: unknown }).key)
         if (!key || !READABLE_ATTRIBUTES.has(key)) break
         for (const word of displayValues((n as { value?: unknown }).value)) {
@@ -375,7 +404,7 @@ export function scanDisplayText(file: string, text: string): DisplayScan {
         const where = calleeName(n.callee) ?? 'call'
         for (const argument of n.arguments as unknown[]) {
           const literal = stringOf(argument)
-          if (literal !== null) record(literal, (argument as { start?: number }).start ?? 0, where)
+          if (literal !== null) record(literal, (argument as { start: number }).start, where)
         }
         break
       }
@@ -386,8 +415,8 @@ export function scanDisplayText(file: string, text: string): DisplayScan {
 
   visit(parsed.program)
 
-  const comments =
-    (parsed as { comments?: { value: string; start: number; end: number }[] }).comments ?? []
+  const comments = (parsed as { comments: { value: string; start: number; end: number }[] })
+    .comments
   const excuses: DisplayExcuse[] = []
   for (const comment of comments) {
     const matched = EXCUSE.exec(comment.value)
@@ -408,10 +437,15 @@ export function scanDisplayText(file: string, text: string): DisplayScan {
   return { strings, excuses }
 }
 
-/** Whether a note speaks for a given word: on its line always, and on the line
- *  below only when the note stood alone (see {@link standsAlone}). */
+/**
+ * Whether a note speaks for a given word: on its line always, and on the line
+ * below only when the note stood alone (see {@link standsAlone}).
+ *
+ * Both callers pair a scan's notes with the same scan's words, and a scan is
+ * one file, so the two are always in the same file. There is no check for it
+ * here: it would be a branch no input can take.
+ */
 function excuses(excuse: DisplayExcuse, string: DisplayString): boolean {
-  if (excuse.file !== string.file) return false
   if (excuse.line === string.line) return true
   return excuse.ownLine && excuse.line === string.line - 1
 }

@@ -1414,6 +1414,263 @@ describe('only the files handed in are graded (I16)', () => {
   })
 })
 
+/** A parseable component around a body, so a fixture is source rather than a
+ *  fragment. Built by a function so a mutant that breaks one is reported as
+ *  caught rather than as survived. */
+function component(body: string): string {
+  return `
+export function Widget({ organisation }: { organisation: string }) {
+  return (
+${body}
+  )
+}
+`
+}
+
+/** The words the gate still reports for a source, once the notes in it have
+ *  had their say. */
+function stillReported(body: string): string[] {
+  return gradeDisplayText([scan(component(body))])
+    .filter((f) => f.kind === 'untranslated-string')
+    .map((f) => f.text)
+}
+
+describe('what the report says about what it found (I14, I17)', () => {
+  it('says how each string is read, and names the attribute where there is one', () => {
+    const findings = gradeDisplayText([scan(editorLike())])
+
+    const between = findings.find((f) => f.text === 'Delete row')
+    expect(between?.kind).toBe('untranslated-string')
+    expect(between?.where).toBe('text')
+    expect(between?.detail).toBe(
+      'read by a person as text on the page, so it belongs in the catalogue rather than in the source'
+    )
+
+    const tooltip = findings.find((f) => f.text === 'Bold (Cmd+B)')
+    expect(tooltip?.where).toBe('title')
+    expect(tooltip?.detail).toBe(
+      'read by a person as the title, so it belongs in the catalogue rather than in the source'
+    )
+  })
+
+  it('says why a note with no reason is refused rather than honoured (I17)', () => {
+    const finding = gradeDisplayText([
+      scan(component(`    <p title="Kept as it was" /* i18n-allow */>Word</p>`)),
+    ]).find((f) => f.kind === 'excuse-without-reason')
+
+    expect(finding?.where).toBe('note')
+    expect(finding?.text).toBe('')
+    expect(finding?.line).toBe(4)
+    expect(finding?.detail).toBe(
+      'an excuse with no reason is an allowlist entry, so it is refused rather than honoured'
+    )
+  })
+})
+
+describe('what counts as a note at all (I17)', () => {
+  it('is not a note when the comment opens with something else', () => {
+    // Somebody talking *about* the gate, not using it. Honouring this would
+    // mean a passing mention of the marker silences a line.
+    expect(
+      stillReported(`    <p title="Kept as it was" /* TODO: i18n-allow one day */>W</p>`)
+    ).toContain('Kept as it was')
+  })
+
+  it('is a note however much space surrounds the marker', () => {
+    // A note long enough to wrap opens with a newline before the marker, which
+    // is the shape a reason of any substance actually has.
+    expect(
+      stillReported(`    <p
+      /*
+         i18n-allow: a specimen rather than language.
+       */
+      title="Kept as it was"
+    >W</p>`)
+    ).not.toContain('Kept as it was')
+  })
+
+  it('is a note with no space after the colon', () => {
+    expect(
+      stillReported(`    <p title="Kept as it was" /* i18n-allow:not language */>W</p>`)
+    ).not.toContain('Kept as it was')
+  })
+
+  it('is a note with no colon at all', () => {
+    expect(
+      stillReported(`    <p title="Kept as it was" /* i18n-allow not language */>W</p>`)
+    ).not.toContain('Kept as it was')
+  })
+})
+
+describe('where a note reaches (I17)', () => {
+  it('reaches the line below when it stands alone among the children', () => {
+    // Between tags the only comment syntax is `{/* ... */}`, braces and all,
+    // and it cannot sit after the word it speaks for. So the braces have to
+    // count as standing alone, or the form is unusable where it is needed.
+    expect(
+      stillReported(`    <p>
+      {/* i18n-allow: a product name. */}
+      Quackback
+    </p>`)
+    ).not.toContain('Quackback')
+  })
+
+  it('reaches only its own line when something follows it there', () => {
+    // A note with a word after it on the line speaks for that line. Letting it
+    // reach further would silence the next string on every single use.
+    expect(
+      stillReported(`    <p>
+      {/* i18n-allow: a product name. */}<span>Quackback</span>
+      <span>Kept as it was</span>
+    </p>`)
+    ).toContain('Kept as it was')
+  })
+
+  it('does not reach the line above it', () => {
+    expect(
+      stillReported(`    <p>
+      <span>Kept as it was</span>
+      {/* i18n-allow: a product name. */}
+      Quackback
+    </p>`)
+    ).toContain('Kept as it was')
+  })
+})
+
+describe('a call whose whole job is to show its argument (I15)', () => {
+  function reportedFrom(body: string) {
+    return gradeDisplayText([scan(component(body))]).filter((f) => f.kind === 'untranslated-string')
+  }
+
+  it('reads a bare browser call', () => {
+    const found = reportedFrom(`    <p onClick={() => alert('Careful now')}>W</p>`)
+
+    expect(found.find((f) => f.text === 'Careful now')?.where).toBe('alert')
+  })
+
+  it('reads the same call written through the window', () => {
+    const found = reportedFrom(`    <p onClick={() => window.confirm('Are you sure?')}>W</p>`)
+
+    expect(found.find((f) => f.text === 'Are you sure?')?.where).toBe('window.confirm')
+  })
+
+  it('reads any method of an object that exists to show things', () => {
+    const found = reportedFrom(`    <p onClick={() => toast.success('Saved it')}>W</p>`)
+
+    expect(found.find((f) => f.text === 'Saved it')?.where).toBe('toast.success')
+  })
+
+  it('leaves alone a call that merely reads like one', () => {
+    // The same method name on an object that writes to a log rather than to a
+    // person.
+    const found = reportedFrom(`    <p onClick={() => logger.error('Upload broke')}>W</p>`)
+
+    expect(found.map((f) => f.text)).not.toContain('Upload broke')
+  })
+
+  it('reads a shower reached through something with no name of its own', () => {
+    const found = reportedFrom(`    <p onClick={() => window.self.alert('Careful now')}>W</p>`)
+
+    // No object name to print, so the report names the method alone rather
+    // than an empty prefix in front of it.
+    expect(found.find((f) => f.text === 'Careful now')?.where).toBe('alert')
+  })
+
+  it('names the call itself when the method is reached by a computed key', () => {
+    const found = reportedFrom(`    <p onClick={() => toast['error']('Upload broke')}>W</p>`)
+
+    // An object that shows things, reached in a way that leaves no method name
+    // to print. Still a word on the page, so it is still reported.
+    expect(found.find((f) => f.text === 'Upload broke')?.where).toBe('call')
+  })
+})
+
+describe('an attribute with no value at all (I15)', () => {
+  it('is not a word', () => {
+    // `<img alt />` is a readable attribute written as a flag. There is no
+    // string to read, and asking for one must not throw.
+    expect(gradeDisplayText([scan(component(`    <img alt src="/a.png" />`))])).toEqual([])
+  })
+})
+
+describe('the reason a note carries (I17)', () => {
+  /** The reason the gate read out of the only note in a source. */
+  function reasonIn(body: string): string {
+    return scan(component(body)).excuses[0].reason
+  }
+
+  it('is everything after the marker, however it was punctuated', () => {
+    // Three ways of writing the same note. What matters is that the reason
+    // arrives whole: a rule that ate the first word would make a note read as
+    // reasoned while saying less than its author wrote.
+    expect(reasonIn(`    <p title="X" /* i18n-allow: not language */>W</p>`)).toBe('not language')
+    expect(reasonIn(`    <p title="X" /* i18n-allow:not language */>W</p>`)).toBe('not language')
+    expect(reasonIn(`    <p title="X" /* i18n-allow not language */>W</p>`)).toBe('not language')
+  })
+
+  it('is everything a note that wraps says, not only its first line', () => {
+    const reason = reasonIn(`    <p
+      /* i18n-allow: a specimen rather than language,
+         and the address is one we do not hold. */
+      title="X"
+    >W</p>`)
+
+    expect(reason).toContain('a specimen rather than language')
+    expect(reason).toContain('the address is one we do not hold')
+  })
+})
+
+describe('a note with a word in front of it (I17)', () => {
+  it('speaks for its own line only', () => {
+    // A note that is not alone on its line speaks for that line. If it reached
+    // the line below as well, putting one after a word would silence the next
+    // string on every single use -- the same hole as the trailing form.
+    expect(
+      stillReported(`    <p>
+      <span>Quackback</span>{/* i18n-allow: a product name. */}
+      <span>Kept as it was</span>
+    </p>`)
+    ).toContain('Kept as it was')
+  })
+})
+
+describe('the few attribute names a person actually reads (I15)', () => {
+  it('reads the text behind an image and the name on a field', () => {
+    // Both are in the list and neither had a test: `alt` appears only as an
+    // expression elsewhere, and `label` not at all. A list is only as good as
+    // the entries something checks.
+    const found = stillReported(`    <p>
+      <img alt="A duck on a pond" src="/a.png" />
+      <input label="Your name" />
+    </p>`)
+
+    expect(found).toContain('A duck on a pond')
+    expect(found).toContain('Your name')
+  })
+})
+
+describe('a name the gate cannot read (I15)', () => {
+  it('is not treated as the readable name it happens to spell', () => {
+    // `{[title]: '...'}` is a key decided at runtime that reads like `title:`
+    // in the source. Grading it would report a word by the name of a variable
+    // rather than by where it sits, which is the whole rule.
+    expect(
+      stillReported(`    <p>{Object.entries({ [title]: 'Some words' }).length}</p>`)
+    ).not.toContain('Some words')
+  })
+})
+
+describe('a call with nothing to name it by (I15)', () => {
+  it('is not read as a shower', () => {
+    // The callee is itself a call, so there is no name to check against the
+    // short list. Reading its arguments would report every string handed to
+    // every function in the file.
+    expect(stillReported(`    <p onClick={() => getToast()('Upload broke')}>W</p>`)).not.toContain(
+      'Upload broke'
+    )
+  })
+})
+
 describe('properties of the display-text rule', () => {
   it('never reports a class list, whatever it says (I15)', () => {
     fc.assert(
@@ -1466,5 +1723,73 @@ describe('properties of the display-text rule', () => {
         }
       )
     )
+  })
+})
+
+describe('what the report says about a word the braces chose (I14, I15)', () => {
+  it('reads it as text on the page, the same as a word between the tags', () => {
+    // The words between tags and the words a `{…}` picks between are found by
+    // two different cases, and a reader cannot tell them apart -- so the report
+    // must not either.
+    const findings = gradeDisplayText([
+      scan(component(`    <p>{busy ? 'Saving your changes' : 'All changes saved'}</p>`)),
+    ])
+
+    const chosen = findings.find((f) => f.text === 'Saving your changes')
+    expect(chosen?.where).toBe('text')
+    expect(chosen?.detail).toBe(
+      'read by a person as text on the page, so it belongs in the catalogue rather than in the source'
+    )
+  })
+})
+
+describe('a default on a binding nobody reads (I15)', () => {
+  it('is not read as a word on the page', () => {
+    // The same shape as the placeholder default the editor has, with a name
+    // that says nobody reads the value. `placeholder = '…'` is a sentence on
+    // the page; `variant = '…'` is a choice between styles.
+    const source = `
+export function Row({ variant = 'Delete this row for good' }: { variant?: string }) {
+  return <div className={variant} />
+}
+`
+
+    expect(reportedText(source)).toEqual([])
+  })
+})
+
+describe('a note that is still doing its job (I18)', () => {
+  it('is not called removable while it silences a word', () => {
+    const source = `
+export function X() {
+  // i18n-allow: the product name is the same in every language
+  return <div title="Quackback" />
+}
+`
+    const scanned = scan(source)
+
+    expect(unusedExcuses([scanned])).toEqual([])
+    expect(gradeDisplayText([scanned])).toEqual([])
+  })
+})
+
+describe('a sentence of ours joined to somebody’s own word (I15, I20)', () => {
+  it('holds our half and never theirs', () => {
+    // The third shape a display position takes: not a choice between two words
+    // we wrote, but a word we wrote joined to one we did not. The frame is
+    // ours to translate; what it is joined to is not (I20).
+    expect(reportedText(component(`    <p>{'Signed in as ' + organisation}</p>`))).toEqual([
+      'Signed in as',
+    ])
+  })
+
+  it('leaves alone the value a comparison asks about', () => {
+    // `position === 'top'` asks a question about a setting; what the braces
+    // show is the answer, and the answer is not one of those words. Reading
+    // every binary operator rather than only `+` reported exactly this, in the
+    // editor's own toolbar.
+    expect(
+      reportedText(component(`    <p>{toolbarPosition === 'top of the editor' && <b />}</p>`))
+    ).toEqual([])
   })
 })

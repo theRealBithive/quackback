@@ -1,5 +1,5 @@
 {
-  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing — the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
+  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing \u2014 the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
   "graded": [
     {
       "file": "scripts/audit-policy.ts",
@@ -155,7 +155,7 @@
       "mutator": "StringLiteral",
       "line": "const log = logger.child({ component: 'gitlab-post-source' })",
       "replacement": "\"\"",
-      "why": "Same line, same reason: the component name is log metadata, not behaviour. The line's operator-facing content that does matter — the post id in the warning — is asserted in post-source.db.test.ts."
+      "why": "Same line, same reason: the component name is log metadata, not behaviour. The line's operator-facing content that does matter \u2014 the post id in the warning \u2014 is asserted in post-source.db.test.ts."
     },
     {
       "file": "apps/web/src/integrations/gitlab/server/post-source.ts",
@@ -303,6 +303,48 @@
       "line": "'Sign-in failed. Try again or contact your administrator if the problem persists.',",
       "replacement": "\"\"",
       "why": "`defaultMessage` is the English written beside a message id, and react-intl reads it only when the active catalogue has no entry for that id. Every id in a shipped source file is in all nine catalogues -- that is what `bun scripts/i18n-check.ts` fails the build over -- so the catalogue always wins and this string never reaches a screen. A test could only assert it by rendering against a catalogue that lacks the id, which is the state the i18n gate exists to make impossible. It stays in the source as the fallback V6 promises if that gate ever stops holding, and because `bun run intl:extract` reads it."
+    },
+    {
+      "file": "scripts/i18n-policy.ts",
+      "mutator": "Regex",
+      "line": "const EXCUSE = /^\\s*i18n-allow\\b\\s*:?\\s*(.*)$/s",
+      "replacement": "/^\\s*i18n-allow\\b\\s*:?\\s*(.*)/s",
+      "why": "The `$` follows a greedy `.*` that has already run to the end of the comment, and with `/s` there is no line boundary for it to stop at, so there is nothing left for the anchor to reject. Even a trailing newline the two could in principle disagree about is gone before anything reads the group: the only use of `matched[1]` trims it."
+    },
+    {
+      "file": "scripts/i18n-policy.ts",
+      "mutator": "ArithmeticOperator",
+      "line": "const before = text.slice(text.lastIndexOf('\\n', start - 1) + 1, start)",
+      "replacement": "start + 1",
+      "why": "`start` is the offset of a comment, so `text[start]` is `/` and `text[start + 1]` is `*` or `/`. The backwards search for a newline therefore finds the same newline whether it begins one character before the comment or one character inside it, because a comment opens with two characters and neither of them can be a line break."
+    },
+    {
+      "file": "scripts/i18n-policy.ts",
+      "mutator": "ConditionalExpression",
+      "line": "const after = text.slice(end, lineEnd < 0 ? text.length : lineEnd)",
+      "replacement": "false",
+      "why": "The branch is taken only when no newline follows the note, and what this line computes is read only through `ownLine`, which decides whether the note also speaks for the line below it. A line below exists only if a newline follows. So the mutant changes the answer exactly in the case where nothing can ask the question."
+    },
+    {
+      "file": "scripts/i18n-policy.ts",
+      "mutator": "EqualityOperator",
+      "line": "const after = text.slice(end, lineEnd < 0 ? text.length : lineEnd)",
+      "replacement": "lineEnd <= 0",
+      "why": "`lineEnd` is `indexOf('\\n', end)` for a comment that ends past position 0, so it is either -1 or greater than 0. Zero is the one value the two comparisons disagree about, and it is the one value this search cannot return."
+    },
+    {
+      "file": "scripts/i18n-policy.ts",
+      "mutator": "StringLiteral",
+      "line": "if (SHOWING_OBJECTS.has(c.object.name ?? '')) return true",
+      "replacement": "\"Stryker was here!\"",
+      "why": "The fallback stands for a callee with no name of its own -- `window.self.alert`, where the object is itself a member expression -- and it is asked of a set holding one name. Any string that is not that name answers identically, so no source can tell the empty string from another absent name."
+    },
+    {
+      "file": "scripts/i18n-policy.ts",
+      "mutator": "StringLiteral",
+      "line": "return SHOWING_FUNCTIONS.has(c.property.name ?? '')",
+      "replacement": "\"Stryker was here!\"",
+      "why": "The same shape one line down, for a method reached by a computed key such as `toast['error']`, where the property has no name. The set holds three names and any other string answers the same, so the empty string is not distinguishable from another absent name."
     }
   ]
 }
