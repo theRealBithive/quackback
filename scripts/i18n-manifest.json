@@ -1,4 +1,12 @@
 {
   "claimedPrefixes": ["auth.blocked.", "notification.", "onboarding."],
-  "exemptions": []
+  "exemptions": [],
+  "checkedFiles": [
+    "apps/web/src/components/ui/rich-text-editor.tsx",
+    "apps/web/src/components/ui/mention-picker.tsx",
+    "apps/web/src/components/ui/conversation-image-node.tsx",
+    "apps/web/src/components/ui/quackback-embed-extension.tsx",
+    "apps/web/src/components/ui/datetime-picker.tsx",
+    "apps/web/src/components/ui/breadcrumbs.tsx"
+  ]
 }

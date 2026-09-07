@@ -348,6 +348,55 @@ describe('the mutations excused as equivalent (B6)', () => {
         replacement: '""',
         why: expect.stringContaining('the catalogue always wins'),
       },
+      {
+        file: 'scripts/i18n-policy.ts',
+        mutator: 'Regex',
+        line: 'const EXCUSE = /^\\s*i18n-allow\\b\\s*:?\\s*(.*)$/s',
+        replacement: '/^\\s*i18n-allow\\b\\s*:?\\s*(.*)/s',
+        why: expect.stringContaining('the only use of `matched[1]` trims it'),
+      },
+      {
+        file: 'scripts/i18n-policy.ts',
+        mutator: 'ArithmeticOperator',
+        line: "const before = text.slice(text.lastIndexOf('\\n', start - 1) + 1, start)",
+        replacement: 'start + 1',
+        why: expect.stringContaining('a comment opens with two characters'),
+      },
+      {
+        file: 'scripts/i18n-policy.ts',
+        mutator: 'ConditionalExpression',
+        line: 'const after = text.slice(end, lineEnd < 0 ? text.length : lineEnd)',
+        replacement: 'false',
+        why: expect.stringContaining('nothing can ask the question'),
+      },
+      {
+        file: 'scripts/i18n-policy.ts',
+        mutator: 'EqualityOperator',
+        line: 'const after = text.slice(end, lineEnd < 0 ? text.length : lineEnd)',
+        replacement: 'lineEnd <= 0',
+        why: expect.stringContaining('the one value this search cannot return'),
+      },
+      {
+        file: 'scripts/i18n-policy.ts',
+        mutator: 'StringLiteral',
+        line: "if (SHOWING_OBJECTS.has(c.object.name ?? '')) return true",
+        replacement: '"Stryker was here!"',
+        why: expect.stringContaining('window.self.alert'),
+      },
+      {
+        file: 'scripts/i18n-policy.ts',
+        mutator: 'StringLiteral',
+        line: "return SHOWING_FUNCTIONS.has(c.property.name ?? '')",
+        replacement: '"Stryker was here!"',
+        why: expect.stringContaining("toast['error']"),
+      },
+      {
+        file: 'scripts/i18n-policy.ts',
+        mutator: 'ConditionalExpression',
+        line: "if (node.type === 'BinaryExpression') {",
+        replacement: 'true',
+        why: expect.stringContaining('a unary plus, which has no `left` and no `right`'),
+      },
     ])
   })
 

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
+import { renderWithIntl } from '@/test/render-with-intl'
 import { Breadcrumbs } from '../breadcrumbs'
 
 vi.mock('@tanstack/react-router', () => ({
@@ -11,7 +12,7 @@ vi.mock('@tanstack/react-router', () => ({
 
 describe('<Breadcrumbs>', () => {
   it('renders each segment in order with a separator between', () => {
-    const { container } = render(
+    const { container } = renderWithIntl(
       <Breadcrumbs
         segments={[
           { label: 'Settings', to: '/admin/settings' },
@@ -30,7 +31,7 @@ describe('<Breadcrumbs>', () => {
   })
 
   it('renders non-terminal segments as links, terminal segment as text', () => {
-    render(
+    renderWithIntl(
       <Breadcrumbs
         segments={[
           { label: 'Settings', to: '/admin/settings' },
@@ -53,7 +54,7 @@ describe('<Breadcrumbs>', () => {
   })
 
   it('uses an aria-label for accessibility', () => {
-    const { container } = render(
+    const { container } = renderWithIntl(
       <Breadcrumbs
         segments={[{ label: 'Settings', to: '/admin/settings' }, { label: 'Security' }]}
       />

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { FormattedMessage, useIntl } from 'react-intl'
 
 interface DateTimePickerProps {
   value?: Date
@@ -55,10 +56,36 @@ export function DateTimePicker({
   className,
 }: DateTimePickerProps) {
   const [open, setOpen] = React.useState(false)
+  const intl = useIntl()
 
-  const defaultPlaceholder = dateOnly ? 'Pick a date' : 'Pick date & time'
+  const defaultPlaceholder = dateOnly
+    ? intl.formatMessage({ id: 'ui.datePicker.placeholder.date', defaultMessage: 'Pick a date' })
+    : intl.formatMessage({
+        id: 'ui.datePicker.placeholder.dateTime',
+        defaultMessage: 'Pick date & time',
+      })
   const resolvedPlaceholder = placeholder ?? defaultPlaceholder
-  const displayFormat = dateOnly ? 'MMM d, yyyy' : 'MMM d, yyyy · HH:mm'
+
+  /**
+   * The date as the reader's language writes it, not as one pattern does.
+   *
+   * `MMM d, yyyy` is a pattern in a language: it puts the month first and uses
+   * a comma, which is English and wrong in most of the nine we ship. Handing
+   * `Intl` the fields instead lets the locale decide the order, the separators
+   * and the month's own abbreviation -- `Sep 7, 2026` against `7. Sept. 2026`.
+   *
+   * The `·` between date and time stays, because it is the design rather than
+   * language, and each half is formatted on its own so it survives.
+   *
+   * `date-fns` keeps the machine formats below untouched: `yyyy-MM-dd` and the
+   * `HH:mm` the time input takes are wire values, and formatting those for a
+   * reader would break them.
+   */
+  const readableDate = (date: Date) => {
+    const day = intl.formatDate(date, { day: 'numeric', month: 'short', year: 'numeric' })
+    if (dateOnly) return day
+    return `${day} · ${intl.formatTime(date, { hour: '2-digit', minute: '2-digit' })}`
+  }
 
   const applyBounds = React.useCallback(
     (date: Date) => clampToBounds(date, minDate, maxDate),
@@ -111,7 +138,7 @@ export function DateTimePicker({
     <>
       <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">
-        {value ? format(value, displayFormat) : resolvedPlaceholder}
+        {value ? readableDate(value) : resolvedPlaceholder}
       </span>
     </>
   )
@@ -147,7 +174,10 @@ export function DateTimePicker({
               onClear()
             }}
             className="inline-flex shrink-0 items-center justify-center border-l border-border/50 px-1.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-            aria-label="Clear date"
+            aria-label={intl.formatMessage({
+              id: 'ui.datePicker.clear',
+              defaultMessage: 'Clear date',
+            })}
           >
             <XMarkIcon className="h-3 w-3" />
           </button>
@@ -179,7 +209,9 @@ export function DateTimePicker({
           <div className="border-t border-border/50 px-3 py-2">
             <div className="flex items-center gap-2">
               <ClockIcon className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">Time</span>
+              <span className="text-sm text-muted-foreground">
+                <FormattedMessage id="ui.datePicker.time" defaultMessage="Time" />
+              </span>
               <Input
                 type="time"
                 step="60"

@@ -52,11 +52,57 @@
  *     `activation.goal.product_feedback` resolves to nothing. The report gets
  *     shorter as the hole gets bigger, which is the direction nobody checks.
  *     [V16]
+ *
+ * I14 to I20 are the second rule class: not "is this id answered for", but
+ * "was this text written into the source instead of the catalogue". The two
+ * are independent, and only the first was built at the time -- so V13 was a
+ * claim with nothing enforcing it, and a string added to a translated surface
+ * after the fact was shown in English to every reader in every language while
+ * the gate stayed green.
+ *
+ * I14 A word a reader can see, written into a claimed file rather than into
+ *     the catalogue, fails the run naming the file, the line and the word.
+ *     [V13]
+ * I15 What counts as a word a reader can see is decided by where it sits, not
+ *     by what it looks like: text between tags, the value of one of the few
+ *     attributes a person actually reads (a tooltip, a name a screen reader
+ *     announces, a placeholder, the text behind an image), and a message
+ *     handed to something whose whole job is to show it -- a toast, a browser
+ *     prompt. A class name, a URL in a link, an icon name and a node type are
+ *     not that, however English they look. [V13]
+ * I16 A file is checked because the manifest names it, not because of where it
+ *     lives. Adding one asserts that it holds no untranslated text, and the
+ *     list is asserted in full, so it cannot shrink into a shorter report.
+ *     [V14]
+ * I17 A string that genuinely must not be translated -- a product name, a
+ *     specimen URL, a code example -- is excused by a note at the line itself,
+ *     with the reason. An excuse without a reason is refused rather than
+ *     honoured, for the same reason an exemption is. At the line and not in
+ *     the manifest, so it travels with the line and retires when the line is
+ *     edited. [V14]
+ * I18 An excuse that matches nothing is reported as removable and does not
+ *     fail the run, so the notes cannot rot into a list of stale claims. [V14]
+ * I19 Something with no word in it is not text: a separator, a number, a
+ *     symbol. The rule is about language, and a rule that flags an em dash
+ *     teaches people to switch it off. [V13]
+ * I20 A value the source does not contain is not a string this rule can ask
+ *     for. Where a sentence the product owns carries a person's own words
+ *     inside it, the rule holds the sentence and never the words. [V13, V17]
+ *
+ * V17 is the guarantee those last two serve, and it is the reader's side of
+ * the same thing: text a person wrote is shown as they wrote it. Nothing a
+ * user brings in -- what they type, a link they paste, a name, a file they
+ * uploaded -- is translated, reworded, or rewritten into one of our sentences.
+ * Where our own frame surrounds their words, the frame is translated and their
+ * words are not.
  */
 import { describe, it, expect } from 'vitest'
 import fc from 'fast-check'
 import {
   gradeCatalogues,
+  gradeDisplayText,
+  scanDisplayText,
+  unusedExcuses,
   isShippedSource,
   mergeScans,
   scanSource,
@@ -1027,5 +1073,734 @@ describe('properties', () => {
         }
       )
     )
+  })
+})
+
+// ============================================================================
+// The second rule class: text written into the source instead of the catalogue
+// ============================================================================
+
+/** A file whose every shape the rules below have an opinion about. Built by a
+ *  function rather than held at module scope: a mutant that crashes a fixture
+ *  during collection is reported as survived, because the suite never runs. */
+function editorLike(): string {
+  return `
+const slashItems = [
+  {
+    title: 'Bullet List',
+    description: 'Unordered list',
+    'aria-label': 'Insert a bullet list',
+    [dynamicKey]: 'Not a name we can read',
+    icon: <List className="size-4" />,
+    command: 'bulletList',
+  },
+]
+
+export function Toolbar({
+  alt,
+  organisation,
+  placeholder = 'Write something...',
+}: {
+  alt: string
+  organisation: string
+  placeholder?: string
+}) {
+  return (
+    <div className="flex items-center gap-2" role="toolbar" aria-label="Image options">
+      <button title="Bold (Cmd+B)" onClick={() => editor.isActive('bold')}>
+        Delete row
+      </button>
+      <img alt={alt} src="https://cdn.example.com/x.png" />
+      <input placeholder="https://example.com" />
+      <span>—</span>
+      <span>2026</span>
+      <em aria-label={\`\${organisation} Member\`}>{organisation}</em>
+      <button onClick={applyLink} className={isActive ? 'border-primary' : 'border-muted'}>{isActive ? 'Update' : 'Add'}</button>
+      <span title={isActive ? 'Linked' : 'Not linked yet'}>{organisation || 'Team'}</span>
+      <span>{\`Signed in as \${organisation}\`}</span>
+      <span>{formatCount('items left')}</span>
+    </div>
+  )
+}
+`
+}
+
+function scan(source: string, file = 'apps/web/src/components/ui/toolbar.tsx') {
+  return scanDisplayText(file, source)
+}
+
+function reportedText(source: string): string[] {
+  return scan(source)
+    .strings.map((s) => s.text)
+    .sort()
+}
+
+describe('text written into the source instead of the catalogue (I14, I15)', () => {
+  it('names the file, the line and the word (I14)', () => {
+    const found = scan(editorLike()).strings.find((s) => s.text === 'Delete row')
+
+    expect(found).toBeDefined()
+    expect(found?.file).toBe('apps/web/src/components/ui/toolbar.tsx')
+    expect(found?.where).toBe('text')
+    // The line of the word itself, not of the element that opens above it:
+    // a report that points at the wrong line is a report nobody trusts.
+    expect(editorLike().split('\n')[(found?.line ?? 0) - 1]).toContain('Delete row')
+  })
+
+  it('reads a tooltip, a screen-reader name, a placeholder and an image text (I15)', () => {
+    const texts = reportedText(editorLike())
+
+    expect(texts).toContain('Bold (Cmd+B)')
+    expect(texts).toContain('Image options')
+    expect(texts).toContain('https://example.com')
+  })
+
+  it('reads a word a display position chooses between (I15)', () => {
+    // The reader sees the value, not the syntax. Both branches of a conditional
+    // reach the screen, and so does the word behind an `||` -- which is the
+    // shape that hid `'Team'` in `mention-picker.tsx` from the first version of
+    // this rule.
+    const texts = reportedText(editorLike())
+
+    expect(texts).toContain('Update')
+    expect(texts).toContain('Add')
+    expect(texts).toContain('Team')
+  })
+
+  it('reads a chosen word in a readable attribute too, not only between tags (I15)', () => {
+    // The same hole, on the other display position: a tooltip that picks
+    // between two words we wrote is two tooltips we wrote.
+    const texts = reportedText(editorLike())
+
+    expect(texts).toContain('Linked')
+    expect(texts).toContain('Not linked yet')
+  })
+
+  it('reads our half of a sentence assembled between tags (I15, I20)', () => {
+    const texts = reportedText(editorLike())
+
+    expect(texts).toContain('Signed in as')
+  })
+
+  it('stops at a call rather than reading what it was passed (I15)', () => {
+    // A call in a display position is graded by the rule for calls, which knows
+    // the short list of functions whose job is to show their argument. Reading
+    // every other call's arguments here would report `formatMessage({ id })` --
+    // the very thing this gate asks for -- as untranslated text.
+    const texts = reportedText(editorLike())
+
+    expect(texts).not.toContain('items left')
+  })
+
+  it('reads a display field in a table of items (I15)', () => {
+    // A tooltip is a tooltip whether it is written `title=` in the markup or
+    // `title:` in a row of a menu the markup renders. This is where two thirds
+    // of this editor's words actually live -- its slash-command menu -- and the
+    // first version of the rule saw none of them.
+    const texts = reportedText(editorLike())
+
+    expect(texts).toContain('Bullet List')
+    expect(texts).toContain('Unordered list')
+  })
+
+  it('reads a display field whose name has to be quoted (I15)', () => {
+    // `aria-label` is not a valid identifier, so in an object it can only ever
+    // be written quoted. A rule that reads only bare names would miss every
+    // screen-reader name held in a table.
+    expect(reportedText(editorLike())).toContain('Insert a bullet list')
+  })
+
+  it('leaves alone a name it cannot read (I15)', () => {
+    // A computed key is a name decided at runtime. The gate grades the few
+    // names it knows, so a key it cannot read is not one of them.
+    expect(reportedText(editorLike())).not.toContain('Not a name we can read')
+  })
+
+  it('leaves alone the machine field beside it (I15)', () => {
+    // Same object, one property along: the name of the command to run. Reading
+    // it would put an editor node type in the catalogue.
+    expect(reportedText(editorLike())).not.toContain('bulletList')
+  })
+
+  it('reads the word a display prop falls back to (I15)', () => {
+    // A default is what most readers actually see, because most callers pass
+    // nothing.
+    expect(reportedText(editorLike())).toContain('Write something...')
+  })
+
+  it('leaves alone what only looks like language (I15)', () => {
+    const texts = reportedText(editorLike())
+
+    // A class list, a node type handed to the editor, and the address of an
+    // asset. All English, none of it read by anyone.
+    expect(texts).not.toContain('flex items-center gap-2')
+    expect(texts).not.toContain('bold')
+    expect(texts).not.toContain('https://cdn.example.com/x.png')
+    expect(texts).not.toContain('toolbar')
+    // A class name a conditional picks between. It reaches the same expression
+    // shape a tooltip does, and an attribute nobody reads is still an attribute
+    // nobody reads.
+    expect(texts).not.toContain('border-primary')
+    expect(texts).not.toContain('border-muted')
+  })
+
+  it('reads a sentence handed to something whose job is to show it (I15)', () => {
+    const source = `
+function f() {
+  toast.error("Couldn't upload image. Try again.")
+  const url = window.prompt('Paste YouTube video URL:')
+  logger.warn('upload failed for asset')
+  return url
+}
+`
+    const texts = reportedText(source)
+
+    expect(texts).toContain("Couldn't upload image. Try again.")
+    expect(texts).toContain('Paste YouTube video URL:')
+    // A log line is read by an operator in a log, not by a reader on a page.
+    expect(texts).not.toContain('upload failed for asset')
+  })
+})
+
+describe('what is not language (I19)', () => {
+  it('passes over a separator, a number and whitespace (I19)', () => {
+    const texts = reportedText(editorLike())
+
+    expect(texts).not.toContain('—')
+    expect(texts).not.toContain('2026')
+    expect(texts.filter((t) => t.trim() === '')).toEqual([])
+  })
+
+  it('has something to report at all, so the check above is not vacuous (I19)', () => {
+    expect(reportedText(editorLike()).length).toBeGreaterThan(3)
+  })
+})
+
+describe('a person’s own words inside our sentence (I20)', () => {
+  it('never asks for a value the source does not contain (I20)', () => {
+    const texts = reportedText(editorLike())
+
+    // `alt={alt}` is whatever the person typed when they uploaded, and
+    // `{organisation}` is what they named their own workspace.
+    expect(texts.some((t) => t.includes('organisation'))).toBe(false)
+    expect(texts).not.toContain('alt')
+  })
+
+  it('holds the frame around those words, and only the frame (I20)', () => {
+    const found = scan(editorLike()).strings.filter((s) => s.text.includes('Member'))
+
+    expect(found).toHaveLength(1)
+    expect(found[0].text.trim()).toBe('Member')
+    expect(found[0].where).toBe('aria-label')
+  })
+})
+
+describe('excusing a string that must not be translated (I17, I18)', () => {
+  const withExcuse = `
+export function X() {
+  return (
+    <div>
+      {/* i18n-allow: the product's own name is the same in every language */}
+      Quackback
+      <input placeholder="https://example.com" /* i18n-allow: a specimen address is not language */ />
+    </div>
+  )
+}
+`
+
+  it('honours a note at the line, in both forms (I17)', () => {
+    const findings = gradeDisplayText([scan(withExcuse)])
+
+    expect(findings.filter((f) => f.kind === 'untranslated-string')).toEqual([])
+  })
+
+  it('refuses a note with no reason rather than honouring it (I17)', () => {
+    const source = withExcuse.replace(
+      "i18n-allow: the product's own name is the same in every language",
+      'i18n-allow'
+    )
+
+    const findings = gradeDisplayText([scan(source)])
+
+    expect(findings.map((f) => f.kind)).toContain('excuse-without-reason')
+    // And the string it tried to excuse is still reported, so a silenced
+    // string cannot slip through on a malformed note.
+    expect(findings.some((f) => f.kind === 'untranslated-string' && f.text === 'Quackback')).toBe(
+      true
+    )
+  })
+
+  it('reports a note that matches nothing as removable, without failing (I18)', () => {
+    const source = `
+export function X() {
+  // i18n-allow: nothing here needs it any more
+  return <div className="x" />
+}
+`
+    const scanned = scan(source)
+
+    expect(unusedExcuses([scanned])).toHaveLength(1)
+    expect(gradeDisplayText([scanned])).toEqual([])
+  })
+
+  it('does not read a stray mention of the word as a note (I17)', () => {
+    // The line below is text on a page, not an instruction to the gate.
+    const source = `
+export function X() {
+  return <div title="Ask an admin about i18n-allow settings" />
+}
+`
+    const findings = gradeDisplayText([scan(source)])
+
+    expect(findings.some((f) => f.kind === 'untranslated-string')).toBe(true)
+  })
+})
+
+describe('a note that takes more than one line (I17)', () => {
+  it('speaks for the line below where it ends, not below where it starts', () => {
+    // A reason worth writing is usually longer than a line, and this is the
+    // form every later batch will copy. Anchoring on the line the note opens on
+    // would excuse a line still inside the note and leave the string beneath it
+    // reported -- so a real reason would read as a broken excuse and the short,
+    // reasonless one would work.
+    const source = `
+export function Field() {
+  return (
+    <input
+      /* i18n-allow: a specimen showing the shape of the input rather than
+         language, and a translated example would name a domain we do not
+         hold. */
+      placeholder="https://example.com"
+    />
+  )
+}
+`
+    expect(gradeDisplayText([scan(source)])).toEqual([])
+  })
+
+  it('still refuses a multi-line note with no reason (I17)', () => {
+    const source = `
+export function Field() {
+  return (
+    <input
+      /* i18n-allow
+       */
+      placeholder="https://example.com"
+    />
+  )
+}
+`
+    const kinds = gradeDisplayText([scan(source)]).map((f) => f.kind)
+
+    expect(kinds).toContain('excuse-without-reason')
+  })
+})
+
+describe('only the files handed in are graded (I16)', () => {
+  it('grades nothing when nothing is handed in (I16)', () => {
+    expect(gradeDisplayText([])).toEqual([])
+    expect(unusedExcuses([])).toEqual([])
+  })
+
+  it('keeps each finding with the file it came from (I16)', () => {
+    const findings = gradeDisplayText([
+      scan(editorLike(), 'apps/web/src/components/ui/a.tsx'),
+      scan(editorLike(), 'apps/web/src/components/ui/b.tsx'),
+    ])
+
+    expect(new Set(findings.map((f) => f.file))).toEqual(
+      new Set(['apps/web/src/components/ui/a.tsx', 'apps/web/src/components/ui/b.tsx'])
+    )
+  })
+})
+
+/** A parseable component around a body, so a fixture is source rather than a
+ *  fragment. Built by a function so a mutant that breaks one is reported as
+ *  caught rather than as survived. */
+function component(body: string): string {
+  return `
+export function Widget({ organisation }: { organisation: string }) {
+  return (
+${body}
+  )
+}
+`
+}
+
+/** The words the gate still reports for a source, once the notes in it have
+ *  had their say. */
+function stillReported(body: string): string[] {
+  return gradeDisplayText([scan(component(body))])
+    .filter((f) => f.kind === 'untranslated-string')
+    .map((f) => f.text)
+}
+
+describe('what the report says about what it found (I14, I17)', () => {
+  it('says how each string is read, and names the attribute where there is one', () => {
+    const findings = gradeDisplayText([scan(editorLike())])
+
+    const between = findings.find((f) => f.text === 'Delete row')
+    expect(between?.kind).toBe('untranslated-string')
+    expect(between?.where).toBe('text')
+    expect(between?.detail).toBe(
+      'read by a person as text on the page, so it belongs in the catalogue rather than in the source'
+    )
+
+    const tooltip = findings.find((f) => f.text === 'Bold (Cmd+B)')
+    expect(tooltip?.where).toBe('title')
+    expect(tooltip?.detail).toBe(
+      'read by a person as the title, so it belongs in the catalogue rather than in the source'
+    )
+  })
+
+  it('says why a note with no reason is refused rather than honoured (I17)', () => {
+    const finding = gradeDisplayText([
+      scan(component(`    <p title="Kept as it was" /* i18n-allow */>Word</p>`)),
+    ]).find((f) => f.kind === 'excuse-without-reason')
+
+    expect(finding?.where).toBe('note')
+    expect(finding?.text).toBe('')
+    expect(finding?.line).toBe(4)
+    expect(finding?.detail).toBe(
+      'an excuse with no reason is an allowlist entry, so it is refused rather than honoured'
+    )
+  })
+})
+
+describe('what counts as a note at all (I17)', () => {
+  it('is not a note when the comment opens with something else', () => {
+    // Somebody talking *about* the gate, not using it. Honouring this would
+    // mean a passing mention of the marker silences a line.
+    expect(
+      stillReported(`    <p title="Kept as it was" /* TODO: i18n-allow one day */>W</p>`)
+    ).toContain('Kept as it was')
+  })
+
+  it('is a note however much space surrounds the marker', () => {
+    // A note long enough to wrap opens with a newline before the marker, which
+    // is the shape a reason of any substance actually has.
+    expect(
+      stillReported(`    <p
+      /*
+         i18n-allow: a specimen rather than language.
+       */
+      title="Kept as it was"
+    >W</p>`)
+    ).not.toContain('Kept as it was')
+  })
+
+  it('is a note with no space after the colon', () => {
+    expect(
+      stillReported(`    <p title="Kept as it was" /* i18n-allow:not language */>W</p>`)
+    ).not.toContain('Kept as it was')
+  })
+
+  it('is a note with no colon at all', () => {
+    expect(
+      stillReported(`    <p title="Kept as it was" /* i18n-allow not language */>W</p>`)
+    ).not.toContain('Kept as it was')
+  })
+})
+
+describe('where a note reaches (I17)', () => {
+  it('reaches the line below when it stands alone among the children', () => {
+    // Between tags the only comment syntax is `{/* ... */}`, braces and all,
+    // and it cannot sit after the word it speaks for. So the braces have to
+    // count as standing alone, or the form is unusable where it is needed.
+    expect(
+      stillReported(`    <p>
+      {/* i18n-allow: a product name. */}
+      Quackback
+    </p>`)
+    ).not.toContain('Quackback')
+  })
+
+  it('reaches only its own line when something follows it there', () => {
+    // A note with a word after it on the line speaks for that line. Letting it
+    // reach further would silence the next string on every single use.
+    expect(
+      stillReported(`    <p>
+      {/* i18n-allow: a product name. */}<span>Quackback</span>
+      <span>Kept as it was</span>
+    </p>`)
+    ).toContain('Kept as it was')
+  })
+
+  it('does not reach the line above it', () => {
+    expect(
+      stillReported(`    <p>
+      <span>Kept as it was</span>
+      {/* i18n-allow: a product name. */}
+      Quackback
+    </p>`)
+    ).toContain('Kept as it was')
+  })
+})
+
+describe('a call whose whole job is to show its argument (I15)', () => {
+  function reportedFrom(body: string) {
+    return gradeDisplayText([scan(component(body))]).filter((f) => f.kind === 'untranslated-string')
+  }
+
+  it('reads a bare browser call', () => {
+    const found = reportedFrom(`    <p onClick={() => alert('Careful now')}>W</p>`)
+
+    expect(found.find((f) => f.text === 'Careful now')?.where).toBe('alert')
+  })
+
+  it('reads the same call written through the window', () => {
+    const found = reportedFrom(`    <p onClick={() => window.confirm('Are you sure?')}>W</p>`)
+
+    expect(found.find((f) => f.text === 'Are you sure?')?.where).toBe('window.confirm')
+  })
+
+  it('reads any method of an object that exists to show things', () => {
+    const found = reportedFrom(`    <p onClick={() => toast.success('Saved it')}>W</p>`)
+
+    expect(found.find((f) => f.text === 'Saved it')?.where).toBe('toast.success')
+  })
+
+  it('leaves alone a call that merely reads like one', () => {
+    // The same method name on an object that writes to a log rather than to a
+    // person.
+    const found = reportedFrom(`    <p onClick={() => logger.error('Upload broke')}>W</p>`)
+
+    expect(found.map((f) => f.text)).not.toContain('Upload broke')
+  })
+
+  it('reads a shower reached through something with no name of its own', () => {
+    const found = reportedFrom(`    <p onClick={() => window.self.alert('Careful now')}>W</p>`)
+
+    // No object name to print, so the report names the method alone rather
+    // than an empty prefix in front of it.
+    expect(found.find((f) => f.text === 'Careful now')?.where).toBe('alert')
+  })
+
+  it('names the call itself when the method is reached by a computed key', () => {
+    const found = reportedFrom(`    <p onClick={() => toast['error']('Upload broke')}>W</p>`)
+
+    // An object that shows things, reached in a way that leaves no method name
+    // to print. Still a word on the page, so it is still reported.
+    expect(found.find((f) => f.text === 'Upload broke')?.where).toBe('call')
+  })
+})
+
+describe('an argument that is not a word in the source (I15)', () => {
+  it('is left alone, and the words around it are not', () => {
+    // The editor hands `toast.error` the sentence it has just built from the
+    // catalogue. There is nothing on that line to ask for, and reading the
+    // name of the variable would report the very thing this gate asks for.
+    expect(
+      stillReported(`    <button onClick={() => toast.error(uploadFailed)}>Retry now</button>`)
+    ).toEqual(['Retry now'])
+  })
+})
+
+describe('an attribute with no value at all (I15)', () => {
+  it('is not a word', () => {
+    // `<img alt />` is a readable attribute written as a flag. There is no
+    // string to read, and asking for one must not throw.
+    expect(gradeDisplayText([scan(component(`    <img alt src="/a.png" />`))])).toEqual([])
+  })
+})
+
+describe('the reason a note carries (I17)', () => {
+  /** The reason the gate read out of the only note in a source. */
+  function reasonIn(body: string): string {
+    return scan(component(body)).excuses[0].reason
+  }
+
+  it('is everything after the marker, however it was punctuated', () => {
+    // Three ways of writing the same note. What matters is that the reason
+    // arrives whole: a rule that ate the first word would make a note read as
+    // reasoned while saying less than its author wrote.
+    expect(reasonIn(`    <p title="X" /* i18n-allow: not language */>W</p>`)).toBe('not language')
+    expect(reasonIn(`    <p title="X" /* i18n-allow:not language */>W</p>`)).toBe('not language')
+    expect(reasonIn(`    <p title="X" /* i18n-allow not language */>W</p>`)).toBe('not language')
+  })
+
+  it('is everything a note that wraps says, not only its first line', () => {
+    const reason = reasonIn(`    <p
+      /* i18n-allow: a specimen rather than language,
+         and the address is one we do not hold. */
+      title="X"
+    >W</p>`)
+
+    expect(reason).toContain('a specimen rather than language')
+    expect(reason).toContain('the address is one we do not hold')
+  })
+})
+
+describe('a note with a word in front of it (I17)', () => {
+  it('speaks for its own line only', () => {
+    // A note that is not alone on its line speaks for that line. If it reached
+    // the line below as well, putting one after a word would silence the next
+    // string on every single use -- the same hole as the trailing form.
+    expect(
+      stillReported(`    <p>
+      <span>Quackback</span>{/* i18n-allow: a product name. */}
+      <span>Kept as it was</span>
+    </p>`)
+    ).toContain('Kept as it was')
+  })
+})
+
+describe('the few attribute names a person actually reads (I15)', () => {
+  it('reads the text behind an image and the name on a field', () => {
+    // Both are in the list and neither had a test: `alt` appears only as an
+    // expression elsewhere, and `label` not at all. A list is only as good as
+    // the entries something checks.
+    const found = stillReported(`    <p>
+      <img alt="A duck on a pond" src="/a.png" />
+      <input label="Your name" />
+    </p>`)
+
+    expect(found).toContain('A duck on a pond')
+    expect(found).toContain('Your name')
+  })
+})
+
+describe('a name the gate cannot read (I15)', () => {
+  it('is not treated as the readable name it happens to spell', () => {
+    // `{[title]: '...'}` is a key decided at runtime that reads like `title:`
+    // in the source. Grading it would report a word by the name of a variable
+    // rather than by where it sits, which is the whole rule.
+    expect(
+      stillReported(`    <p>{Object.entries({ [title]: 'Some words' }).length}</p>`)
+    ).not.toContain('Some words')
+  })
+})
+
+describe('a call with nothing to name it by (I15)', () => {
+  it('is not read as a shower', () => {
+    // The callee is itself a call, so there is no name to check against the
+    // short list. Reading its arguments would report every string handed to
+    // every function in the file.
+    expect(stillReported(`    <p onClick={() => getToast()('Upload broke')}>W</p>`)).not.toContain(
+      'Upload broke'
+    )
+  })
+})
+
+describe('properties of the display-text rule', () => {
+  it('never reports a class list, whatever it says (I15)', () => {
+    fc.assert(
+      fc.property(fc.stringMatching(/^[a-z][a-z0-9 :/-]{0,40}$/), (classes) => {
+        const source = `export const X = () => <div className=${JSON.stringify(classes)} />`
+
+        expect(scan(source).strings).toEqual([])
+      })
+    )
+  })
+
+  it('never reports text with no word in it (I19)', () => {
+    fc.assert(
+      fc.property(
+        fc.stringMatching(/^[-—·:;.,!?()[\]{}0-9\s]{1,30}$/).filter((s) => !s.includes('}')),
+        (noise) => {
+          const source = `export const X = () => <div>${noise}</div>`
+
+          expect(scan(source).strings).toEqual([])
+        }
+      )
+    )
+  })
+
+  it('excusing a line removes that string and leaves the others (I17)', () => {
+    fc.assert(
+      fc.property(
+        fc.stringMatching(/^[A-Z][a-z]{2,10}( [a-z]{2,10}){0,3}$/),
+        fc.stringMatching(/^[a-z][a-z ]{5,40}$/),
+        (word, reason) => {
+          const bare = `export const X = () => (
+  <div>
+    <span title=${JSON.stringify(word)} />
+    <span title="Kept as it was" />
+  </div>
+)`
+          const excused = `export const X = () => (
+  <div>
+    <span title=${JSON.stringify(word)} /* i18n-allow: ${reason} */ />
+    <span title="Kept as it was" />
+  </div>
+)`
+
+          expect(
+            gradeDisplayText([scan(bare)])
+              .map((f) => f.text)
+              .sort()
+          ).toEqual([word, 'Kept as it was'].sort())
+          expect(gradeDisplayText([scan(excused)]).map((f) => f.text)).toEqual(['Kept as it was'])
+        }
+      )
+    )
+  })
+})
+
+describe('what the report says about a word the braces chose (I14, I15)', () => {
+  it('reads it as text on the page, the same as a word between the tags', () => {
+    // The words between tags and the words a `{…}` picks between are found by
+    // two different cases, and a reader cannot tell them apart -- so the report
+    // must not either.
+    const findings = gradeDisplayText([
+      scan(component(`    <p>{busy ? 'Saving your changes' : 'All changes saved'}</p>`)),
+    ])
+
+    const chosen = findings.find((f) => f.text === 'Saving your changes')
+    expect(chosen?.where).toBe('text')
+    expect(chosen?.detail).toBe(
+      'read by a person as text on the page, so it belongs in the catalogue rather than in the source'
+    )
+  })
+})
+
+describe('a default on a binding nobody reads (I15)', () => {
+  it('is not read as a word on the page', () => {
+    // The same shape as the placeholder default the editor has, with a name
+    // that says nobody reads the value. `placeholder = '…'` is a sentence on
+    // the page; `variant = '…'` is a choice between styles.
+    const source = `
+export function Row({ variant = 'Delete this row for good' }: { variant?: string }) {
+  return <div className={variant} />
+}
+`
+
+    expect(reportedText(source)).toEqual([])
+  })
+})
+
+describe('a note that is still doing its job (I18)', () => {
+  it('is not called removable while it silences a word', () => {
+    const source = `
+export function X() {
+  // i18n-allow: the product name is the same in every language
+  return <div title="Quackback" />
+}
+`
+    const scanned = scan(source)
+
+    expect(unusedExcuses([scanned])).toEqual([])
+    expect(gradeDisplayText([scanned])).toEqual([])
+  })
+})
+
+describe('a sentence of ours joined to somebody’s own word (I15, I20)', () => {
+  it('holds our half and never theirs', () => {
+    // The third shape a display position takes: not a choice between two words
+    // we wrote, but a word we wrote joined to one we did not. The frame is
+    // ours to translate; what it is joined to is not (I20).
+    expect(reportedText(component(`    <p>{'Signed in as ' + organisation}</p>`))).toEqual([
+      'Signed in as',
+    ])
+  })
+
+  it('leaves alone the value a comparison asks about', () => {
+    // `position === 'top'` asks a question about a setting; what the braces
+    // show is the answer, and the answer is not one of those words. Reading
+    // every binary operator rather than only `+` reported exactly this, in the
+    // editor's own toolbar.
+    expect(
+      reportedText(component(`    <p>{toolbarPosition === 'top of the editor' && <b />}</p>`))
+    ).toEqual([])
   })
 })

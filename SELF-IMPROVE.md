@@ -5,6 +5,127 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
+## 1x — A Stryker survivor list is stale the moment you write a test against it
+
+The gate prints its survivors and writes `.mutation-tmp/report.json`. Both are
+a photograph of the tree at the time the run started, and the whole point of
+reading them is to write tests -- so by the time the list is being worked
+through, it describes a tree that no longer exists. Two hours went into
+analysing a list where a third of the entries were already dead, including one
+that had been killed by a test written in the same session.
+
+Worse, the report and the truth can disagree for the same tree. A mutant
+reported as `Survived` at one line turned out to be killed by an existing test
+when the line was mutated by hand -- so a survivor list is not evidence that a
+mutant is unkillable, and an `equivalents` record written off the report alone
+can carry a reason that is simply false. That is the one thing the manifest's
+reason requirement exists to prevent, so it has to be checked rather than
+argued.
+
+The check is ten seconds per candidate and it belongs in a loop, because the
+value is in doing all of them:
+
+```python
+for label, expect, old, new in CASES:      # expect: 'killed' | 'equivalent'
+    assert pristine.count(old) == 1
+    src.write_text(pristine.replace(old, new))
+    r = subprocess.run(['bun', 'x', 'vitest', 'run', '<the pinning suite>'],
+                       capture_output=True, text=True)
+    got = 'killed' if ' failed' in r.stdout + r.stderr else 'equivalent'
+    print(('OK ' if got == expect else '!! ') + label)
+src.write_text(pristine)                   # restore, always
+```
+
+Copy the file to the scratchpad first. Predicting each outcome before running
+is what makes it useful: a `!!` line is either a wrong belief about the code or
+a test that does not do what its name says, and both are findings. Fifteen
+predictions were checked this way in one pass and one of them was wrong -- the
+one that would otherwise have become a false `equivalents` entry.
+
+## 1x — A widened AST rule looks right against its fixtures and wrong against the source
+
+The i18n gate's display rule was widened to read `{'Signed in as ' + name}`, by
+descending into a `BinaryExpression` the way it already descended into a
+conditional and a logical chain. 138 unit tests passed, including a new one for
+exactly that shape, and the docstring argued that the operator need not be
+consulted.
+
+Then `bun scripts/i18n-check.ts` reported two findings in the editor:
+`{toolbarPosition === 'top' && …}`. A comparison is a `BinaryExpression` too,
+and its operands are the name of a setting rather than words on a page. The
+unit fixtures had no comparison in a display position; the real file had two.
+
+So the acceptance test for a change to the rule is the gate's own run over the
+claimed files, not the unit suite. It takes seconds, it reads a few thousand
+lines of real source instead of a hand-written component, and it is the only
+thing that says whether a widened rule is now reporting noise -- which is how a
+gate gets switched off.
+
+## 1x — TipTap's `setOptions` does not reconfigure a plugin it already built
+
+`useEditor` calls `editor.setOptions({ extensions })` whenever the array's
+reference changes, and the repo's own comment above the `useMemo` says so. What
+it does not say is that the plugins built from those extensions stay as they
+were: `setOptions` replaces the options object and calls
+`view.updateState(this.state)`, and never rebuilds the extension manager.
+
+So an extension's _text_ is fixed at editor-creation time. Measured while
+translating the editor: on a language change the toolbar moved to French and
+the placeholder stayed German, because the placeholder lives inside a
+ProseMirror plugin. The slash-command titles are in the same place, and worse,
+because they are what the menu is _searched_ by -- a reader who switched to
+German would type `/tabelle` against an English list and find nothing.
+
+Adding the language to the `useMemo` dependency array does not fix it and reads
+exactly like it should. The fix is to remount, with a `key` on the memoised
+component, which costs the caret and nothing else. Anything else that has to
+follow a language change into an extension will hit this.
+
+A render test with a _single_ language cannot see any of it, and neither can two
+separate renders -- each builds its extensions once and agrees. Only an
+in-place switch inside one mounted tree reaches it.
+
+## 1x — A position-based i18n rule cannot see a literal bound to a name
+
+The gate reads a string in a display position: between tags, in one of the few
+readable attributes, in a display field of an object, as the default of a
+display prop, and either branch of a conditional in any of those. That covers
+80 of the 91 strings in this batch's six files.
+
+The remaining eleven all have one shape -- a literal assigned to a name, one hop
+from where it is shown: `?? 'Team'` into a variable that later becomes a title,
+`return 'Text'` from a helper the trigger renders, a `Record<string, string>` of
+group headings whose keys are domain words rather than readable names. No
+position rule reaches them, because at the literal there is no display position
+to read.
+
+What found them was sweeping every sentence-like literal in the claimed files
+against the gate's own report and reading the leftovers by hand: 57 leftovers in
+the editor, of which 53 were class names, key names and log prefixes and four
+were real. That sweep is a throwaway script in a scratchpad and should be part
+of the gate -- as a report rather than a failure, since it over-lists by design.
+Until it is, every batch has to redo it, and the plan's third rule class (the
+catalogue-module rule, for `errors.ts` and friends) is still unbuilt.
+
+## 1x — An `i18n-allow` note is anchored on the line it opens on
+
+Found in this gate's own use, one line after writing the first real one: a
+reason worth writing does not fit on a line, and a multi-line note above a
+string excused a line still inside the note. So a short note with no reason
+worked and a proper one read as a broken excuse -- the wrong way round.
+
+Fixed here by anchoring on the line the note _finishes_ on. Worth remembering as
+a shape rather than as a bug: a rule about "the line above" needs to say which
+line of a multi-line thing it means, and the reasonable-looking choice is the
+wrong one.
+
+## 1x — A JSX comment is not valid between attributes
+
+`{/* ... */}` in an attribute list is a JSX spread with an empty expression and
+does not compile. A plain `/* ... */` between attributes does. Costs one
+typecheck round trip every time, and it comes up whenever an attribute needs a
+note -- which for this work is every `i18n-allow`.
+
 ## 6x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
@@ -455,6 +576,52 @@ the minute spent working out whether the red line was mine. It was not: the
 same test is red on `origin/main`. Checking the fixture in would have made
 that answer free.
 
+## 2x — A mutation survivor is reported by line, and a line can hold several mutants
+
+The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that
+holds more than one mutable sub-expression that does not say which one, and the two
+readings lead to opposite conclusions. Both of these cost a mutate-run-restore cycle in
+one session:
+
+- `issue-move.ts:54` reads as a type assertion (`{ instanceUrl?: string }`, erased at
+  runtime and therefore genuinely equivalent). It was the argument to
+  `db.query.integrations.findFirst({ where: ... })` — a real gap, where dropping the
+  `where` returns _an_ integration instead of _the_ one.
+- `issue-move.resolver.ts:47` reads as the ternary on the next line. It was the arrow
+  body inside `.find((r) => r.boardId === boardId)` on line 47 itself.
+
+The column is in the detail section further up the report, but the summary is what you act
+on, and reading the source line at that number is the natural next move — which is exactly
+what misleads. **Print the trimmed source line beside each survivor**, the way an
+`equivalents` record already addresses its line by text. It costs one `readFileSync` in
+`mutation-policy.ts` and removes the ambiguity at the point of use.
+
+Until then: never mutate from the summary alone. Take the `file:line:col` out of the
+detail block, and confirm the mutant by applying it by hand and watching the suite go red.
+
+Hit again while grading the i18n gate, with two consequences the first run did not
+reach.
+
+**"Killed by hand, survived in the report" is not a bug in the report.** A hand-check
+of `if (!expression || typeof expression !== 'object') return []` mutated the whole
+condition to `false` and the suite went red, while the gate called the mutant
+survived. Both were right: the reported mutant was the _right operand_ forced to
+`false`, and the test that kills the whole-condition form passes `null`, which the
+`||` short-circuits on -- so that test never evaluates the operand and Stryker
+correctly leaves it out of `coveredBy`. Reproducing a sub-expression mutant means
+mutating that sub-expression, not the line.
+
+**An `equivalents` record cannot address one mutant on such a line.** `excusing()` in
+`mutation-policy.ts` matches on file, mutator, replacement and the trimmed text of the
+line, and **not** on the column. `if (node.type === 'BinaryExpression' && node.operator
+=== '+')` carried three `ConditionalExpression -> true` mutants — the whole condition,
+each operand — of which one was unkillable and two were killed by real tests. One
+record would have excused all three, so a future edit could have broken those two tests
+without the gate saying anything. It was written as two `if`s instead, one mutant to a
+line. That is a workaround: the matcher should carry the column, or refuse a record that
+matches more than one mutant, so a genuine `&&` does not have to be split to be graded
+honestly.
+
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
 `scripts/mutation-manifest.json` and the `toEqual` in
@@ -865,29 +1032,6 @@ Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and
 and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
 that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
 read as untested until proven otherwise.
-
-## 1x — A mutation survivor is reported by line, and a line can hold several mutants
-
-The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that
-holds more than one mutable sub-expression that does not say which one, and the two
-readings lead to opposite conclusions. Both of these cost a mutate-run-restore cycle in
-one session:
-
-- `issue-move.ts:54` reads as a type assertion (`{ instanceUrl?: string }`, erased at
-  runtime and therefore genuinely equivalent). It was the argument to
-  `db.query.integrations.findFirst({ where: ... })` — a real gap, where dropping the
-  `where` returns _an_ integration instead of _the_ one.
-- `issue-move.resolver.ts:47` reads as the ternary on the next line. It was the arrow
-  body inside `.find((r) => r.boardId === boardId)` on line 47 itself.
-
-The column is in the detail section further up the report, but the summary is what you act
-on, and reading the source line at that number is the natural next move — which is exactly
-what misleads. **Print the trimmed source line beside each survivor**, the way an
-`equivalents` record already addresses its line by text. It costs one `readFileSync` in
-`mutation-policy.ts` and removes the ambiguity at the point of use.
-
-Until then: never mutate from the summary alone. Take the `file:line:col` out of the
-detail block, and confirm the mutant by applying it by hand and watching the suite go red.
 
 ## 1x — postgres.js encodes a JSON _string_ parameter into jsonb a second time
 

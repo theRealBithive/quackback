@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import type { ReactElement } from 'react'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { renderWithIntl } from '@/test/render-with-intl'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const SEGMENTS = [
@@ -42,7 +43,7 @@ afterEach(cleanup)
 
 function renderWithClient(ui: ReactElement) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return renderWithIntl(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
 }
 
 const baseProps = {

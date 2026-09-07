@@ -98,6 +98,424 @@ export interface Exemption {
   reason: string
 }
 
+// ============================================================================
+// The second rule class: text written into the source instead of the catalogue
+// ============================================================================
+
+/**
+ * The attributes a person actually reads.
+ *
+ * Deliberately short. Every name added here is a name the rule will read on
+ * every element in every checked file, and the cost of getting one wrong is
+ * not a missed string -- it is a report full of class lists and node types,
+ * which is how a gate stops being read.
+ */
+const READABLE_ATTRIBUTES = new Set([
+  'title',
+  'aria-label',
+  'placeholder',
+  'alt',
+  'label',
+  'description',
+])
+
+/** Objects whose every method exists to show the string handed to it. */
+const SHOWING_OBJECTS = new Set(['toast'])
+
+/** Functions of the same kind, called with or without `window.`. */
+const SHOWING_FUNCTIONS = new Set(['prompt', 'confirm', 'alert'])
+
+/** The marker that excuses a line, and the reason it demands. */
+const EXCUSE = /^\s*i18n-allow\b\s*:?\s*(.*)$/s
+
+/** Whether a string holds a word, in any script. A separator, a number and a
+ *  bare symbol are not language, and a rule that reports them teaches people
+ *  to switch it off (I19). */
+function holdsAWord(text: string): boolean {
+  return /\p{L}/u.test(text)
+}
+
+export interface DisplayString {
+  /** The text as a reader would see it, trimmed. */
+  text: string
+  file: string
+  line: number
+  /** Where it sat: `text` between tags, an attribute name, or the call it was
+   *  handed to. The rule is about position, so the report says the position. */
+  where: string
+}
+
+export interface DisplayExcuse {
+  file: string
+  line: number
+  /** Empty when the note gave none, which is refused rather than honoured. */
+  reason: string
+  /** Whether the note stood alone on its line, which decides how far it
+   *  reaches. See {@link standsAlone}. */
+  ownLine: boolean
+}
+
+export interface DisplayScan {
+  strings: DisplayString[]
+  excuses: DisplayExcuse[]
+}
+
+export interface DisplayFinding {
+  kind: 'untranslated-string' | 'excuse-without-reason'
+  text: string
+  file: string
+  line: number
+  where: string
+  detail: string
+}
+
+/**
+ * Whether a note stood alone on its line.
+ *
+ * This decides how far it reaches, and the two forms are not interchangeable.
+ * Inside JSX the only comment syntax is `{/* ... *\/}`, which cannot sit after
+ * the text it speaks for -- a `//` line among JSX children is text on the page,
+ * not a comment (measured; the parser reports it as part of the text node). So
+ * a note alone on its line speaks for the line below it. A note *after* a word
+ * speaks for that word only: letting the trailing form reach further silences
+ * the next string as well, which is a hole it would open on every single use.
+ * A property test found that, having been written before the rule was.
+ */
+function standsAlone(text: string, start: number, end: number): boolean {
+  const before = text.slice(text.lastIndexOf('\n', start - 1) + 1, start)
+  const lineEnd = text.indexOf('\n', end)
+  const after = text.slice(end, lineEnd < 0 ? text.length : lineEnd)
+  return /^[\s{]*$/.test(before) && /^[\s}]*$/.test(after)
+}
+
+/** What a call is written as, as far as the two rules below care: a bare name,
+ *  or a name on something. A callee is always one of the parser's nodes, so
+ *  there is no guard for a missing one -- it would be a branch no source can
+ *  take. */
+type Callee = {
+  type: string
+  name: string
+  object: { name?: string }
+  property: { name?: string }
+}
+
+/**
+ * The name a call is made under, for the report.
+ *
+ * Reached only for a callee {@link showsItsArgument} accepted, so the type is
+ * one of the two below. `null` is for the shape that has no name to print: a
+ * method reached by a computed key, where the report says `call` instead.
+ */
+function calleeName(callee: unknown): string | null {
+  const c = callee as Callee
+  if (c.type === 'Identifier') return c.name
+  const object = c.object.name
+  const property = c.property.name
+  if (!property) return null
+  return object ? `${object}.${property}` : property
+}
+
+/** Whether a call's string arguments are shown to a reader. */
+function showsItsArgument(callee: unknown): boolean {
+  const c = callee as Callee
+  if (c.type === 'Identifier') return SHOWING_FUNCTIONS.has(c.name)
+  if (c.type !== 'MemberExpression') return false
+  if (SHOWING_OBJECTS.has(c.object.name ?? '')) return true
+  return SHOWING_FUNCTIONS.has(c.property.name ?? '')
+}
+
+/**
+ * Read every word a reader can see out of one source file, and every note
+ * excusing one.
+ *
+ * The whole rule is about *position*: the same word is a label in one place, a
+ * class name in another and a node type in a third. So nothing here looks at
+ * what a string says -- only at where it sits, and whether it holds a word at
+ * all (I15, I19).
+ *
+ * A person's own words never appear, and not by a special case: they reach the
+ * page through an expression, and an expression is not a literal. Where our
+ * sentence carries their words inside it -- a template literal -- the pieces
+ * we wrote are read and the holes are not (I20).
+ */
+/**
+ * The name a property or a binding carries, when it is written out rather than
+ * computed. A computed key is a name we cannot read, so it is not one of the
+ * few we grade.
+ */
+function writtenName(node: unknown): string | null {
+  // Both callers hand in a key or a binding that exists, so there is no guard
+  // for a missing one: it would be a branch no input can take.
+  const n = node as { type?: string; name?: string; value?: unknown }
+  if (n.type === 'Identifier') return n.name ?? null
+  return stringOf(n)
+}
+
+/**
+ * The words a display position would actually render, out of the expression
+ * sitting in it.
+ *
+ * A reader sees the value, not the syntax: `{isActive ? 'Update' : 'Add'}`
+ * shows one of two words we wrote, and `title={busy ? 'Saving' : 'Save'}` is a
+ * tooltip either way. So the descent follows the shapes whose words are the
+ * words in their parts -- a conditional, an `||`/`??`/`&&` chain, and a `+`
+ * that joins one part to another -- and reads the pieces of our own sentence
+ * out of a template literal, leaving the holes for a person's own words alone
+ * (I20).
+ *
+ * Both sides of a logical chain are read rather than only the one that can be
+ * rendered: a string literal on the left of `&&` or `??` is dead either way,
+ * and an operator table there would be a second thing to keep true for no
+ * finding it could add. A binary operator is a different matter, and `+` is
+ * the only one of them that gets read: it is the one whose result is its parts
+ * put together, exactly as a template literal is. Every other binary operator
+ * answers a question about a value rather than showing it, and reading
+ * `position === 'top'` would report the name of a setting as a sentence.
+ *
+ * It stops at a call. A call in a display position is graded by the rule for
+ * calls, which knows the short list of functions whose whole job is to show
+ * their argument -- and every other call there is as likely to be
+ * `formatMessage({ id })`, whose argument is an id rather than a word. Reading
+ * those would report the very thing this gate asks for.
+ */
+function displayValues(expression: unknown): { text: string; start: number }[] {
+  // Every caller hands in one of the parser's nodes or nothing at all -- an
+  // attribute with no value, a branch a shape does not have. So the guard is
+  // for the nothing; a check that the something is an object would be a branch
+  // no call site can take.
+  if (!expression) return []
+  const node = expression as Record<string, unknown> & { type?: string; start?: number }
+
+  const literal = stringOf(node)
+  if (literal !== null) return [{ text: literal, start: node.start ?? 0 }]
+
+  if (node.type === 'TemplateLiteral') {
+    // Every piece of a template literal is a node of its own and carries its
+    // own position, so there is no fallback here: it would be a branch no
+    // source can take.
+    const quasis = node.quasis as { value: { raw: string }; start: number }[]
+    return quasis.map((quasi) => ({ text: quasi.value.raw, start: quasi.start }))
+  }
+
+  if (node.type === 'ConditionalExpression') {
+    return [...displayValues(node.consequent), ...displayValues(node.alternate)]
+  }
+
+  if (node.type === 'LogicalExpression') {
+    return [...displayValues(node.left), ...displayValues(node.right)]
+  }
+
+  if (node.type === 'BinaryExpression') {
+    // Two conditions and not one `&&`, because a record in the mutation
+    // manifest is addressed by the text of its line: the joined form put three
+    // mutants on one line that the manifest cannot tell apart, so excusing the
+    // one that no test can catch would have excused the two that tests do.
+    if (node.operator !== '+') return []
+    return [...displayValues(node.left), ...displayValues(node.right)]
+  }
+
+  return []
+}
+
+export function scanDisplayText(file: string, text: string): DisplayScan {
+  const parsed = parseSync(file, text)
+  const lineOf = lineIndex(text)
+  const strings: DisplayString[] = []
+
+  /** The line the word itself sits on, not the line the node opens on. A
+   *  report that points at the element above the text is a report nobody
+   *  trusts, and JSX text starts at the previous tag. */
+  const lineOfWord = (raw: string, start: number): number =>
+    // `record` below only reaches here for a string that holds a word, so the
+    // search always finds one; a fallback for -1 would be a branch no input
+    // can take.
+    lineOf(start + raw.search(/\p{L}/u))
+
+  const record = (raw: string, start: number, where: string) => {
+    if (!holdsAWord(raw)) return
+    strings.push({ text: raw.trim(), file, line: lineOfWord(raw, start), where })
+  }
+
+  /** Containers an attribute already answered for; see the attribute case. An
+   *  attribute is always visited before the container inside it, because each
+   *  node is graded before the walk descends into it. */
+  const gradedAsAttribute = new Set<unknown>()
+
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return
+    const n = node as Record<string, unknown> & { type?: string; start?: number }
+
+    switch (n.type) {
+      case 'JSXText': {
+        // A text node is the string it holds, so neither a conversion nor a
+        // fallback here can be reached.
+        record(n.value as string, n.start as number, 'text')
+        break
+      }
+      case 'JSXAttribute': {
+        // Claimed before the allowlist is consulted, not after. The walk below
+        // reaches this attribute's own container too, and the case for a
+        // container has no way to ask what it is sitting in -- so an attribute
+        // that is *not* a display position has to claim its container as well,
+        // or `className={busy ? 'a' : 'b'}` would be read as text on the page.
+        const container = (n as { value?: unknown }).value
+        // Claimed whatever the value turns out to be. Only a container is ever
+        // looked up again, so a quoted value or a valueless attribute lands in
+        // here and is never asked for -- and a test for the difference would be
+        // a test of the set rather than of the report.
+        gradedAsAttribute.add(container)
+        const name = (n.name as { name?: string }).name
+        if (!name || !READABLE_ATTRIBUTES.has(name)) break
+        for (const word of displayValues(attributeValue(n as { value?: unknown }))) {
+          record(word.text, word.start, name)
+        }
+        break
+      }
+      case 'JSXExpressionContainer': {
+        // Between the tags rather than in an attribute: a word in braces is a
+        // word on the page.
+        if (gradedAsAttribute.has(node)) break
+        for (const word of displayValues(n.expression)) record(word.text, word.start, 'text')
+        break
+      }
+      case 'Property': {
+        // A tooltip is a tooltip whether it is written `title=` in the markup
+        // or `title:` in a row of a menu the markup renders from a table. The
+        // same short list of names decides, for the same reason: the name says
+        // a person reads the value, and the property beside it holding a node
+        // type or a command says nobody does.
+        //
+        // `computed` sits on the property rather than on its key, which is
+        // where this check used to be and therefore never fired: `{[title]: x}`
+        // is a name decided at runtime that reads exactly like `title:` in the
+        // source, and grading it would report a word by the name of a variable
+        // instead of by where it sits.
+        if (n.computed) break
+        const key = writtenName((n as { key?: unknown }).key)
+        if (!key || !READABLE_ATTRIBUTES.has(key)) break
+        for (const word of displayValues((n as { value?: unknown }).value)) {
+          record(word.text, word.start, key)
+        }
+        break
+      }
+      case 'AssignmentPattern': {
+        // The word a display prop falls back to. It is what most readers
+        // actually see, because most callers pass nothing.
+        const bound = writtenName((n as { left?: unknown }).left)
+        if (!bound || !READABLE_ATTRIBUTES.has(bound)) break
+        for (const word of displayValues((n as { right?: unknown }).right)) {
+          record(word.text, word.start, bound)
+        }
+        break
+      }
+      case 'CallExpression': {
+        if (!showsItsArgument(n.callee)) break
+        const where = calleeName(n.callee) ?? 'call'
+        for (const argument of n.arguments as unknown[]) {
+          const literal = stringOf(argument)
+          if (literal !== null) record(literal, (argument as { start: number }).start, where)
+        }
+        break
+      }
+    }
+
+    for (const value of Object.values(n)) visit(value)
+  }
+
+  visit(parsed.program)
+
+  const comments = (parsed as { comments: { value: string; start: number; end: number }[] })
+    .comments
+  const excuses: DisplayExcuse[] = []
+  for (const comment of comments) {
+    const matched = EXCUSE.exec(comment.value)
+    if (!matched) continue
+    excuses.push({
+      file,
+      // The line the note *finishes* on. A reason worth writing rarely fits on
+      // one line, and anchoring on the line it opens on would excuse a line
+      // still inside the note -- so a real reason would read as a broken excuse
+      // while a short, reasonless one worked. For a note that does fit on one
+      // line, and for the trailing form, start and end are the same line.
+      line: lineOf(comment.end),
+      reason: matched[1].trim(),
+      ownLine: standsAlone(text, comment.start, comment.end),
+    })
+  }
+
+  return { strings, excuses }
+}
+
+/**
+ * Whether a note speaks for a given word: on its line always, and on the line
+ * below only when the note stood alone (see {@link standsAlone}).
+ *
+ * Both callers pair a scan's notes with the same scan's words, and a scan is
+ * one file, so the two are always in the same file. There is no check for it
+ * here: it would be a branch no input can take.
+ */
+function excuses(excuse: DisplayExcuse, string: DisplayString): boolean {
+  if (excuse.line === string.line) return true
+  return excuse.ownLine && excuse.line === string.line - 1
+}
+
+/** The notes that carry a reason, which are the only ones that silence
+ *  anything: a note without one is refused (I17). */
+function reasonedExcuses(scan: DisplayScan): DisplayExcuse[] {
+  return scan.excuses.filter((excuse) => excuse.reason !== '')
+}
+
+/**
+ * Grade the text found in the checked files.
+ *
+ * Only the files handed in are graded, and each finding keeps the file it came
+ * from: the manifest decides what is checked, not this function (I16).
+ */
+export function gradeDisplayText(scans: readonly DisplayScan[]): DisplayFinding[] {
+  const findings: DisplayFinding[] = []
+  for (const scan of scans) {
+    const silencing = reasonedExcuses(scan)
+    for (const string of scan.strings) {
+      if (silencing.some((excuse) => excuses(excuse, string))) continue
+      findings.push({
+        kind: 'untranslated-string',
+        text: string.text,
+        file: string.file,
+        line: string.line,
+        where: string.where,
+        detail:
+          `read by a person as ${string.where === 'text' ? 'text on the page' : `the ${string.where}`}` +
+          ', so it belongs in the catalogue rather than in the source',
+      })
+    }
+    for (const excuse of scan.excuses) {
+      if (excuse.reason !== '') continue
+      findings.push({
+        kind: 'excuse-without-reason',
+        text: '',
+        file: excuse.file,
+        line: excuse.line,
+        where: 'note',
+        detail:
+          'an excuse with no reason is an allowlist entry, so it is refused rather than honoured',
+      })
+    }
+  }
+  return findings
+}
+
+/** The notes that no longer speak for anything. Reported and not fatal, so the
+ *  list cannot rot into stale claims without anyone seeing it (I18). */
+export function unusedExcuses(scans: readonly DisplayScan[]): DisplayExcuse[] {
+  const stale: DisplayExcuse[] = []
+  for (const scan of scans) {
+    for (const excuse of reasonedExcuses(scan)) {
+      if (!scan.strings.some((string) => excuses(excuse, string))) stale.push(excuse)
+    }
+  }
+  return stale
+}
+
 export interface CatalogueInput {
   scan: SourceScan
   catalogues: Record<string, Record<string, string>>

@@ -1,5 +1,6 @@
 import { forwardRef, useImperativeHandle, useState, useEffect, useRef } from 'react'
 import { useRouteContext } from '@tanstack/react-router'
+import { FormattedMessage, useIntl } from 'react-intl'
 import { CheckBadgeIcon } from '@heroicons/react/24/solid'
 import type { SettingsBrandingData } from '@/lib/server/domains/settings/settings.types'
 import { isTeamMember, type Role } from '@/lib/shared/roles'
@@ -37,9 +38,23 @@ export const MentionPicker = forwardRef<MentionPickerHandle, MentionPickerProps>
     const ctx = useRouteContext({ from: '__root__' }) as {
       settings?: { brandingData?: SettingsBrandingData; name?: string | null }
     }
+    const intl = useIntl()
     const branding = ctx.settings?.brandingData
     const teamBadgeLogoUrl = branding?.logoUrl ?? null
-    const teamBadgeLabel = branding?.name ?? ctx.settings?.name ?? 'Team'
+    // The last fallback is a word, so it comes from the catalogue rather than
+    // from this line -- a literal here would be shown in English to every
+    // reader in every language, and a rule that reads display positions cannot
+    // see it one hop from where it is shown.
+    const teamBadgeLabel =
+      branding?.name ??
+      ctx.settings?.name ??
+      intl.formatMessage({ id: 'ui.mentionPicker.defaultOrganisation', defaultMessage: 'Team' })
+    // A frame with the organisation inside it, not a name in front of a bare
+    // noun: German needs the preposition, and so do the Romance languages.
+    const teamBadgeTitle = intl.formatMessage(
+      { id: 'ui.mentionPicker.teamMember', defaultMessage: '{organisation} Member' },
+      { organisation: teamBadgeLabel }
+    )
 
     const updateSelected = (next: number) => {
       selectedRef.current = next
@@ -95,7 +110,9 @@ export const MentionPicker = forwardRef<MentionPickerHandle, MentionPickerProps>
     return (
       <div className="mention-picker">
         {items.length === 0 ? (
-          <div className="mention-picker__empty">No people match.</div>
+          <div className="mention-picker__empty">
+            <FormattedMessage id="ui.mentionPicker.empty" defaultMessage="No people match." />
+          </div>
         ) : (
           <ScrollArea className="mention-picker__scroll">
             <div role="listbox" ref={listRef} className="mention-picker__list">
@@ -121,8 +138,8 @@ export const MentionPicker = forwardRef<MentionPickerHandle, MentionPickerProps>
                   {isTeamMember(item.role) && (
                     <span
                       className="mention-picker__team-badge"
-                      aria-label={`${teamBadgeLabel} Member`}
-                      title={`${teamBadgeLabel} Member`}
+                      aria-label={teamBadgeTitle}
+                      title={teamBadgeTitle}
                     >
                       {teamBadgeLogoUrl ? (
                         <img

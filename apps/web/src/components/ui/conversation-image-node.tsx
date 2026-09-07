@@ -2,6 +2,7 @@ import { Node } from '@tiptap/core'
 import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react'
 import { XMarkIcon } from '@heroicons/react/24/solid'
 import { cn } from '@/lib/shared/utils'
+import { useIntl } from 'react-intl'
 
 /**
  * In-editor render for an inline conversation image. Reads the `{ src, alt }` off the
@@ -10,6 +11,7 @@ import { cn } from '@/lib/shared/utils'
  * src simply renders nothing inside it.
  */
 function ConversationImageNodeView({ node, selected, deleteNode }: ReactNodeViewProps) {
+  const intl = useIntl()
   const src = node.attrs.src as string | null
   const alt = (node.attrs.alt as string | null) ?? ''
   return (
@@ -19,7 +21,10 @@ function ConversationImageNodeView({ node, selected, deleteNode }: ReactNodeView
           editor selection before the click fires. */}
       <button
         type="button"
-        aria-label="Remove image"
+        aria-label={intl.formatMessage({
+          id: 'ui.imageNode.remove',
+          defaultMessage: 'Remove image',
+        })}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => deleteNode()}
         className={cn(
