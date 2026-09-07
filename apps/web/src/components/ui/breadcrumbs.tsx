@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { ChevronRightIcon } from '@heroicons/react/16/solid'
 import { cn } from '@/lib/shared/utils'
+import { useIntl } from 'react-intl'
 
 export interface BreadcrumbSegment {
   /** Label rendered for this segment. */
@@ -21,9 +22,10 @@ interface BreadcrumbsProps {
  * the hierarchy. Wraps gracefully on narrow viewports.
  */
 export function Breadcrumbs({ segments, className }: BreadcrumbsProps) {
+  const intl = useIntl()
   return (
     <nav
-      aria-label="Breadcrumb"
+      aria-label={intl.formatMessage({ id: 'ui.breadcrumbs.label', defaultMessage: 'Breadcrumb' })}
       className={cn('flex flex-wrap items-center gap-1 text-sm text-muted-foreground', className)}
     >
       {segments.map((segment, index) => {

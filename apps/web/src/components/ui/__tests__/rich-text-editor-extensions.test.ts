@@ -12,8 +12,25 @@
  */
 
 import { describe, it, expect, vi } from 'vitest'
+import { createIntl } from 'react-intl'
 import type { EditorFeatures } from '../rich-text-editor'
 import { buildExtensions, generateContentHTML, hasActiveSuggestion } from '../rich-text-editor'
+
+/**
+ * `buildExtensions` with the language argument filled in.
+ *
+ * The slash menu is searched on its own translated titles, so the extension set
+ * needs a language to be built in at all. These tests are about which
+ * extensions are registered rather than about what they say, so an empty
+ * catalogue is right here: every message falls back to the English beside its
+ * id, which is what this file asserted before there was a catalogue.
+ */
+function build(features: EditorFeatures, options: { placeholder: string; onSubmit?: () => void }) {
+  return buildExtensions(features, {
+    ...options,
+    intl: createIntl({ locale: 'en', messages: {} }),
+  })
+}
 
 // Full widget feature set (worst-case for duplicates)
 const WIDGET_FEATURES: EditorFeatures = {
@@ -31,7 +48,7 @@ const WIDGET_FEATURES: EditorFeatures = {
 
 describe('buildExtensions', () => {
   it('contains no duplicate extension names (full widget feature set)', () => {
-    const exts = buildExtensions(WIDGET_FEATURES, { placeholder: 'Write...' })
+    const exts = build(WIDGET_FEATURES, { placeholder: 'Write...' })
     const names = exts.map((e) => (e as { name: string }).name)
     const seen = new Set<string>()
     const duplicates: string[] = []
@@ -43,7 +60,7 @@ describe('buildExtensions', () => {
   })
 
   it('contains no duplicate extension names (minimal feature set)', () => {
-    const exts = buildExtensions({}, { placeholder: 'Write...' })
+    const exts = build({}, { placeholder: 'Write...' })
     const names = exts.map((e) => (e as { name: string }).name)
     const seen = new Set<string>()
     const duplicates: string[] = []
@@ -55,7 +72,7 @@ describe('buildExtensions', () => {
   })
 
   it('always includes underline (via StarterKit)', () => {
-    const exts = buildExtensions({}, { placeholder: 'Write...' })
+    const exts = build({}, { placeholder: 'Write...' })
     // Underline should come from StarterKit v3 — NOT as a standalone top-level extension
     const standaloneUnderline = exts.filter((e) => (e as { name: string }).name === 'underline')
     expect(standaloneUnderline).toHaveLength(0) // should NOT be standalone
@@ -64,8 +81,8 @@ describe('buildExtensions', () => {
   it('returns the same extension instances when called with identical feature flags (memoization contract)', () => {
     // buildExtensions itself is a pure factory - same args produce same structure.
     // This test verifies the returned array length is deterministic.
-    const exts1 = buildExtensions(WIDGET_FEATURES, { placeholder: 'Write...' })
-    const exts2 = buildExtensions(WIDGET_FEATURES, { placeholder: 'Write...' })
+    const exts1 = build(WIDGET_FEATURES, { placeholder: 'Write...' })
+    const exts2 = build(WIDGET_FEATURES, { placeholder: 'Write...' })
     // Lengths must match (different instances, but same count)
     expect(exts1.length).toBe(exts2.length)
     // Names must match in order
@@ -75,8 +92,8 @@ describe('buildExtensions', () => {
   })
 
   it('always includes image extension for schema compatibility', () => {
-    const with_ = buildExtensions({ images: true }, { placeholder: '' })
-    const without = buildExtensions({ images: false }, { placeholder: '' })
+    const with_ = build({ images: true }, { placeholder: '' })
+    const without = build({ images: false }, { placeholder: '' })
     const withNames = with_.map((e) => (e as { name: string }).name)
     const withoutNames = without.map((e) => (e as { name: string }).name)
     expect(withNames).toContain('image')
@@ -84,37 +101,37 @@ describe('buildExtensions', () => {
   })
 
   it('includes slashCommands extension by default', () => {
-    const exts = buildExtensions({}, { placeholder: '' })
+    const exts = build({}, { placeholder: '' })
     const names = exts.map((e) => (e as { name: string }).name)
     expect(names).toContain('slashCommands')
   })
 
   it('omits slashCommands when slashMenu is false', () => {
-    const exts = buildExtensions({ slashMenu: false }, { placeholder: '' })
+    const exts = build({ slashMenu: false }, { placeholder: '' })
     const names = exts.map((e) => (e as { name: string }).name)
     expect(names).not.toContain('slashCommands')
   })
 
   it('includes emoji extension by default', () => {
-    const exts = buildExtensions({}, { placeholder: '' })
+    const exts = build({}, { placeholder: '' })
     const names = exts.map((e) => (e as { name: string }).name)
     expect(names).toContain('emoji')
   })
 
   it('omits emoji extension when emojiPicker is false', () => {
-    const exts = buildExtensions({ emojiPicker: false }, { placeholder: '' })
+    const exts = build({ emojiPicker: false }, { placeholder: '' })
     const names = exts.map((e) => (e as { name: string }).name)
     expect(names).not.toContain('emoji')
   })
 
   it('omits enterAsHardBreak by default (document-style Enter)', () => {
-    const exts = buildExtensions({}, { placeholder: '' })
+    const exts = build({}, { placeholder: '' })
     const names = exts.map((e) => (e as { name: string }).name)
     expect(names).not.toContain('enterAsHardBreak')
   })
 
   it('includes enterAsHardBreak when enabled (comment-style Enter)', () => {
-    const exts = buildExtensions({ enterAsHardBreak: true }, { placeholder: '' })
+    const exts = build({ enterAsHardBreak: true }, { placeholder: '' })
     const names = exts.map((e) => (e as { name: string }).name)
     expect(names).toContain('enterAsHardBreak')
   })
@@ -122,12 +139,12 @@ describe('buildExtensions', () => {
   // P2.1 — mentions feature flag (default TRUE; undefined must mean enabled so
   // every existing consumer keeps the `@` menu).
   it('includes the mention extension by default (undefined = enabled)', () => {
-    const names = buildExtensions({}, { placeholder: '' }).map((e) => (e as { name: string }).name)
+    const names = build({}, { placeholder: '' }).map((e) => (e as { name: string }).name)
     expect(names).toContain('mention')
   })
 
   it('omits the mention extension when mentions is false', () => {
-    const names = buildExtensions({ mentions: false }, { placeholder: '' }).map(
+    const names = build({ mentions: false }, { placeholder: '' }).map(
       (e) => (e as { name: string }).name
     )
     expect(names).not.toContain('mention')
@@ -136,7 +153,7 @@ describe('buildExtensions', () => {
   it('keeps mentions on for an existing preset that never sets the flag (widget set)', () => {
     // Spot-check: WIDGET_FEATURES (and every current preset) leaves `mentions`
     // unset, so the mention menu must survive the flag addition.
-    const names = buildExtensions(WIDGET_FEATURES, { placeholder: '' }).map(
+    const names = build(WIDGET_FEATURES, { placeholder: '' }).map(
       (e) => (e as { name: string }).name
     )
     expect(names).toContain('mention')
@@ -197,7 +214,7 @@ describe('submitOnEnter (onSubmit)', () => {
   }
 
   function submitExtension(features: EditorFeatures, onSubmit: () => void): KeymapExtension {
-    const ext = buildExtensions(features, { placeholder: '', onSubmit }).find(
+    const ext = build(features, { placeholder: '', onSubmit }).find(
       (e) => (e as { name: string }).name === 'submitOnEnter'
     )
     if (!ext) throw new Error('submitOnEnter extension was not registered')
@@ -209,12 +226,12 @@ describe('submitOnEnter (onSubmit)', () => {
   }
 
   it('is absent when no onSubmit is provided (zero behavior change)', () => {
-    const names = buildExtensions({}, { placeholder: '' }).map((e) => (e as { name: string }).name)
+    const names = build({}, { placeholder: '' }).map((e) => (e as { name: string }).name)
     expect(names).not.toContain('submitOnEnter')
   })
 
   it('is registered when onSubmit is provided', () => {
-    const names = buildExtensions({}, { placeholder: '', onSubmit: () => {} }).map(
+    const names = build({}, { placeholder: '', onSubmit: () => {} }).map(
       (e) => (e as { name: string }).name
     )
     expect(names).toContain('submitOnEnter')
@@ -258,10 +275,7 @@ describe('submitOnEnter (onSubmit)', () => {
   it('wins over enterAsHardBreak via a higher extension priority', () => {
     // TipTap tries same-key bindings in descending priority order and stops at
     // the first returning true, so submitOnEnter must outrank enterAsHardBreak.
-    const exts = buildExtensions(
-      { enterAsHardBreak: true },
-      { placeholder: '', onSubmit: () => {} }
-    )
+    const exts = build({ enterAsHardBreak: true }, { placeholder: '', onSubmit: () => {} })
     const byName = new Map(
       exts.map((e) => [(e as { name: string }).name, e as unknown as KeymapExtension])
     )

@@ -59,6 +59,7 @@ import {
   useRef,
 } from 'react'
 import { computePosition, flip, shift, offset } from '@floating-ui/dom'
+import { FormattedMessage, useIntl, type IntlShape, type MessageDescriptor } from 'react-intl'
 import { cn } from '@/lib/shared/utils'
 // The read-only JSON→HTML serializer now lives in a browser-free shared module
 // so server-side consumers (e.g. outbound conversation email) can import it
@@ -180,9 +181,13 @@ export function buildExtensions(
     onImageUpload?: (file: File) => Promise<string>
     /** When set, Enter submits (chat-send) instead of splitting the block. */
     onSubmit?: () => void
+    /** The reader's language. Required rather than optional: the slash menu is
+     *  searched on its own translated titles, so an extension set built without
+     *  it is an English menu inside a translated editor. */
+    intl: IntlShape
   }
 ) {
-  const { placeholder, onImageUpload, onSubmit } = options
+  const { placeholder, onImageUpload, onSubmit, intl } = options
   return [
     StarterKit.configure({
       heading: features.headings ? { levels: [1, 2, 3] } : false,
@@ -273,7 +278,7 @@ export function buildExtensions(
           }),
         ]
       : []),
-    ...(features.slashMenu !== false ? [createSlashCommands(features, onImageUpload)] : []),
+    ...(features.slashMenu !== false ? [createSlashCommands(intl, features, onImageUpload)] : []),
     ...(features.emojiPicker !== false ? [createEmojiExtension()] : []),
     // Enter-key bindings, highest precedence first. createSubmitOnEnter registers
     // at a higher priority than createEnterAsHardBreak (see the factory below), so
@@ -422,6 +427,32 @@ export interface EditorFeatures {
 // Slash Menu Types and Extension
 // ============================================================================
 
+/**
+ * The sentence shown when an image upload does not go through. Four places
+ * raise it -- the slash command, a drop, a paste, and the toolbar button -- and
+ * they say the same thing, so the id is spelled out once here.
+ */
+function imageUploadFailed(intl: IntlShape): string {
+  return intl.formatMessage({
+    id: 'ui.editor.image.uploadFailed',
+    defaultMessage: "Couldn't upload image. Try again.",
+  })
+}
+
+/**
+ * A tooltip that names an action and the keystroke for it.
+ *
+ * The keystroke is handed in from here rather than written into the catalogue.
+ * It is not language -- a translated key names a key nobody has -- and keeping
+ * it out means no catalogue entry can corrupt it, in any of the nine (U3).
+ */
+function shortcutTitle(intl: IntlShape, action: MessageDescriptor, shortcut: string): string {
+  return intl.formatMessage(
+    { id: 'ui.editor.shortcutHint', defaultMessage: '{action} ({shortcut})' },
+    { action: intl.formatMessage(action), shortcut }
+  )
+}
+
 interface SlashMenuItem {
   title: string
   description: string
@@ -431,15 +462,29 @@ interface SlashMenuItem {
   group: 'text' | 'lists' | 'blocks' | 'advanced'
 }
 
-function getSlashMenuItems(
+/**
+ * The rows the slash menu offers, in the reader's language.
+ *
+ * Exported because this is where a language becomes the menu's words, and those
+ * words are what `filterSlashItems` searches: a row named in the wrong language
+ * is a row a reader cannot find, which no test of the rendered menu would show.
+ */
+export function getSlashMenuItems(
+  intl: IntlShape,
   features: EditorFeatures,
   onImageUpload?: (file: File) => Promise<string>
 ): SlashMenuItem[] {
   const items: SlashMenuItem[] = [
     // Text group - always available
     {
-      title: 'Text',
-      description: 'Plain paragraph text',
+      title: intl.formatMessage({
+        id: 'ui.editor.slash.text.title',
+        defaultMessage: 'Text',
+      }),
+      description: intl.formatMessage({
+        id: 'ui.editor.slash.text.description',
+        defaultMessage: 'Plain paragraph text',
+      }),
       icon: <Type className="size-4" />,
       command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).setParagraph().run()
@@ -453,8 +498,14 @@ function getSlashMenuItems(
   if (features.headings) {
     items.push(
       {
-        title: 'Heading 1',
-        description: 'Large section heading',
+        title: intl.formatMessage({
+          id: 'ui.editor.slash.heading1.title',
+          defaultMessage: 'Heading 1',
+        }),
+        description: intl.formatMessage({
+          id: 'ui.editor.slash.heading1.description',
+          defaultMessage: 'Large section heading',
+        }),
         icon: <Heading1 className="size-4" />,
         command: ({ editor, range }) => {
           editor.chain().focus().deleteRange(range).setHeading({ level: 1 }).run()
@@ -463,8 +514,14 @@ function getSlashMenuItems(
         group: 'text',
       },
       {
-        title: 'Heading 2',
-        description: 'Medium section heading',
+        title: intl.formatMessage({
+          id: 'ui.editor.slash.heading2.title',
+          defaultMessage: 'Heading 2',
+        }),
+        description: intl.formatMessage({
+          id: 'ui.editor.slash.heading2.description',
+          defaultMessage: 'Medium section heading',
+        }),
         icon: <Heading2 className="size-4" />,
         command: ({ editor, range }) => {
           editor.chain().focus().deleteRange(range).setHeading({ level: 2 }).run()
@@ -473,8 +530,14 @@ function getSlashMenuItems(
         group: 'text',
       },
       {
-        title: 'Heading 3',
-        description: 'Small section heading',
+        title: intl.formatMessage({
+          id: 'ui.editor.slash.heading3.title',
+          defaultMessage: 'Heading 3',
+        }),
+        description: intl.formatMessage({
+          id: 'ui.editor.slash.heading3.description',
+          defaultMessage: 'Small section heading',
+        }),
         icon: <Heading3 className="size-4" />,
         command: ({ editor, range }) => {
           editor.chain().focus().deleteRange(range).setHeading({ level: 3 }).run()
@@ -488,8 +551,14 @@ function getSlashMenuItems(
   // Lists - always available (part of StarterKit)
   items.push(
     {
-      title: 'Bullet List',
-      description: 'Unordered list',
+      title: intl.formatMessage({
+        id: 'ui.editor.slash.bulletList.title',
+        defaultMessage: 'Bullet List',
+      }),
+      description: intl.formatMessage({
+        id: 'ui.editor.slash.bulletList.description',
+        defaultMessage: 'Unordered list',
+      }),
       icon: <ListBulletIcon className="size-4" />,
       command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).toggleBulletList().run()
@@ -498,8 +567,14 @@ function getSlashMenuItems(
       group: 'lists',
     },
     {
-      title: 'Numbered List',
-      description: 'Ordered list',
+      title: intl.formatMessage({
+        id: 'ui.editor.slash.numberedList.title',
+        defaultMessage: 'Numbered List',
+      }),
+      description: intl.formatMessage({
+        id: 'ui.editor.slash.numberedList.description',
+        defaultMessage: 'Ordered list',
+      }),
       icon: <ListOrdered className="size-4" />,
       command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).toggleOrderedList().run()
@@ -512,8 +587,14 @@ function getSlashMenuItems(
   // Task list - conditional
   if (features.taskLists) {
     items.push({
-      title: 'Checklist',
-      description: 'Task list with checkboxes',
+      title: intl.formatMessage({
+        id: 'ui.editor.slash.checklist.title',
+        defaultMessage: 'Checklist',
+      }),
+      description: intl.formatMessage({
+        id: 'ui.editor.slash.checklist.description',
+        defaultMessage: 'Task list with checkboxes',
+      }),
       icon: <CheckSquare className="size-4" />,
       command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).toggleTaskList().run()
@@ -526,8 +607,14 @@ function getSlashMenuItems(
   // Blockquote - conditional
   if (features.blockquotes) {
     items.push({
-      title: 'Quote',
-      description: 'Blockquote for citations',
+      title: intl.formatMessage({
+        id: 'ui.editor.slash.quote.title',
+        defaultMessage: 'Quote',
+      }),
+      description: intl.formatMessage({
+        id: 'ui.editor.slash.quote.description',
+        defaultMessage: 'Blockquote for citations',
+      }),
       icon: <Quote className="size-4" />,
       command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).toggleBlockquote().run()
@@ -540,8 +627,14 @@ function getSlashMenuItems(
   // Horizontal divider - conditional
   if (features.dividers) {
     items.push({
-      title: 'Divider',
-      description: 'Horizontal line separator',
+      title: intl.formatMessage({
+        id: 'ui.editor.slash.divider.title',
+        defaultMessage: 'Divider',
+      }),
+      description: intl.formatMessage({
+        id: 'ui.editor.slash.divider.description',
+        defaultMessage: 'Horizontal line separator',
+      }),
       icon: <Minus className="size-4" />,
       command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).setHorizontalRule().run()
@@ -554,8 +647,14 @@ function getSlashMenuItems(
   // Code blocks - conditional
   if (features.codeBlocks) {
     items.push({
-      title: 'Code Block',
-      description: 'Syntax highlighted code',
+      title: intl.formatMessage({
+        id: 'ui.editor.slash.codeBlock.title',
+        defaultMessage: 'Code Block',
+      }),
+      description: intl.formatMessage({
+        id: 'ui.editor.slash.codeBlock.description',
+        defaultMessage: 'Syntax highlighted code',
+      }),
       icon: <Code2 className="size-4" />,
       command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).toggleCodeBlock().run()
@@ -568,8 +667,14 @@ function getSlashMenuItems(
   // Images - conditional
   if (features.images && onImageUpload) {
     items.push({
-      title: 'Image',
-      description: 'Upload an image',
+      title: intl.formatMessage({
+        id: 'ui.editor.slash.image.title',
+        defaultMessage: 'Image',
+      }),
+      description: intl.formatMessage({
+        id: 'ui.editor.slash.image.description',
+        defaultMessage: 'Upload an image',
+      }),
       icon: <ImagePlus className="size-4" />,
       command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).run()
@@ -587,7 +692,7 @@ function getSlashMenuItems(
           } catch (error) {
             console.error('Failed to upload image:', error)
             const { toast } = await import('sonner')
-            toast.error("Couldn't upload image. Try again.")
+            toast.error(imageUploadFailed(intl))
           }
         }
         input.click()
@@ -600,8 +705,14 @@ function getSlashMenuItems(
   // Table - conditional
   if (features.tables) {
     items.push({
-      title: 'Table',
-      description: 'Insert a table',
+      title: intl.formatMessage({
+        id: 'ui.editor.slash.table.title',
+        defaultMessage: 'Table',
+      }),
+      description: intl.formatMessage({
+        id: 'ui.editor.slash.table.description',
+        defaultMessage: 'Insert a table',
+      }),
       icon: <TableIcon className="size-4" />,
       command: ({ editor, range }) => {
         editor
@@ -619,12 +730,23 @@ function getSlashMenuItems(
   // YouTube embed - conditional
   if (features.embeds) {
     items.push({
-      title: 'YouTube',
-      description: 'Embed a YouTube video',
+      title: intl.formatMessage({
+        id: 'ui.editor.slash.youtube.title',
+        defaultMessage: 'YouTube',
+      }),
+      description: intl.formatMessage({
+        id: 'ui.editor.slash.youtube.description',
+        defaultMessage: 'Embed a YouTube video',
+      }),
       icon: <YoutubeIcon className="size-4" />,
       command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).run()
-        const url = window.prompt('Paste YouTube video URL:')
+        const url = window.prompt(
+          intl.formatMessage({
+            id: 'ui.editor.youtube.prompt',
+            defaultMessage: 'Paste YouTube video URL:',
+          })
+        )
         if (url && url.trim()) {
           editor.commands.setYoutubeVideo({
             src: url.trim(),
@@ -677,6 +799,7 @@ interface SlashMenuListProps {
 
 const SlashMenuList = forwardRef<SlashMenuListRef, SlashMenuListProps>(
   ({ items, command }, ref) => {
+    const intl = useIntl()
     const [selectedIndex, setSelectedIndex] = useState(0)
     const containerRef = useRef<HTMLDivElement>(null)
 
@@ -733,7 +856,7 @@ const SlashMenuList = forwardRef<SlashMenuListRef, SlashMenuListProps>(
       return (
         <div className="z-50 w-52 rounded-lg border bg-popover p-2 shadow-lg">
           <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-            No matching commands
+            <FormattedMessage id="ui.editor.slash.empty" defaultMessage="No matching commands" />
           </div>
         </div>
       )
@@ -741,10 +864,13 @@ const SlashMenuList = forwardRef<SlashMenuListRef, SlashMenuListProps>(
 
     const groupedItems = groupSlashItems(items)
     const groupLabels: Record<string, string> = {
-      text: 'Text',
-      lists: 'Lists',
-      blocks: 'Blocks',
-      advanced: 'Advanced',
+      text: intl.formatMessage({ id: 'ui.editor.slash.group.text', defaultMessage: 'Text' }),
+      lists: intl.formatMessage({ id: 'ui.editor.slash.group.lists', defaultMessage: 'Lists' }),
+      blocks: intl.formatMessage({ id: 'ui.editor.slash.group.blocks', defaultMessage: 'Blocks' }),
+      advanced: intl.formatMessage({
+        id: 'ui.editor.slash.group.advanced',
+        defaultMessage: 'Advanced',
+      }),
     }
 
     // Calculate global index for selection tracking
@@ -804,13 +930,14 @@ SlashMenuList.displayName = 'SlashMenuList'
 
 // Create the slash commands extension
 function createSlashCommands(
+  intl: IntlShape,
   features: EditorFeatures,
   onImageUpload?: (file: File) => Promise<string>
 ) {
   // Compute once per extension instance. Since buildExtensions() is wrapped in
   // useMemo, this only re-runs when features or onImageUpload actually changes —
   // NOT on every keystroke.
-  const allItems = getSlashMenuItems(features, onImageUpload)
+  const allItems = getSlashMenuItems(intl, features, onImageUpload)
 
   return Extension.create({
     name: 'slashCommands',
@@ -1205,7 +1332,7 @@ interface RichTextEditorProps {
 function RichTextEditorBase({
   value,
   onChange,
-  placeholder = 'Write something...',
+  placeholder,
   className,
   disabled = false,
   minHeight = '120px',
@@ -1217,13 +1344,24 @@ function RichTextEditorBase({
   onSubmit,
   editorRef,
 }: RichTextEditorProps) {
+  const intl = useIntl()
+  const resolvedPlaceholder =
+    placeholder ??
+    intl.formatMessage({ id: 'ui.editor.placeholder', defaultMessage: 'Write something...' })
+
   // Memoize extensions keyed on individual feature flags.
   // TipTap v3's useEditor calls editor.setOptions() whenever the extensions
   // array reference changes (uses reference equality via compareOptions).
   // Rebuilding the array on every render causes setOptions→transaction→onUpdate
   // on every keystroke, resulting in 300–400 ms input violations.
   const extensions = useMemo(
-    () => buildExtensions(features, { placeholder, onImageUpload, onSubmit }),
+    () =>
+      buildExtensions(features, {
+        placeholder: resolvedPlaceholder,
+        onImageUpload,
+        onSubmit,
+        intl,
+      }),
 
     [
       features.headings,
@@ -1241,7 +1379,9 @@ function RichTextEditorBase({
       features.mentions,
       onImageUpload,
       onSubmit,
-      placeholder,
+      resolvedPlaceholder,
+      intl,
+      intl.locale,
     ]
   )
 
@@ -1257,11 +1397,13 @@ function RichTextEditorBase({
         ),
         style: `--editor-min-height: ${minHeight}`,
       },
-      handleDrop: features.images && onImageUpload ? handleImageDrop(onImageUpload) : undefined,
-      handlePaste: features.images && onImageUpload ? handleImagePaste(onImageUpload) : undefined,
+      handleDrop:
+        features.images && onImageUpload ? handleImageDrop(intl, onImageUpload) : undefined,
+      handlePaste:
+        features.images && onImageUpload ? handleImagePaste(intl, onImageUpload) : undefined,
     }),
 
-    [features.images, onImageUpload, borderless, minHeight]
+    [features.images, onImageUpload, borderless, minHeight, intl, intl.locale]
   )
 
   // Stores the last JSON emitted by onUpdate so the value-sync useEffect can
@@ -1485,24 +1627,24 @@ function RichTextEditorBase({
         <ContextMenuContent className="min-w-[180px]">
           <ContextMenuItem onClick={contextMenuActions.viewImage}>
             <Expand className="mr-3 size-4 text-muted-foreground" />
-            View image
+            <FormattedMessage id="ui.editor.image.view" defaultMessage="View image" />
           </ContextMenuItem>
           <ContextMenuItem onClick={contextMenuActions.downloadImage}>
             <Download className="mr-3 size-4 text-muted-foreground" />
-            Download
+            <FormattedMessage id="ui.editor.image.download" defaultMessage="Download" />
           </ContextMenuItem>
           <ContextMenuItem onClick={contextMenuActions.copyImage}>
             <Copy className="mr-3 size-4 text-muted-foreground" />
-            Copy to clipboard
+            <FormattedMessage id="ui.editor.image.copy" defaultMessage="Copy to clipboard" />
           </ContextMenuItem>
           <ContextMenuItem onClick={contextMenuActions.copyLink}>
             <Link2 className="mr-3 size-4 text-muted-foreground" />
-            Copy link
+            <FormattedMessage id="ui.editor.image.copyLink" defaultMessage="Copy link" />
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem onClick={contextMenuActions.deleteImage}>
             <Trash2 className="mr-3 size-4 text-muted-foreground" />
-            Delete
+            <FormattedMessage id="ui.editor.image.delete" defaultMessage="Delete" />
           </ContextMenuItem>
         </ContextMenuContent>
       )}
@@ -1569,7 +1711,7 @@ function RichTextEditorBase({
 // Skip re-render when individual feature flags and all other props are unchanged.
 // Compares features by primitive values rather than object reference so callers
 // can safely pass inline objects without triggering unnecessary editor rebuilds.
-export const RichTextEditor = memo(RichTextEditorBase, (prev, next) => {
+const MemoisedRichTextEditor = memo(RichTextEditorBase, (prev, next) => {
   if (
     prev.value !== next.value ||
     prev.onChange !== next.onChange ||
@@ -1604,6 +1746,27 @@ export const RichTextEditor = memo(RichTextEditorBase, (prev, next) => {
   )
 })
 
+/**
+ * The editor, remounted when the reader's language changes.
+ *
+ * TipTap's `setOptions` replaces the options object but not the plugins that
+ * were built from it, so an extension keeps the words it was created with. That
+ * is measured, not assumed: on a language change the toolbar moved and the
+ * placeholder did not, because the placeholder lives in a ProseMirror plugin.
+ * The titles the slash menu is *searched* by live in the same place, so a
+ * reader who switched to German would be typing `/tabelle` against an English
+ * list.
+ *
+ * Remounting is what moves them. It costs the caret position and nothing else
+ * -- the content comes back from the `value` prop the caller holds -- and it
+ * happens once, when someone deliberately changes their language, never on a
+ * keystroke. The memo below it is what keeps a keystroke cheap.
+ */
+export function RichTextEditor(props: RichTextEditorProps) {
+  const { locale } = useIntl()
+  return <MemoisedRichTextEditor key={locale} {...props} />
+}
+
 // ============================================================================
 // Image Handling
 // ============================================================================
@@ -1612,6 +1775,7 @@ export const RichTextEditor = memo(RichTextEditorBase, (prev, next) => {
  * Handle image drop events in the editor.
  */
 function handleImageDrop(
+  intl: IntlShape,
   onImageUpload: (file: File) => Promise<string>
 ): (
   view: import('@tiptap/pm/view').EditorView,
@@ -1650,9 +1814,7 @@ function handleImageDrop(
         })
         .catch((err) => {
           console.error('[RichTextEditor] Image drop upload failed:', err)
-          void import('sonner').then(({ toast }) =>
-            toast.error("Couldn't upload image. Try again.")
-          )
+          void import('sonner').then(({ toast }) => toast.error(imageUploadFailed(intl)))
         })
     })
 
@@ -1664,6 +1826,7 @@ function handleImageDrop(
  * Handle image paste events in the editor.
  */
 function handleImagePaste(
+  intl: IntlShape,
   onImageUpload: (file: File) => Promise<string>
 ): (view: import('@tiptap/pm/view').EditorView, event: ClipboardEvent, slice: unknown) => boolean {
   return (view, event) => {
@@ -1693,9 +1856,7 @@ function handleImagePaste(
         })
         .catch((err) => {
           console.error('[RichTextEditor] Image paste upload failed:', err)
-          void import('sonner').then(({ toast }) =>
-            toast.error("Couldn't upload image. Try again.")
-          )
+          void import('sonner').then(({ toast }) => toast.error(imageUploadFailed(intl)))
         })
     })
 
@@ -1766,6 +1927,7 @@ interface BubbleMenuContentProps {
 }
 
 function BubbleMenuContent({ editor, disabled }: BubbleMenuContentProps) {
+  const intl = useIntl()
   return (
     <div className="flex items-center gap-0.5 rounded-lg border bg-popover p-1 shadow-md">
       <ToolbarButton
@@ -1773,28 +1935,44 @@ function BubbleMenuContent({ editor, disabled }: BubbleMenuContentProps) {
         onClick={() => editor.chain().focus().toggleBold().run()}
         disabled={disabled}
         isActive={editor.isActive('bold')}
-        title="Bold (Cmd+B)"
+        title={shortcutTitle(
+          intl,
+          { id: 'ui.editor.action.bold', defaultMessage: 'Bold' },
+          'Cmd+B'
+        )}
       />
       <ToolbarButton
         icon={<Italic className="size-4" />}
         onClick={() => editor.chain().focus().toggleItalic().run()}
         disabled={disabled}
         isActive={editor.isActive('italic')}
-        title="Italic (Cmd+I)"
+        title={shortcutTitle(
+          intl,
+          { id: 'ui.editor.action.italic', defaultMessage: 'Italic' },
+          'Cmd+I'
+        )}
       />
       <ToolbarButton
         icon={<UnderlineIcon className="size-4" />}
         onClick={() => editor.chain().focus().toggleUnderline().run()}
         disabled={disabled}
         isActive={editor.isActive('underline')}
-        title="Underline (Cmd+U)"
+        title={shortcutTitle(
+          intl,
+          { id: 'ui.editor.action.underline', defaultMessage: 'Underline' },
+          'Cmd+U'
+        )}
       />
       <ToolbarButton
         icon={<Strikethrough className="size-4" />}
         onClick={() => editor.chain().focus().toggleStrike().run()}
         disabled={disabled}
         isActive={editor.isActive('strike')}
-        title="Strikethrough (Cmd+Shift+S)"
+        title={shortcutTitle(
+          intl,
+          { id: 'ui.editor.action.strikethrough', defaultMessage: 'Strikethrough' },
+          'Cmd+Shift+S'
+        )}
       />
       <ToolbarDivider />
       <ToolbarButton
@@ -1802,7 +1980,11 @@ function BubbleMenuContent({ editor, disabled }: BubbleMenuContentProps) {
         onClick={() => editor.chain().focus().toggleCode().run()}
         disabled={disabled}
         isActive={editor.isActive('code')}
-        title="Inline Code (Cmd+E)"
+        title={shortcutTitle(
+          intl,
+          { id: 'ui.editor.action.inlineCode', defaultMessage: 'Inline Code' },
+          'Cmd+E'
+        )}
       />
       <LinkButton editor={editor} disabled={disabled} />
       <ToolbarDivider />
@@ -1812,6 +1994,7 @@ function BubbleMenuContent({ editor, disabled }: BubbleMenuContentProps) {
 }
 
 function LinkButton({ editor, disabled }: { editor: Editor; disabled: boolean }) {
+  const intl = useIntl()
   const [isOpen, setIsOpen] = useState(false)
   const [url, setUrl] = useState('')
 
@@ -1841,7 +2024,10 @@ function LinkButton({ editor, disabled }: { editor: Editor; disabled: boolean })
             setUrl(currentUrl || '')
             setIsOpen(true)
           }}
-          title="Insert Link"
+          title={intl.formatMessage({
+            id: 'ui.editor.action.insertLink',
+            defaultMessage: 'Insert Link',
+          })}
         >
           <LinkIcon className="size-4" />
         </Button>
@@ -1849,6 +2035,10 @@ function LinkButton({ editor, disabled }: { editor: Editor; disabled: boolean })
       <PopoverContent className="w-72 p-2" align="start" side="top" sideOffset={8}>
         <div className="flex gap-2">
           <Input
+            /* i18n-allow: a specimen showing the shape of the input rather than
+               language. Every reader recognises this one, `example.com` is
+               reserved for exactly this use (RFC 2606), and a translated
+               example would send someone to a domain we do not hold. */
             placeholder="https://example.com"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -1862,7 +2052,11 @@ function LinkButton({ editor, disabled }: { editor: Editor; disabled: boolean })
             autoFocus
           />
           <Button size="sm" className="h-8" onClick={applyLink}>
-            {isActive ? 'Update' : 'Add'}
+            {isActive ? (
+              <FormattedMessage id="ui.editor.link.update" defaultMessage="Update" />
+            ) : (
+              <FormattedMessage id="ui.editor.link.add" defaultMessage="Add" />
+            )}
           </Button>
         </div>
         {isActive && (
@@ -1876,7 +2070,7 @@ function LinkButton({ editor, disabled }: { editor: Editor; disabled: boolean })
               setIsOpen(false)
             }}
           >
-            Remove link
+            <FormattedMessage id="ui.editor.link.remove" defaultMessage="Remove link" />
           </Button>
         )}
       </PopoverContent>
@@ -1884,22 +2078,47 @@ function LinkButton({ editor, disabled }: { editor: Editor; disabled: boolean })
   )
 }
 
-function HeadingDropdown({ editor, disabled }: { editor: Editor; disabled: boolean }) {
-  // Determine current block type
-  const getCurrentBlockType = () => {
-    if (editor.isActive('heading', { level: 1 })) return 'H1'
-    if (editor.isActive('heading', { level: 2 })) return 'H2'
-    if (editor.isActive('heading', { level: 3 })) return 'H3'
-    return 'Text'
-  }
+const HEADING_LEVELS = [1, 2, 3] as const
 
-  const currentType = getCurrentBlockType()
+/** The short form the narrow trigger shows for each heading level. */
+const HEADING_SHORT_FORMS: Record<(typeof HEADING_LEVELS)[number], MessageDescriptor> = {
+  1: { id: 'ui.editor.block.heading1Short', defaultMessage: 'H1' },
+  2: { id: 'ui.editor.block.heading2Short', defaultMessage: 'H2' },
+  3: { id: 'ui.editor.block.heading3Short', defaultMessage: 'H3' },
+}
+
+function HeadingDropdown({ editor, disabled }: { editor: Editor; disabled: boolean }) {
+  const intl = useIntl()
+
+  // The trigger is a narrow button, so it carries the typographic short form
+  // rather than the full name the menu below it uses. Both come from the
+  // catalogue: a language that writes headings differently can say so.
+  const activeLevel = HEADING_LEVELS.find((level) => editor.isActive('heading', { level }))
+  const currentType = activeLevel
+    ? intl.formatMessage(HEADING_SHORT_FORMS[activeLevel])
+    : intl.formatMessage({ id: 'ui.editor.block.paragraph', defaultMessage: 'Text' })
 
   const blockTypes = [
-    { label: 'Text', value: 'paragraph', icon: <Type className="size-4" /> },
-    { label: 'Heading 1', value: 'h1', icon: <Heading1 className="size-4" /> },
-    { label: 'Heading 2', value: 'h2', icon: <Heading2 className="size-4" /> },
-    { label: 'Heading 3', value: 'h3', icon: <Heading3 className="size-4" /> },
+    {
+      label: intl.formatMessage({ id: 'ui.editor.block.paragraph', defaultMessage: 'Text' }),
+      value: 'paragraph',
+      icon: <Type className="size-4" />,
+    },
+    {
+      label: intl.formatMessage({ id: 'ui.editor.action.heading1', defaultMessage: 'Heading 1' }),
+      value: 'h1',
+      icon: <Heading1 className="size-4" />,
+    },
+    {
+      label: intl.formatMessage({ id: 'ui.editor.action.heading2', defaultMessage: 'Heading 2' }),
+      value: 'h2',
+      icon: <Heading2 className="size-4" />,
+    },
+    {
+      label: intl.formatMessage({ id: 'ui.editor.action.heading3', defaultMessage: 'Heading 3' }),
+      value: 'h3',
+      icon: <Heading3 className="size-4" />,
+    },
   ]
 
   const handleSelect = (value: string) => {
@@ -1961,6 +2180,7 @@ interface TableToolbarProps {
 }
 
 function TableToolbar({ editor, disabled }: TableToolbarProps) {
+  const intl = useIntl()
   return (
     <div className="flex items-center gap-0.5 rounded-lg border bg-popover p-1 shadow-md">
       {/* Add row above */}
@@ -1968,14 +2188,20 @@ function TableToolbar({ editor, disabled }: TableToolbarProps) {
         icon={<ArrowUp className="size-4" />}
         onClick={() => editor.chain().focus().addRowBefore().run()}
         disabled={disabled}
-        title="Add row above"
+        title={intl.formatMessage({
+          id: 'ui.editor.table.addRowAbove',
+          defaultMessage: 'Add row above',
+        })}
       />
       {/* Add row below */}
       <ToolbarButton
         icon={<ArrowDown className="size-4" />}
         onClick={() => editor.chain().focus().addRowAfter().run()}
         disabled={disabled}
-        title="Add row below"
+        title={intl.formatMessage({
+          id: 'ui.editor.table.addRowBelow',
+          defaultMessage: 'Add row below',
+        })}
       />
       <ToolbarDivider />
       {/* Add column left */}
@@ -1983,14 +2209,20 @@ function TableToolbar({ editor, disabled }: TableToolbarProps) {
         icon={<ArrowLeft className="size-4" />}
         onClick={() => editor.chain().focus().addColumnBefore().run()}
         disabled={disabled}
-        title="Add column left"
+        title={intl.formatMessage({
+          id: 'ui.editor.table.addColumnLeft',
+          defaultMessage: 'Add column left',
+        })}
       />
       {/* Add column right */}
       <ToolbarButton
         icon={<ArrowRight className="size-4" />}
         onClick={() => editor.chain().focus().addColumnAfter().run()}
         disabled={disabled}
-        title="Add column right"
+        title={intl.formatMessage({
+          id: 'ui.editor.table.addColumnRight',
+          defaultMessage: 'Add column right',
+        })}
       />
       <ToolbarDivider />
       {/* Delete row */}
@@ -2012,19 +2244,19 @@ function TableToolbar({ editor, disabled }: TableToolbarProps) {
             onClick={() => editor.chain().focus().deleteRow().run()}
             className="gap-2"
           >
-            Delete row
+            <FormattedMessage id="ui.editor.table.deleteRow" defaultMessage="Delete row" />
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => editor.chain().focus().deleteColumn().run()}
             className="gap-2"
           >
-            Delete column
+            <FormattedMessage id="ui.editor.table.deleteColumn" defaultMessage="Delete column" />
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => editor.chain().focus().deleteTable().run()}
             className="gap-2 text-destructive focus:text-destructive"
           >
-            Delete table
+            <FormattedMessage id="ui.editor.table.deleteTable" defaultMessage="Delete table" />
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -2107,6 +2339,7 @@ interface ImageToolbarProps {
 }
 
 function ImageToolbar({ editor, disabled }: ImageToolbarProps) {
+  const intl = useIntl()
   const attrs = editor.getAttributes('resizableImage')
   const src = attrs.src as string | undefined
 
@@ -2119,43 +2352,76 @@ function ImageToolbar({ editor, disabled }: ImageToolbarProps) {
     <div
       className="flex items-center gap-0.5 rounded-lg border bg-popover p-1 shadow-md"
       role="toolbar"
-      aria-label="Image options"
+      aria-label={intl.formatMessage({
+        id: 'ui.editor.image.menuLabel',
+        defaultMessage: 'Image options',
+      })}
     >
       <ToolbarButton
         icon={<Expand className="size-4" />}
         onClick={viewImage}
         disabled={disabled}
-        title="View image"
-        aria-label="View image in new tab"
+        title={intl.formatMessage({
+          id: 'ui.editor.image.view',
+          defaultMessage: 'View image',
+        })}
+        aria-label={intl.formatMessage({
+          id: 'ui.editor.image.viewAria',
+          defaultMessage: 'View image in new tab',
+        })}
       />
       <ToolbarButton
         icon={<Download className="size-4" />}
         onClick={downloadImage}
         disabled={disabled}
-        title="Download"
-        aria-label="Download image"
+        title={intl.formatMessage({
+          id: 'ui.editor.image.download',
+          defaultMessage: 'Download',
+        })}
+        aria-label={intl.formatMessage({
+          id: 'ui.editor.image.downloadAria',
+          defaultMessage: 'Download image',
+        })}
       />
       <ToolbarButton
         icon={<Copy className="size-4" />}
         onClick={copyImage}
         disabled={disabled}
-        title="Copy to clipboard"
-        aria-label="Copy image to clipboard"
+        title={intl.formatMessage({
+          id: 'ui.editor.image.copy',
+          defaultMessage: 'Copy to clipboard',
+        })}
+        aria-label={intl.formatMessage({
+          id: 'ui.editor.image.copyAria',
+          defaultMessage: 'Copy image to clipboard',
+        })}
       />
       <ToolbarButton
         icon={<Link2 className="size-4" />}
         onClick={copyLink}
         disabled={disabled}
-        title="Copy link"
-        aria-label="Copy image link"
+        title={intl.formatMessage({
+          id: 'ui.editor.image.copyLink',
+          defaultMessage: 'Copy link',
+        })}
+        aria-label={intl.formatMessage({
+          id: 'ui.editor.image.copyLinkAria',
+          defaultMessage: 'Copy image link',
+        })}
       />
       <ToolbarDivider />
       <ToolbarButton
         icon={<Trash2 className="size-4" />}
         onClick={deleteImage}
         disabled={disabled}
-        title="Delete"
-        aria-label="Delete image"
+        title={intl.formatMessage({
+          id: 'ui.editor.image.delete',
+          defaultMessage: 'Delete',
+        })}
+        aria-label={intl.formatMessage({
+          id: 'ui.editor.image.deleteAria',
+          defaultMessage: 'Delete image',
+        })}
       />
     </div>
   )
@@ -2188,12 +2454,16 @@ function MenuBar({
   variant = 'top',
   borderless = false,
 }: MenuBarProps) {
+  const intl = useIntl()
   const isBottom = variant === 'bottom'
   // Muted ghost buttons on the transparent bottom row; filled active-state on top.
   const btn = isBottom ? ('quiet' as const) : ('default' as const)
   const setLink = useCallback(() => {
     const previousUrl = editor.getAttributes('link').href
-    let url = window.prompt('URL', previousUrl)
+    let url = window.prompt(
+      intl.formatMessage({ id: 'ui.editor.link.promptLabel', defaultMessage: 'URL' }),
+      previousUrl
+    )
 
     if (url === null) return
 
@@ -2226,7 +2496,7 @@ function MenuBar({
       } catch (error) {
         console.error('Failed to upload image:', error)
         const { toast } = await import('sonner')
-        toast.error("Couldn't upload image. Try again.")
+        toast.error(imageUploadFailed(intl))
       }
     }
     input.click()
@@ -2256,7 +2526,10 @@ function MenuBar({
             onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
             disabled={disabled}
             isActive={editor.isActive('heading', { level: 1 })}
-            title="Heading 1"
+            title={intl.formatMessage({
+              id: 'ui.editor.action.heading1',
+              defaultMessage: 'Heading 1',
+            })}
           />
           <ToolbarButton
             variant={btn}
@@ -2264,7 +2537,10 @@ function MenuBar({
             onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
             disabled={disabled}
             isActive={editor.isActive('heading', { level: 2 })}
-            title="Heading 2"
+            title={intl.formatMessage({
+              id: 'ui.editor.action.heading2',
+              defaultMessage: 'Heading 2',
+            })}
           />
           <ToolbarButton
             variant={btn}
@@ -2272,7 +2548,10 @@ function MenuBar({
             onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
             disabled={disabled}
             isActive={editor.isActive('heading', { level: 3 })}
-            title="Heading 3"
+            title={intl.formatMessage({
+              id: 'ui.editor.action.heading3',
+              defaultMessage: 'Heading 3',
+            })}
           />
           <ToolbarDivider />
         </>
@@ -2285,7 +2564,10 @@ function MenuBar({
         onClick={() => editor.chain().focus().toggleBold().run()}
         disabled={disabled || !editor.can().chain().focus().toggleBold().run()}
         isActive={editor.isActive('bold')}
-        title="Bold"
+        title={intl.formatMessage({
+          id: 'ui.editor.action.bold',
+          defaultMessage: 'Bold',
+        })}
       />
       <ToolbarButton
         variant={btn}
@@ -2293,7 +2575,10 @@ function MenuBar({
         onClick={() => editor.chain().focus().toggleItalic().run()}
         disabled={disabled || !editor.can().chain().focus().toggleItalic().run()}
         isActive={editor.isActive('italic')}
-        title="Italic"
+        title={intl.formatMessage({
+          id: 'ui.editor.action.italic',
+          defaultMessage: 'Italic',
+        })}
       />
       <ToolbarDivider />
 
@@ -2304,7 +2589,10 @@ function MenuBar({
         onClick={() => editor.chain().focus().toggleBulletList().run()}
         disabled={disabled}
         isActive={editor.isActive('bulletList')}
-        title="Bullet List"
+        title={intl.formatMessage({
+          id: 'ui.editor.action.bulletList',
+          defaultMessage: 'Bullet List',
+        })}
       />
       <ToolbarButton
         variant={btn}
@@ -2312,7 +2600,10 @@ function MenuBar({
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
         disabled={disabled}
         isActive={editor.isActive('orderedList')}
-        title="Ordered List"
+        title={intl.formatMessage({
+          id: 'ui.editor.action.orderedList',
+          defaultMessage: 'Ordered List',
+        })}
       />
       <ToolbarDivider />
 
@@ -2323,7 +2614,10 @@ function MenuBar({
         onClick={setLink}
         disabled={disabled}
         isActive={editor.isActive('link')}
-        title="Insert Link"
+        title={intl.formatMessage({
+          id: 'ui.editor.action.insertLink',
+          defaultMessage: 'Insert Link',
+        })}
       />
 
       {/* Code block button */}
@@ -2334,7 +2628,10 @@ function MenuBar({
           onClick={() => editor.chain().focus().toggleCodeBlock().run()}
           disabled={disabled}
           isActive={editor.isActive('codeBlock')}
-          title="Code Block"
+          title={intl.formatMessage({
+            id: 'ui.editor.action.codeBlock',
+            defaultMessage: 'Code Block',
+          })}
         />
       )}
 
@@ -2345,7 +2642,10 @@ function MenuBar({
           icon={<ImagePlus className="size-4" />}
           onClick={insertImage}
           disabled={disabled}
-          title="Insert Image"
+          title={intl.formatMessage({
+            id: 'ui.editor.action.insertImage',
+            defaultMessage: 'Insert Image',
+          })}
         />
       )}
 
@@ -2359,14 +2659,20 @@ function MenuBar({
         icon={<ArrowUturnLeftIcon className="size-4" />}
         onClick={() => editor.chain().focus().undo().run()}
         disabled={disabled || !canUndo}
-        title="Undo"
+        title={intl.formatMessage({
+          id: 'ui.editor.action.undo',
+          defaultMessage: 'Undo',
+        })}
       />
       <ToolbarButton
         variant={btn}
         icon={<ArrowUturnRightIcon className="size-4" />}
         onClick={() => editor.chain().focus().redo().run()}
         disabled={disabled || !canRedo}
-        title="Redo"
+        title={intl.formatMessage({
+          id: 'ui.editor.action.redo',
+          defaultMessage: 'Redo',
+        })}
       />
     </div>
   )

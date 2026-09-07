@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { FormattedMessage, useIntl } from 'react-intl'
 
 interface DateTimePickerProps {
   value?: Date
@@ -55,8 +56,14 @@ export function DateTimePicker({
   className,
 }: DateTimePickerProps) {
   const [open, setOpen] = React.useState(false)
+  const intl = useIntl()
 
-  const defaultPlaceholder = dateOnly ? 'Pick a date' : 'Pick date & time'
+  const defaultPlaceholder = dateOnly
+    ? intl.formatMessage({ id: 'ui.datePicker.placeholder.date', defaultMessage: 'Pick a date' })
+    : intl.formatMessage({
+        id: 'ui.datePicker.placeholder.dateTime',
+        defaultMessage: 'Pick date & time',
+      })
   const resolvedPlaceholder = placeholder ?? defaultPlaceholder
   const displayFormat = dateOnly ? 'MMM d, yyyy' : 'MMM d, yyyy · HH:mm'
 
@@ -147,7 +154,10 @@ export function DateTimePicker({
               onClear()
             }}
             className="inline-flex shrink-0 items-center justify-center border-l border-border/50 px-1.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-            aria-label="Clear date"
+            aria-label={intl.formatMessage({
+              id: 'ui.datePicker.clear',
+              defaultMessage: 'Clear date',
+            })}
           >
             <XMarkIcon className="h-3 w-3" />
           </button>
@@ -179,7 +189,9 @@ export function DateTimePicker({
           <div className="border-t border-border/50 px-3 py-2">
             <div className="flex items-center gap-2">
               <ClockIcon className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">Time</span>
+              <span className="text-sm text-muted-foreground">
+                <FormattedMessage id="ui.datePicker.time" defaultMessage="Time" />
+              </span>
               <Input
                 type="time"
                 step="60"

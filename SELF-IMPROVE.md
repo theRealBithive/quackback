@@ -5,6 +5,71 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
+## 1x — TipTap's `setOptions` does not reconfigure a plugin it already built
+
+`useEditor` calls `editor.setOptions({ extensions })` whenever the array's
+reference changes, and the repo's own comment above the `useMemo` says so. What
+it does not say is that the plugins built from those extensions stay as they
+were: `setOptions` replaces the options object and calls
+`view.updateState(this.state)`, and never rebuilds the extension manager.
+
+So an extension's _text_ is fixed at editor-creation time. Measured while
+translating the editor: on a language change the toolbar moved to French and
+the placeholder stayed German, because the placeholder lives inside a
+ProseMirror plugin. The slash-command titles are in the same place, and worse,
+because they are what the menu is _searched_ by -- a reader who switched to
+German would type `/tabelle` against an English list and find nothing.
+
+Adding the language to the `useMemo` dependency array does not fix it and reads
+exactly like it should. The fix is to remount, with a `key` on the memoised
+component, which costs the caret and nothing else. Anything else that has to
+follow a language change into an extension will hit this.
+
+A render test with a _single_ language cannot see any of it, and neither can two
+separate renders -- each builds its extensions once and agrees. Only an
+in-place switch inside one mounted tree reaches it.
+
+## 1x — A position-based i18n rule cannot see a literal bound to a name
+
+The gate reads a string in a display position: between tags, in one of the few
+readable attributes, in a display field of an object, as the default of a
+display prop, and either branch of a conditional in any of those. That covers
+80 of the 91 strings in this batch's six files.
+
+The remaining eleven all have one shape -- a literal assigned to a name, one hop
+from where it is shown: `?? 'Team'` into a variable that later becomes a title,
+`return 'Text'` from a helper the trigger renders, a `Record<string, string>` of
+group headings whose keys are domain words rather than readable names. No
+position rule reaches them, because at the literal there is no display position
+to read.
+
+What found them was sweeping every sentence-like literal in the claimed files
+against the gate's own report and reading the leftovers by hand: 57 leftovers in
+the editor, of which 53 were class names, key names and log prefixes and four
+were real. That sweep is a throwaway script in a scratchpad and should be part
+of the gate -- as a report rather than a failure, since it over-lists by design.
+Until it is, every batch has to redo it, and the plan's third rule class (the
+catalogue-module rule, for `errors.ts` and friends) is still unbuilt.
+
+## 1x — An `i18n-allow` note is anchored on the line it opens on
+
+Found in this gate's own use, one line after writing the first real one: a
+reason worth writing does not fit on a line, and a multi-line note above a
+string excused a line still inside the note. So a short note with no reason
+worked and a proper one read as a broken excuse -- the wrong way round.
+
+Fixed here by anchoring on the line the note _finishes_ on. Worth remembering as
+a shape rather than as a bug: a rule about "the line above" needs to say which
+line of a multi-line thing it means, and the reasonable-looking choice is the
+wrong one.
+
+## 1x — A JSX comment is not valid between attributes
+
+`{/* ... */}` in an attribute list is a JSX spread with an empty expression and
+does not compile. A plain `/* ... */` between attributes does. Costs one
+typecheck round trip every time, and it comes up whenever an attribute needs a
+note -- which for this work is every `i18n-allow`.
+
 ## 6x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and

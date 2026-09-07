@@ -9,6 +9,7 @@ import {
 } from '@/lib/shared/embeds/parse-embed-url'
 import { QuackbackEmbedCard } from '@/components/shared/quackback-embed-card'
 import { cn } from '@/lib/shared/utils'
+import { useIntl } from 'react-intl'
 
 export interface QuackbackEmbedOptions {
   /** When true, pasting a post/changelog URL converts it into an embed node.
@@ -24,6 +25,7 @@ export interface QuackbackEmbedOptions {
  * non-editable; an empty node simply renders nothing inside it.
  */
 function QuackbackEmbedNodeView({ node, selected, deleteNode }: ReactNodeViewProps) {
+  const intl = useIntl()
   const kind = node.attrs.kind as 'post' | 'changelog' | 'article' | 'ticket' | null
   const id = node.attrs.id as string | null
   return (
@@ -40,7 +42,10 @@ function QuackbackEmbedNodeView({ node, selected, deleteNode }: ReactNodeViewPro
           editor selection before the click fires. */}
       <button
         type="button"
-        aria-label="Remove embed"
+        aria-label={intl.formatMessage({
+          id: 'ui.embed.remove',
+          defaultMessage: 'Remove embed',
+        })}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => deleteNode()}
         className={cn(
