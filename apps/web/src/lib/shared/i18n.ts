@@ -190,6 +190,8 @@ const ONBOARDING_MESSAGE_PREFIXES = [
   'portal.auth.',
   'activation.goal.',
   'activation.task.',
+  // The account step signs people in, so it can land on any sign-in outcome.
+  'auth.blocked.',
 ] as const
 
 /** The prefix allowlist as a plain string[], for tests and iteration. */
@@ -234,7 +236,20 @@ export async function loadOnboardingMessages(
  * referenced by the portal source and fails CI if any fall outside this list,
  * so a future key can't silently render its English fallback in production.
  */
-const PORTAL_MESSAGE_PREFIXES = ['portal.', 'widget.', 'helpAskAi.', 'ui.', 'common.'] as const
+const PORTAL_MESSAGE_PREFIXES = [
+  'portal.',
+  'widget.',
+  'helpAskAi.',
+  'ui.',
+  'common.',
+  // The sign-in outcomes and the notification settings form: both render on
+  // the portal as well as in the admin, so their namespaces belong in this
+  // slice too. `notification.` is the catalogue's own names, and
+  // `notificationSettings.` the form around them.
+  'auth.blocked.',
+  'notification.',
+  'notificationSettings.',
+] as const
 
 /** The prefix allowlist as a plain string[], for tests and iteration. */
 export const PORTAL_MESSAGE_PREFIX_LIST: readonly string[] = PORTAL_MESSAGE_PREFIXES

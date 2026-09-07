@@ -135,6 +135,18 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'apps/web/src/components/settings/language-card.tsx',
         suites: ['apps/web/src/components/settings/__tests__/language-card.test.tsx'],
       },
+      {
+        file: 'apps/web/src/lib/shared/auth-block-messages.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/auth-block-messages.test.ts'],
+      },
+      {
+        file: 'apps/web/src/components/auth/auth-block-message.ts',
+        suites: ['apps/web/src/components/auth/__tests__/auth-block-message.test.tsx'],
+      },
+      {
+        file: 'apps/web/src/lib/shared/notifications/message-ids.ts',
+        suites: ['apps/web/src/lib/shared/notifications/__tests__/catalog-ids.test.ts'],
+      },
     ])
   })
 
@@ -328,6 +340,13 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: "style={{ animationDelay: '225ms' }}",
         replacement: '""',
         why: expect.stringContaining('fades in with its siblings'),
+      },
+      {
+        file: 'apps/web/src/components/auth/auth-block-message.ts',
+        mutator: 'StringLiteral',
+        line: "'Sign-in failed. Try again or contact your administrator if the problem persists.',",
+        replacement: '""',
+        why: expect.stringContaining('the catalogue always wins'),
       },
     ])
   })

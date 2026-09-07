@@ -1,4 +1,4 @@
 {
-  "claimedPrefixes": ["onboarding."],
+  "claimedPrefixes": ["auth.blocked.", "notification.", "onboarding."],
   "exemptions": []
 }

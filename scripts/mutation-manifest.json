@@ -107,6 +107,18 @@
     {
       "file": "apps/web/src/components/settings/language-card.tsx",
       "suites": ["apps/web/src/components/settings/__tests__/language-card.test.tsx"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/auth-block-messages.ts",
+      "suites": ["apps/web/src/lib/shared/__tests__/auth-block-messages.test.ts"]
+    },
+    {
+      "file": "apps/web/src/components/auth/auth-block-message.ts",
+      "suites": ["apps/web/src/components/auth/__tests__/auth-block-message.test.tsx"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/notifications/message-ids.ts",
+      "suites": ["apps/web/src/lib/shared/notifications/__tests__/catalog-ids.test.ts"]
     }
   ],
   "equivalents": [
@@ -284,6 +296,13 @@
       "line": "style={{ animationDelay: '225ms' }}",
       "replacement": "\"\"",
       "why": "The same delay, as its value rather than its object. An empty delay is a card that fades in with its siblings instead of after them -- nothing a test can distinguish, for the same reason."
+    },
+    {
+      "file": "apps/web/src/components/auth/auth-block-message.ts",
+      "mutator": "StringLiteral",
+      "line": "'Sign-in failed. Try again or contact your administrator if the problem persists.',",
+      "replacement": "\"\"",
+      "why": "`defaultMessage` is the English written beside a message id, and react-intl reads it only when the active catalogue has no entry for that id. Every id in a shipped source file is in all nine catalogues -- that is what `bun scripts/i18n-check.ts` fails the build over -- so the catalogue always wins and this string never reaches a screen. A test could only assert it by rendering against a catalogue that lacks the id, which is the state the i18n gate exists to make impossible. It stays in the source as the fallback V6 promises if that gate ever stops holding, and because `bun run intl:extract` reads it."
     }
   ]
 }

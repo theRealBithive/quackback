@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { useIntl } from 'react-intl'
 import { authClient } from '@/lib/client/auth-client'
+import { authBlockMessage } from '@/components/auth/auth-block-message'
 
 interface UseEmailSigninOptions {
   /** Where the magic link should land after a successful click. */
@@ -39,6 +41,7 @@ export function useEmailSignin({
   callbackUrl,
   onSuccess,
 }: UseEmailSigninOptions): UseEmailSigninResult {
+  const intl = useIntl()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [code, setCode] = useState('')
@@ -67,13 +70,17 @@ export function useEmailSignin({
         body: JSON.stringify({ email, callbackURL: callbackOverrideRef.current ?? callbackUrl }),
       })
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string }
-        throw new Error(body.error || 'Failed to send sign-in email')
+        // The response carries a code; its `error` sentence is the English the
+        // server happened to write and is deliberately not displayed (S3). A
+        // response with no code gets the generic sentence rather than that
+        // English, which is what S4 asks for.
+        const body = (await res.json().catch(() => ({}))) as { code?: string }
+        throw new Error(authBlockMessage(intl, body.code))
       }
       setResendCooldown(60)
       return { ok: true }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to send sign-in email'
+      const message = err instanceof Error ? err.message : authBlockMessage(intl, null)
       setError(message)
       return { ok: false, error: message }
     } finally {
@@ -89,11 +96,26 @@ export function useEmailSignin({
     try {
       const result = await authClient.signIn.emailOtp({ email, otp })
       if (result.error) {
-        throw new Error(result.error.message || 'Invalid or expired code')
+        // Better-Auth sends its own English sentence beside the failure. It is
+        // deliberately not displayed (S3): a rejected code is one outcome to a
+        // reader, whatever the library called the reason.
+        throw new Error(
+          intl.formatMessage({
+            id: 'portal.auth.otp.invalid',
+            defaultMessage: 'Invalid or expired code',
+          })
+        )
       }
       await onSuccess()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid or expired code')
+      setError(
+        err instanceof Error
+          ? err.message
+          : intl.formatMessage({
+              id: 'portal.auth.otp.invalid',
+              defaultMessage: 'Invalid or expired code',
+            })
+      )
     } finally {
       // Success has to clear this too. A host that stays mounted after sign-in
       // (the onboarding account step) would otherwise spin forever, and the

@@ -19,6 +19,7 @@
  * it is handed, and offers no way to resolve one for itself.
  */
 import { describe, it, expect } from 'vitest'
+import enMessages from '@/locales/en.json'
 import * as locale from '../locale'
 
 describe('the portal renders in the locale it is given (V5)', () => {
@@ -37,10 +38,19 @@ describe('the portal renders in the locale it is given (V5)', () => {
   })
 
   it('returns the portal slice rather than the whole catalogue', async () => {
+    // Named the other way round on purpose. This used to repeat the prefix
+    // allowlist as a regex, which made it a copy of the implementation: adding
+    // a prefix broke it whether or not the slice was still a slice. What the
+    // slice exists for is keeping the admin's strings out of the portal's SSR
+    // payload, so that is what is asserted -- by namespace the portal must
+    // never carry, and by the slice being smaller than the catalogue it came
+    // from.
     const { messages } = await locale.loadPortalIntl('en')
     const keys = Object.keys(messages)
+
     expect(keys.length).toBeGreaterThan(0)
-    expect(keys.every((k) => /^(portal|widget|helpAskAi|ui|common)\./.test(k))).toBe(true)
+    expect(keys.length).toBeLessThan(Object.keys(enMessages).length)
+    expect(keys.filter((k) => /^(admin|settings|automation|activation)\./.test(k))).toEqual([])
   })
 
   it('offers no way to resolve a locale of its own (V5)', () => {

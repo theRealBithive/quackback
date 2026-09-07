@@ -34,7 +34,7 @@ describe('the namespaces the i18n gate is declared to have translated (I12)', ()
     // The admin's `activation.` namespace is the next one in line and is
     // deliberately absent: its launch checklist still holds English in a
     // module, so claiming it would assert something untrue.
-    expect(manifest().claimedPrefixes).toEqual(['onboarding.'])
+    expect(manifest().claimedPrefixes).toEqual(['auth.blocked.', 'notification.', 'onboarding.'])
   })
 
   it('carries no exemption, so nothing is excused unread', () => {

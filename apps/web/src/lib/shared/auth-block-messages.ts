@@ -56,6 +56,33 @@ export type AuthBlockCode =
   | 'oauth_provider_not_found'
   | 'handoff_failed'
 
+/**
+ * The catalogue id carrying the sentence for a sign-in outcome.
+ *
+ * The code is what crosses the wire; the sentence is chosen where it is shown,
+ * in the language of the person reading it. `AUTH_BLOCK_MESSAGES` stays as the
+ * English original each surface passes along as `defaultMessage`.
+ *
+ * Most codes are already spellable as a message id. Better-Auth spells one of
+ * them with an apostrophe (`email_doesn't_match`), and a message id cannot
+ * carry one: the i18n gate matches ids as `[A-Za-z0-9_.:-]`, so such an id
+ * would match no pattern and be reported as a key nothing reaches. Replacing
+ * what an id cannot hold keeps codes and ids one-to-one, which
+ * `__tests__/auth-block-messages.test.ts` asserts over the closed set.
+ */
+export function authBlockCodeSlug(code: AuthBlockCode): string {
+  return code.replace(/[^A-Za-z0-9_.:-]/g, '_')
+}
+
+/** The whole id, for the suite that walks the closed set. The display path in
+ *  `components/auth/auth-block-message.ts` spells the namespace inline instead:
+ *  the i18n gate reads the source, and an id assembled inside a function is
+ *  invisible to it, so every key here would be reported as one nothing
+ *  reaches. */
+export function authBlockMessageId(code: AuthBlockCode): string {
+  return `auth.blocked.${authBlockCodeSlug(code)}`
+}
+
 export const AUTH_BLOCK_MESSAGES: Record<AuthBlockCode, string> = {
   password_method_not_allowed:
     "Password sign-in isn't enabled for this workspace. Try magic-link or SSO instead.",
