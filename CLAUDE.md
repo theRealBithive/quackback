@@ -225,6 +225,121 @@ answers, and that its applied-migration count is not behind
 migrations connects fine and turns every per-file schema probe into a skip,
 which is the failure it exists for.
 
+## Languages
+
+The product ships nine: `en, de, fr, es, ar, ru, pt-br, zh-cn, zh-tw`.
+react-intl, with a catalogue per language in `apps/web/src/locales/`, sliced
+per surface (`loadPortalMessages`, `loadWidgetMessages`,
+`loadOnboardingMessages`) so a page does not ship the ids it cannot show.
+
+**The language is resolved in one place.** `bootstrap.ts` calls
+`resolveLocale(acceptLanguage, session?.user.preferredLanguage)`, which puts an
+explicit preference first, then the browser's header, then English — and drops
+a preference we do not ship, so a teammate whose language is `ja` reads
+customer messages in Japanese and operates an English interface. Everything
+downstream, `<html lang>` included, reads `resolvedLocale` off the bootstrap
+payload. Do not resolve it a second time: two places implementing the same
+order is how they later disagree, and `lang="de"` over French text is the
+failure that costs.
+
+**Nine files grow together or not at all.** `locale-parity.test.ts` compares the
+nine catalogues _with each other_ and checks that a translation's placeholders
+match the English original. One new id is nine entries. It also cannot see a key
+missing from all nine — that is perfect parity there, and a broken string to a
+reader — which is what the gate below is for.
+
+### The i18n gate
+
+`bun scripts/i18n-check.ts`, and it runs in CI's `check` job, which is a
+required status check. Same shape as the other gates: the policy is pure and
+lives in `scripts/i18n-policy.ts` (guarantees I1–I20 in its test module), the
+`*-check.ts` beside it is only the process and is excluded from coverage,
+and `scripts/i18n-manifest.json` declares what is claimed. It runs **two
+independent rule classes**, and confusing them wastes a session:
+
+- **Is this id answered for** (I1–I13). Every message id the source names is
+  defined in all nine catalogues; every catalogue key has a use; a namespace we
+  claim in `claimedPrefixes` resolves for the ids the product assembles at
+  runtime.
+- **Was this text written into the source instead of the catalogue**
+  (I14–I20). Only for the files in `checkedFiles`. Adding one there is an
+  assertion: _this file holds no untranslated text._
+
+The second rule reads a word by **where it sits**, not by what it looks like:
+text between tags, the value of one of six attributes a person actually reads,
+an argument to something whose whole job is to show it, a word a `{…}` chooses
+between, a display field in an object literal, and the default of a display
+binding. It descends through a conditional, a logical chain and a `+` — and
+through nothing else binary, because a comparison's operands are not words on
+a page. It stops at a call, because most calls in a display position are
+`formatMessage({ id })` and reading those would report the very thing the gate
+asks for.
+
+**What it cannot see**, so a batch still needs a read-through: a literal bound
+to a name and rendered a few lines down. The rule is positional, and one hop is
+enough to hide a sentence.
+
+**An `i18n-allow` note** excuses a string that genuinely must not be
+translated — a product name, a specimen URL, a code example. It needs the
+reason; without one the gate refuses it rather than honouring it, exactly like
+an `equivalents` record. Two things about it are easy to get wrong: it speaks
+for its own line and for the line below **where it ends**, not where it opens,
+so a reason that wraps still works; and `{/* … */}` is not valid between JSX
+attributes, so inside a tag it has to be a plain `/* … */`.
+
+**What the two classes together do and do not close.** An id spelled out in
+the source is covered unconditionally: measured 2026-09-07, 1,158 ids in the
+source and 1,388 keys in `en.json`, with **none** of those ids undefined — a
+hole of 95 in early September that the batches since have closed. An id the
+product _assembles_ at runtime is a different matter, and is only held for a
+namespace named in `claimedPrefixes`; elsewhere it is printed rather than
+failed (I12), which is what makes claiming one a promise. The 230 catalogue
+keys with no literal use are mostly those assembled ids, which is why I2
+reports them as removable instead of failing.
+
+To re-measure, extract and compare rather than trusting a number written down
+here:
+
+```bash
+cd apps/web && bun run intl:extract --out-file /tmp/extracted.json
+```
+
+The trailing `--out-file` matters — the script's own is `src/locales/en.json`,
+and without an override the extract rewrites the catalogue.
+
+### Testing a translation
+
+**English proves nothing.** Every id carries a `defaultMessage`, which is
+almost always the English catalogue entry too — so a component that never
+consults the catalogue renders an identical page under `en`, and a suite
+asserting English text passes either way. Assert against `de.json` instead, and
+where German keeps the English word (`Feedback`, `Team`, `Support`, and all
+three notification group names), against `fr.json` — with a check in the suite
+saying the two differ, rather than assuming it.
+
+**Almost always, and not always: 30 ids carry a different English text in the
+catalogue than beside the id** (measured 2026-09-07, the same extract as
+above). `loadMessages` reads `en.json` and an entry there beats the
+`defaultMessage`, so the reader sees the catalogue's wording and a test
+asserting the source's own string fails for those 30. Most of the difference is
+typography — straight quotes against typographic ones, three dots against an
+ellipsis, ICU spacing — but at least one is a different sentence. Assert against
+the catalogue, never against the string written beside the id.
+
+A `<FormattedMessage>` with no `IntlProvider` above it **throws**. Use
+`@/test/render-with-intl` (`renderWithIntl`, `renderInGerman`,
+`renderInLocale`, `GermanIntlWrapper`) rather than wrapping by hand. Under a
+non-default locale a missing entry raises `MISSING_TRANSLATION`, which those
+wrappers turn into a thrown error, so a suite cannot pass on a hole.
+
+One editor-specific trap, because it costs a whole debugging session: TipTap's
+`setOptions` replaces the options object and never rebuilds the extension
+manager, so **an extension's text is fixed at editor-creation time**. Adding
+the locale to a `useMemo` dependency array reads like the fix and is not; the
+editor is remounted on a language change instead. A single-language render test
+cannot see this, and neither can two separate renders — only an in-place switch
+inside one mounted tree.
+
 ## Migrations
 
 `bun run db:generate` is broken (a drizzle snapshot collision predating this
