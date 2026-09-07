@@ -5,6 +5,62 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
+## 1x — A Stryker survivor list is stale the moment you write a test against it
+
+The gate prints its survivors and writes `.mutation-tmp/report.json`. Both are
+a photograph of the tree at the time the run started, and the whole point of
+reading them is to write tests -- so by the time the list is being worked
+through, it describes a tree that no longer exists. Two hours went into
+analysing a list where a third of the entries were already dead, including one
+that had been killed by a test written in the same session.
+
+Worse, the report and the truth can disagree for the same tree. A mutant
+reported as `Survived` at one line turned out to be killed by an existing test
+when the line was mutated by hand -- so a survivor list is not evidence that a
+mutant is unkillable, and an `equivalents` record written off the report alone
+can carry a reason that is simply false. That is the one thing the manifest's
+reason requirement exists to prevent, so it has to be checked rather than
+argued.
+
+The check is ten seconds per candidate and it belongs in a loop, because the
+value is in doing all of them:
+
+```python
+for label, expect, old, new in CASES:      # expect: 'killed' | 'equivalent'
+    assert pristine.count(old) == 1
+    src.write_text(pristine.replace(old, new))
+    r = subprocess.run(['bun', 'x', 'vitest', 'run', '<the pinning suite>'],
+                       capture_output=True, text=True)
+    got = 'killed' if ' failed' in r.stdout + r.stderr else 'equivalent'
+    print(('OK ' if got == expect else '!! ') + label)
+src.write_text(pristine)                   # restore, always
+```
+
+Copy the file to the scratchpad first. Predicting each outcome before running
+is what makes it useful: a `!!` line is either a wrong belief about the code or
+a test that does not do what its name says, and both are findings. Fifteen
+predictions were checked this way in one pass and one of them was wrong -- the
+one that would otherwise have become a false `equivalents` entry.
+
+## 1x — A widened AST rule looks right against its fixtures and wrong against the source
+
+The i18n gate's display rule was widened to read `{'Signed in as ' + name}`, by
+descending into a `BinaryExpression` the way it already descended into a
+conditional and a logical chain. 138 unit tests passed, including a new one for
+exactly that shape, and the docstring argued that the operator need not be
+consulted.
+
+Then `bun scripts/i18n-check.ts` reported two findings in the editor:
+`{toolbarPosition === 'top' && …}`. A comparison is a `BinaryExpression` too,
+and its operands are the name of a setting rather than words on a page. The
+unit fixtures had no comparison in a display position; the real file had two.
+
+So the acceptance test for a change to the rule is the gate's own run over the
+claimed files, not the unit suite. It takes seconds, it reads a few thousand
+lines of real source instead of a hand-written component, and it is the only
+thing that says whether a widened rule is now reporting noise -- which is how a
+gate gets switched off.
+
 ## 1x — TipTap's `setOptions` does not reconfigure a plugin it already built
 
 `useEditor` calls `editor.setOptions({ extensions })` whenever the array's
