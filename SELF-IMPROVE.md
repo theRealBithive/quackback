@@ -1318,6 +1318,27 @@ This will fire on most of the remaining language batches, since translating a
 directory means importing `react-intl` and the catalogue into buckets that did
 not reference them before.
 
+## 1x — `vitest run <paths>` ignores a path that matches nothing, and the summary does not say so
+
+Four suite paths were handed to `bun x vitest run`; the summary said
+`Test Files  3 passed (3)`. One path was wrong (`events/__tests__/handler-imports.test.ts`
+for what lives under `jobs/__tests__/`), and vitest treats the arguments as
+filters, so a filter that matches no file is simply dropped. Nothing is printed
+for it. The run is green, one file short, and the only way to notice is to count
+the files you passed against the files it reports — which nobody does when the
+number is already a pass.
+
+This is the same shape as the skipped DB suite this file already records, one
+level up: a suite that never ran reads as a suite that passed. It bites hardest
+right where it is used most — a targeted run of "the suites that reach my
+change" for the coverage or mutation gate — because there the list is typed by
+hand and a dropped file quietly narrows what was measured.
+
+Cheap habit: run with `--reporter=verbose` once and read the file names back,
+or compare the `Test Files` count with the number of paths given. A gate-side
+fix would be for the diff-coverage and mutation checks to print the suites they
+actually ran, since both already know the list.
+
 # Resolved
 
 ## 1x — A Stryker run leaves two things behind that nothing else guards

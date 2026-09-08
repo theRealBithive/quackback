@@ -45,6 +45,14 @@ vi.mock('../registry', () => ({
   getHook: (...args: unknown[]) => mockGetHook(...args),
 }))
 
+// The renewal itself is held in integrations/__tests__/token-refresh.test.ts;
+// here it answers whatever the case needs, and the assertions are about when
+// the worker asks and what it does with the answer.
+const mockGetValidAccessToken = vi.fn()
+vi.mock('@/lib/server/integrations/token-refresh', () => ({
+  getValidAccessToken: (...args: unknown[]) => mockGetValidAccessToken(...args),
+}))
+
 // db mock: inline to avoid hoisting issues. Access via import for assertions.
 vi.mock('@/lib/server/db', async (importOriginal) => ({
   // Spread the real db module so tables/operators stay current; override only what this suite drives.
@@ -280,6 +288,173 @@ describe('Event processing', () => {
       const err = (await runHookJob(makeJob()).catch((e: unknown) => e)) as Error
       expect(isTerminalJobError(err)).toBe(true)
       expect(err.message).toBe('Cannot read property')
+    })
+  })
+
+  /**
+   * Contract, confirmed before implementation:
+   *
+   *   V1 An outbound delivery to GitLab never starts with an access token that
+   *      is expired or within five minutes of expiry while a refresh token is
+   *      stored; the token is renewed first.
+   *   V2 When GitLab rejects a delivery as unauthenticated despite that, the
+   *      delivery is retried exactly once with a freshly renewed token before
+   *      it is reported as failed.
+   *   V4 A renewal that succeeded anywhere is what every later delivery uses:
+   *      no path hands out the pre-renewal token afterwards.
+   *   V5 A provider without a refresh capability, or a connection without a
+   *      refresh token, is delivered exactly as before: same token, same result.
+   *
+   * The token in the job is the resolver's copy of what was stored when the
+   * mapping cache was filled — up to 300 seconds old on top of the queue wait.
+   * Before this the worker delivered with that copy and renewed only after a
+   * 401, and only when the hook asked; GitLab's issue hook never did, so an
+   * idle night ended in "please reconnect" every morning.
+   */
+  describe('runHookJob starts a delivery with a renewed token (V1, V2, V4, V5)', () => {
+    function integrationJob(config: Record<string, unknown>): ClaimedJob {
+      return makeJob({
+        dedupeKey: 'evt-123:integration:gitlab:42',
+        payload: {
+          hookType: 'gitlab',
+          event: makeEvent(),
+          target: { channelId: '42' },
+          config,
+        },
+      })
+    }
+
+    it('renews before the first attempt, by the attributed integration id (V1)', async () => {
+      const run = vi.fn().mockResolvedValue({ success: true })
+      mockGetHook.mockReturnValue({ run })
+      mockGetValidAccessToken.mockResolvedValue('renewed')
+
+      await runHookJob(
+        integrationJob({
+          accessToken: 'stale',
+          integrationId: 'integration_1',
+          rootUrl: 'https://app.example.com',
+        })
+      )
+
+      expect(mockGetValidAccessToken).toHaveBeenCalledTimes(1)
+      expect(mockGetValidAccessToken).toHaveBeenCalledWith('integration_1')
+      expect(run).toHaveBeenCalledTimes(1)
+      expect(run.mock.calls[0][2]).toEqual({
+        accessToken: 'renewed',
+        integrationId: 'integration_1',
+        rootUrl: 'https://app.example.com',
+      })
+    })
+
+    it('leaves a target without an attribution alone — a webhook delivers as before (V5)', async () => {
+      const run = vi.fn().mockResolvedValue({ success: true })
+      mockGetHook.mockReturnValue({ run })
+
+      const job = makeJob()
+      await runHookJob(job)
+
+      expect(mockGetValidAccessToken).not.toHaveBeenCalled()
+      expect(run.mock.calls[0][2]).toBe((job.payload as unknown as HookJobData).config)
+    })
+
+    it('delivers with the stored token when the renewal yields nothing (V5)', async () => {
+      const run = vi.fn().mockResolvedValue({ success: true })
+      mockGetHook.mockReturnValue({ run })
+      mockGetValidAccessToken.mockResolvedValue('')
+
+      await runHookJob(integrationJob({ accessToken: 'stored', integrationId: 'integration_1' }))
+
+      expect(run.mock.calls[0][2]).toEqual({
+        accessToken: 'stored',
+        integrationId: 'integration_1',
+      })
+    })
+
+    it('retries a rejected token once, with a token renewed after the rejection (V2, V4)', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValueOnce({
+          success: false,
+          authExpired: true,
+          error: 'Authentication failed',
+        })
+        .mockResolvedValueOnce({ success: true })
+      mockGetHook.mockReturnValue({ run })
+      // The first answer is the pre-delivery renewal; the second is what the
+      // row holds after another worker renewed in between — the token the
+      // first attempt carried was revoked by that renewal, not expired.
+      mockGetValidAccessToken.mockResolvedValueOnce('first').mockResolvedValueOnce('second')
+
+      await expect(
+        runHookJob(integrationJob({ accessToken: 'stale', integrationId: 'integration_1' }))
+      ).resolves.toBeUndefined()
+
+      expect(run).toHaveBeenCalledTimes(2)
+      expect(run.mock.calls[0][2]).toMatchObject({ accessToken: 'first' })
+      expect(run.mock.calls[1][2]).toMatchObject({ accessToken: 'second' })
+      expect(run.mock.calls[1][3]).toEqual({ jobId: 'evt-123:integration:gitlab:42' })
+    })
+
+    it('retries exactly once — a second rejection is the verdict (V2)', async () => {
+      const run = vi.fn().mockResolvedValue({
+        success: false,
+        authExpired: true,
+        error: 'Authentication failed (401)',
+      })
+      mockGetHook.mockReturnValue({ run })
+      mockGetValidAccessToken.mockResolvedValue('renewed')
+
+      const err = (await runHookJob(
+        integrationJob({ accessToken: 'stale', integrationId: 'integration_1' })
+      ).catch((e: unknown) => e)) as Error
+
+      expect(run).toHaveBeenCalledTimes(2)
+      expect(isTerminalJobError(err)).toBe(true)
+      expect(err.message).toBe('Authentication failed (401)')
+    })
+
+    it('does not retry a rejection when no integration is attributed', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValue({ success: false, authExpired: true, error: 'Authentication failed' })
+      mockGetHook.mockReturnValue({ run })
+
+      const err = (await runHookJob(makeJob()).catch((e: unknown) => e)) as Error
+
+      expect(run).toHaveBeenCalledTimes(1)
+      expect(mockGetValidAccessToken).not.toHaveBeenCalled()
+      expect(isTerminalJobError(err)).toBe(true)
+    })
+
+    it('does not retry when the renewal after a rejection yields nothing', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValue({ success: false, authExpired: true, error: 'Authentication failed' })
+      mockGetHook.mockReturnValue({ run })
+      mockGetValidAccessToken.mockResolvedValueOnce('renewed').mockResolvedValueOnce('')
+
+      const err = (await runHookJob(
+        integrationJob({ accessToken: 'stale', integrationId: 'integration_1' })
+      ).catch((e: unknown) => e)) as Error
+
+      expect(run).toHaveBeenCalledTimes(1)
+      expect(isTerminalJobError(err)).toBe(true)
+    })
+
+    it('does not touch the token for a delivery that failed for another reason', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValue({ success: false, shouldRetry: true, error: 'Rate limited' })
+      mockGetHook.mockReturnValue({ run })
+      mockGetValidAccessToken.mockResolvedValue('renewed')
+
+      await runHookJob(
+        integrationJob({ accessToken: 'stale', integrationId: 'integration_1' })
+      ).catch(() => undefined)
+
+      expect(run).toHaveBeenCalledTimes(1)
+      expect(mockGetValidAccessToken).toHaveBeenCalledTimes(1)
     })
   })
 

@@ -31,6 +31,7 @@ import { isRetryableError } from './hook-utils'
 // (`jobs/JOBS.md` §9); `__tests__/handler-imports.test.ts` enforces it.
 import { db, webhooks, integrations, postExternalLinks, eq, sql } from '@/lib/server/db'
 import { getValidAccessToken } from '@/lib/server/integrations/token-refresh'
+import { integrationIdOf, renewedHookConfig, withRenewedToken } from './hook-token'
 import { notifyChangelogPublished } from '@/lib/server/domains/changelog/changelog.service'
 import {
   handleMaintenanceStart,
@@ -98,33 +99,38 @@ export async function runHookJob(job: ClaimedJob): Promise<void> {
   // back to its own branded id, which is still stable across attempts.
   const idempotencyKey = job.dedupeKey ?? job.jobId
 
+  // The token in the job is the resolver's copy of what was stored when the
+  // mapping cache was filled. Renew it first when it is expired or about to
+  // be; a target without an integration id, or one whose row holds nothing
+  // better, is delivered with its config as it is.
+  const deliveryConfig = await renewedHookConfig(hookConfig)
+
   let result: HookResult
   try {
-    result = await hook.run(event, target, hookConfig, { jobId: idempotencyKey })
+    result = await hook.run(event, target, deliveryConfig, { jobId: idempotencyKey })
   } catch (error) {
     if (isRetryableError(error)) throw error
     throw new TerminalJobError(error instanceof Error ? error.message : 'Unknown error')
   }
 
-  // One-shot refresh + retry when the provider reports an expired token and the
-  // resolver attributed the target to an integration (WO-13: the outbound path
-  // previously 401'd until reconnect).
+  // One-shot refresh + retry when the provider still rejects the token and the
+  // resolver attributed the target to an integration. This is what absorbs a
+  // token revoked ahead of its expiry: a provider that rotates on renewal
+  // revokes the previous pair, so a job that started a moment before another
+  // one renewed carries a dead token that the expiry check alone would keep.
   if (!result.success && result.authExpired) {
-    const integrationId = (hookConfig as { integrationId?: string }).integrationId
+    const integrationId = integrationIdOf(hookConfig)
     if (integrationId) {
-      const fresh = await getValidAccessToken(integrationId as IntegrationId)
+      const fresh = await getValidAccessToken(integrationId)
       if (fresh) {
         log.info(
           { hook_type: hookType, integration_id: integrationId },
-          'token expired mid-delivery; refreshed and retrying once'
+          'token rejected mid-delivery; refreshed and retrying once'
         )
         try {
-          result = await hook.run(
-            event,
-            target,
-            { ...hookConfig, accessToken: fresh },
-            { jobId: idempotencyKey }
-          )
+          result = await hook.run(event, target, withRenewedToken(deliveryConfig, fresh), {
+            jobId: idempotencyKey,
+          })
         } catch (error) {
           if (isRetryableError(error)) throw error
           throw new TerminalJobError(error instanceof Error ? error.message : 'Unknown error')

@@ -147,6 +147,33 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'apps/web/src/lib/shared/notifications/message-ids.ts',
         suites: ['apps/web/src/lib/shared/notifications/__tests__/catalog-ids.test.ts'],
       },
+      {
+        file: 'apps/web/src/lib/server/events/hook-token.ts',
+        suites: ['apps/web/src/lib/server/events/__tests__/hook-token.test.ts'],
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/hook.ts',
+        suites: [
+          'apps/web/src/integrations/gitlab/server/__tests__/hook.test.ts',
+          'apps/web/src/integrations/gitlab/server/__tests__/hook-triage-trigger.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/functions.ts',
+        suites: ['apps/web/src/integrations/gitlab/server/__tests__/functions.test.ts'],
+      },
+      {
+        file: 'apps/web/src/components/admin/settings/integrations/oauth-connection-actions.tsx',
+        suites: [
+          'apps/web/src/components/admin/settings/integrations/__tests__/oauth-connection-actions.test.tsx',
+        ],
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/ui/gitlab-connection-actions.tsx',
+        suites: [
+          'apps/web/src/components/admin/settings/integrations/__tests__/oauth-connection-actions.test.tsx',
+        ],
+      },
     ])
   })
 
@@ -396,6 +423,27 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: "if (node.type === 'BinaryExpression') {",
         replacement: 'true',
         why: expect.stringContaining('a unary plus, which has no `left` and no `right`'),
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/hook.ts',
+        mutator: 'ObjectLiteral',
+        line: "const log = logger.child({ component: 'gitlab' })",
+        replacement: '{}',
+        why: "The component name is metadata on a log line and reaches no branch, no return value and no request. The operator-facing content of the hook's log lines — the project, the status and GitLab's answer — is asserted in hook.test.ts; the child's name is the one field a test could only read back from the logger it just configured.",
+      },
+      {
+        file: 'apps/web/src/integrations/gitlab/server/hook.ts',
+        mutator: 'StringLiteral',
+        line: "const log = logger.child({ component: 'gitlab' })",
+        replacement: '""',
+        why: 'Same line, same reason: the component name is log metadata, not behaviour, and the payload of every line the hook writes is asserted separately.',
+      },
+      {
+        file: 'apps/web/src/components/admin/settings/integrations/oauth-connection-actions.tsx',
+        mutator: 'StringLiteral',
+        line: "window.history.replaceState({}, '', url.toString())",
+        replacement: '"Stryker was here!"',
+        why: "The second argument of history.replaceState is the entry's title, which the HTML specification tells browsers to ignore and no browser reads. The URL is the third argument and is asserted; nothing observable — not the location, not the history length, not the document title — changes with the second.",
       },
     ])
   })

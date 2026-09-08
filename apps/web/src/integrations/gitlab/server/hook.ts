@@ -33,15 +33,17 @@ export interface GitLabConfig {
  * board, so the body and the author are read from the row. Widening that
  * payload instead was rejected: it goes out to customers' webhooks, so its
  * shape is a public contract.
+ *
+ * `postId` is the one `run` already read off the event and checked; it is
+ * passed in rather than read a second time so this function has no guard of
+ * its own to keep in step with the caller's.
  */
 async function issueContentFor(
   event: EventData,
+  postId: string,
   rootUrl: string
 ): Promise<{ title: string; description: string } | null> {
   if (event.type === 'post.created') return buildGitLabIssue(event, rootUrl)
-
-  const postId = (event.data as { post?: { id?: string } } | undefined)?.post?.id
-  if (!postId) return null
 
   const source = await loadIssueSource(postId)
   if (!source) return null
@@ -72,7 +74,7 @@ export const gitlabHook: HookHandler = {
       return { success: true }
     }
 
-    const content = await issueContentFor(event, rootUrl)
+    const content = await issueContentFor(event, postId, rootUrl)
     if (!content) return { success: true }
     const { title, description } = content
 
@@ -95,10 +97,16 @@ export const gitlabHook: HookHandler = {
 
         if (status === 401 || status === 403) {
           log.error({ status_code: status, project_id: projectId, body: errorBody }, 'auth error')
+          // `authExpired` is what makes the worker renew the token and try once
+          // more before it gives up. GitLab revokes the previous token pair on
+          // every renewal, so a job that started with the copy from just before
+          // another one renewed is rejected although the row holds a live token.
+          // Without the flag that was reported as "please reconnect".
           return {
             success: false,
             error: `Authentication failed (${status}). Please reconnect GitLab.`,
             shouldRetry: false,
+            authExpired: true,
           }
         }
 

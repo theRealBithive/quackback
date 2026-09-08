@@ -93,10 +93,29 @@ export function OAuthConnectionActions({
 
         {isConnected && (
           <>
+            {/* Runs the OAuth flow again and updates the existing connection in
+                place: the row keeps its id, so the board rules that hang off it
+                and the webhook secret in its config survive. Disconnecting
+                deletes the row and takes both with it. */}
             <Button
               variant="outline"
               size="sm"
-              disabled={disconnecting}
+              disabled={connecting || disconnecting}
+              onClick={handleConnect}
+            >
+              {connecting ? (
+                <>
+                  <ArrowPathIcon className="mr-2 h-4 w-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                'Reconnect'
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={connecting || disconnecting}
               onClick={() => setDisconnectDialogOpen(true)}
             >
               {disconnecting ? (

@@ -1,5 +1,5 @@
 {
-  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing \u2014 the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
+  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing — the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
   "graded": [
     {
       "file": "scripts/audit-policy.ts",
@@ -119,6 +119,33 @@
     {
       "file": "apps/web/src/lib/shared/notifications/message-ids.ts",
       "suites": ["apps/web/src/lib/shared/notifications/__tests__/catalog-ids.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/events/hook-token.ts",
+      "suites": ["apps/web/src/lib/server/events/__tests__/hook-token.test.ts"]
+    },
+    {
+      "file": "apps/web/src/integrations/gitlab/server/hook.ts",
+      "suites": [
+        "apps/web/src/integrations/gitlab/server/__tests__/hook.test.ts",
+        "apps/web/src/integrations/gitlab/server/__tests__/hook-triage-trigger.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/src/integrations/gitlab/server/functions.ts",
+      "suites": ["apps/web/src/integrations/gitlab/server/__tests__/functions.test.ts"]
+    },
+    {
+      "file": "apps/web/src/components/admin/settings/integrations/oauth-connection-actions.tsx",
+      "suites": [
+        "apps/web/src/components/admin/settings/integrations/__tests__/oauth-connection-actions.test.tsx"
+      ]
+    },
+    {
+      "file": "apps/web/src/integrations/gitlab/ui/gitlab-connection-actions.tsx",
+      "suites": [
+        "apps/web/src/components/admin/settings/integrations/__tests__/oauth-connection-actions.test.tsx"
+      ]
     }
   ],
   "equivalents": [
@@ -155,7 +182,7 @@
       "mutator": "StringLiteral",
       "line": "const log = logger.child({ component: 'gitlab-post-source' })",
       "replacement": "\"\"",
-      "why": "Same line, same reason: the component name is log metadata, not behaviour. The line's operator-facing content that does matter \u2014 the post id in the warning \u2014 is asserted in post-source.db.test.ts."
+      "why": "Same line, same reason: the component name is log metadata, not behaviour. The line's operator-facing content that does matter — the post id in the warning — is asserted in post-source.db.test.ts."
     },
     {
       "file": "apps/web/src/integrations/gitlab/server/post-source.ts",
@@ -352,6 +379,27 @@
       "line": "if (node.type === 'BinaryExpression') {",
       "replacement": "true",
       "why": "Forced true, every node still reaching this line enters the branch, and the line inside it sends back an empty list for anything whose operator is not `+`. The one other node that carries `+` as an operator is a unary plus, which has no `left` and no `right`, so it spreads two empty lists -- the same empty list the fall-through below returns. The condition was split out of an `&&` for this record's sake: joined, three mutants shared the line and the manifest addresses a line by its text."
+    },
+    {
+      "file": "apps/web/src/integrations/gitlab/server/hook.ts",
+      "mutator": "ObjectLiteral",
+      "line": "const log = logger.child({ component: 'gitlab' })",
+      "replacement": "{}",
+      "why": "The component name is metadata on a log line and reaches no branch, no return value and no request. The operator-facing content of the hook's log lines — the project, the status and GitLab's answer — is asserted in hook.test.ts; the child's name is the one field a test could only read back from the logger it just configured."
+    },
+    {
+      "file": "apps/web/src/integrations/gitlab/server/hook.ts",
+      "mutator": "StringLiteral",
+      "line": "const log = logger.child({ component: 'gitlab' })",
+      "replacement": "\"\"",
+      "why": "Same line, same reason: the component name is log metadata, not behaviour, and the payload of every line the hook writes is asserted separately."
+    },
+    {
+      "file": "apps/web/src/components/admin/settings/integrations/oauth-connection-actions.tsx",
+      "mutator": "StringLiteral",
+      "line": "window.history.replaceState({}, '', url.toString())",
+      "replacement": "\"Stryker was here!\"",
+      "why": "The second argument of history.replaceState is the entry's title, which the HTML specification tells browsers to ignore and no browser reads. The URL is the third argument and is asserted; nothing observable — not the location, not the history length, not the document title — changes with the second."
     }
   ]
 }

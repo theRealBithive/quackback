@@ -2,7 +2,7 @@
  * GitLab-specific server functions.
  */
 import { createServerFn } from '@tanstack/react-start'
-import type { PrincipalId } from '@quackback/ids'
+import type { IntegrationId, PrincipalId } from '@quackback/ids'
 import { PERMISSIONS } from '@/lib/shared/permissions'
 
 export interface GitLabOAuthState {
@@ -59,7 +59,7 @@ export const fetchGitLabProjectsFn = createServerFn({ method: 'GET' }).handler(
   async (): Promise<GitLabProject[]> => {
     const { requireAuth } = await import('@/lib/server/functions/auth-helpers')
     const { db, integrations, eq } = await import('@/lib/server/db')
-    const { decryptSecrets } = await import('@/lib/server/integrations/encryption')
+    const { getValidAccessToken } = await import('@/lib/server/integrations/token-refresh')
     const { listGitLabProjects } = await import('@/integrations/gitlab/server/projects')
 
     await requireAuth({ permission: PERMISSIONS.INTEGRATION_MANAGE })
@@ -72,17 +72,17 @@ export const fetchGitLabProjectsFn = createServerFn({ method: 'GET' }).handler(
       throw new Error('GitLab not connected')
     }
 
-    if (!integration.secrets) {
-      throw new Error('GitLab secrets missing')
-    }
-
-    const secrets = decryptSecrets<{ accessToken?: string }>(integration.secrets)
-    if (!secrets.accessToken) {
+    // Renewed by id, not read off the row: the stored access token lives two
+    // hours, and this list is what the settings page loads first thing in the
+    // morning. Reading the row directly made an idle night look like a lost
+    // connection, with a refresh token in the same row that would have worked.
+    const accessToken = await getValidAccessToken(integration.id as IntegrationId)
+    if (!accessToken) {
       throw new Error('GitLab access token missing')
     }
 
     const instanceUrl = (integration.config as { instanceUrl?: string } | null)?.instanceUrl
-    const projects = await listGitLabProjects(secrets.accessToken, instanceUrl)
+    const projects = await listGitLabProjects(accessToken, instanceUrl)
     return projects
   }
 )
