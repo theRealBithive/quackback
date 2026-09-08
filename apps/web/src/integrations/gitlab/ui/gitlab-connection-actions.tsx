@@ -17,7 +17,7 @@ export function GitLabConnectionActions({
       searchParamKey="gitlab"
       getConnectUrl={getGitLabConnectUrl}
       displayName="GitLab"
-      disconnectDescription="This will remove the GitLab integration and stop all synchronization. You can reconnect at any time."
+      disconnectDescription="This removes the GitLab connection together with its board rules and its webhook secret, and stops all synchronization. To renew the authorization and keep both, use Reconnect instead."
     />
   )
 }
