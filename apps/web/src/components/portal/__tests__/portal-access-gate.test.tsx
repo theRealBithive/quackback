@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, fireEvent } from '@testing-library/react'
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 
 const navigate = vi.fn()
@@ -18,8 +18,10 @@ vi.mock('@/lib/client/hooks/use-auth-broadcast', () => ({
   postAuthSuccess: vi.fn(),
 }))
 
+const invalidateQueries = vi.fn().mockResolvedValue(undefined)
+const removeQueries = vi.fn()
 vi.mock('@tanstack/react-query', () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries, removeQueries }),
 }))
 
 vi.mock('@/lib/client/auth-client', () => ({ signOut: vi.fn() }))
@@ -37,6 +39,8 @@ vi.mock('@/lib/client/post-auth-navigation', () => ({ navigateAfterAuth: vi.fn()
 
 import { PortalAccessGate } from '../portal-access-gate'
 import { navigateAfterAuth } from '@/lib/client/post-auth-navigation'
+import { signOut } from '@/lib/client/auth-client'
+import { VIEWER_SCOPED_PORTAL_QUERY_KEYS } from '@/lib/client/queries/portal'
 
 const baseProps = {
   reason: 'unauthenticated' as const,
@@ -52,6 +56,9 @@ const baseProps = {
 beforeEach(() => {
   navigate.mockClear()
   invalidate.mockClear()
+  invalidateQueries.mockClear()
+  removeQueries.mockClear()
+  vi.mocked(signOut).mockClear()
   vi.mocked(navigateAfterAuth).mockClear()
   broadcastOnSuccess = undefined
   formProps = {}
@@ -68,6 +75,26 @@ describe('PortalAccessGate — inline auth form', () => {
     render(<PortalAccessGate {...baseProps} reason="unauthorized" userEmail="alice@example.com" />)
     expect(screen.queryByTestId('auth-form-body')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
+  })
+
+  it('signing out from the unauthorized screen drops the viewer-scoped portal caches before the loaders re-run', async () => {
+    render(<PortalAccessGate {...baseProps} reason="unauthorized" userEmail="alice@example.com" />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /sign out/i }))
+    })
+
+    expect(signOut).toHaveBeenCalledTimes(1)
+    const removedKeys = removeQueries.mock.calls.map(
+      (call) => (call as unknown as [{ queryKey: unknown[] }])[0].queryKey
+    )
+    expect(removedKeys).toEqual(expect.arrayContaining([...VIEWER_SCOPED_PORTAL_QUERY_KEYS]))
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['votedPosts'] })
+    expect(invalidate).toHaveBeenCalledTimes(1)
+    // The caches must be gone before the loaders re-run, or ensureQueryData
+    // hands the next viewer the previous session's payload.
+    const lastRemoval = Math.max(...removeQueries.mock.invocationCallOrder)
+    expect(lastRemoval).toBeLessThan(invalidate.mock.invocationCallOrder[0])
   })
 
   it('seeds the form mode from autoOpenSignin', () => {

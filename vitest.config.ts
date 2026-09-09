@@ -58,6 +58,12 @@ export default defineConfig({
         // `scripts/__tests__/*-gate.test.ts`. The policy modules beside them
         // (`*-policy.ts`) hold the logic and are graded normally.
         'scripts/*-check.ts',
+        // Same shape: `bun run db:generate-csv` runs this file as a process,
+        // it reads argv and writes a file at module scope, so importing it
+        // in-process is not an option. Its contract — every generated row is
+        // one the importer accepts — is covered by spawning it:
+        // `domains/import/__tests__/sample-csv-imports.test.ts`.
+        'packages/db/src/generate-sample-csv.ts',
       ],
     },
     // Use ts-node or vite's transformation instead of stripping
