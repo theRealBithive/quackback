@@ -5,6 +5,140 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
+## 7x — Test suites are flaky under parallel load
+
+`principals/__tests__/seat-usage.db.test.ts` and
+`tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
+the ~120 fixture-backed suites run together, and pass when run alone. Measured
+over nine full runs of that set: 3 failures in 6 runs on one branch, 1 in 3 on an
+unmodified tree — different files, same shape. `seat-usage` asserts
+`after.members === before.members + 2` against a database-wide count and saw +4,
+so something outside its own rolled-back transaction commits rows while it runs.
+
+The cost is not the flake itself, it is that it makes any change to shared test
+infrastructure unfalsifiable: proving a fixture change innocent took six 75-second
+full-set runs plus a stash-and-compare, because a single red run says nothing.
+Either make the whole-DB counts workspace-scoped, or serialise the suites that
+count globally.
+
+Hit again while measuring what coverage costs a shard. Locally, shard 1/4 with
+coverage failed 4 tests and without coverage failed 1 — which reads as "coverage
+broke the suite" until you notice the one failure is in both runs
+(`singletons-not-shared.test.ts`, a 20s timeout) and the other three are
+`channel-accounts/__tests__/channel-account.service.test.ts`, a real-DB suite,
+two of them with `Cannot access '__vite_ssr_import_4__' before initialization`.
+All four CI shards passed with coverage on 4 vCPU. So the local failures are load
+— this laptop runs vitest 11-way with Postgres on the same box — but ruling that
+out took a second full 3-minute shard run as a control. That is the cost of the
+flakiness: no single run means anything, so every measurement needs a twin.
+
+Hit a third time, and this one is not a DB suite at all:
+`lib/client/mutations/__tests__/settings.test.ts` times out (`Test timed out in
+20000ms`) whenever it runs inside a wider selection, and passes alone. The reason
+is visible once measured: alone it needs 16.7s of test time against the 20s
+`testTimeout` in `vitest.config.ts`, so it has 3s of headroom and any contention
+eats it. It cost two full runs plus a stash-and-compare to prove it was not the
+change under test — the same twin-measurement tax as above, now for a suite that
+touches no database. A suite that close to the timeout is a failure waiting for a
+busy machine; the fix is to find what takes 16s in there, not to raise the limit.
+
+Hit a fourth time, in the one run a final report actually rests on: the whole
+suite, 1429 files. `settings.test.ts` timed out again and took
+`policy/module-state/__tests__/module-state.test.ts` with it — that suite walks
+the source tree, needed 32s under the load of a full run, and lives under the
+same 20s ceiling. Both pass in seconds when the two of them run alone. So a full
+local run now ends with three red lines none of which mean anything until a
+control run has been done, and two of the three are known by name. Either pin a
+per-suite `testTimeout` for these two or make the scanner cache its walk; the
+alternative is that every full run ends in a diagnosis.
+
+Hit a fifth time, and this one was self-inflicted in a way worth naming: the
+coverage run and the full suite were started as two background jobs at the same
+time, to save wall clock. Four tests failed across them —
+`signup-policy.db.test.ts` twice, `settings.test.ts`, and a `beforeEach` timeout
+in `anonymous-feature-flags.test.ts` — none of them related to the change, and
+each passed alone afterwards. The coverage run also exited non-zero, which means
+**no report was written at all** and the gate reported that it graded nothing.
+So the two jobs cost three runs instead of saving one. On this machine the two
+heavy jobs are strictly sequential; there is no version of overlapping them that
+produces a readable result.
+
+Hit a sixth time, and it moved the diagnosis: this run was **not** parallel with
+anything. One directory, `lib/server/functions/__tests__`, 106 files, nothing
+else on the machine — and `anonymous-feature-flags.test.ts` still timed out in
+its `beforeEach` at 10s. So the entry's own title undersells it: the load that
+breaks these suites is vitest's own 11-way fan-out inside a single run, not two
+jobs competing. Narrowing the run to the four suites that actually reach the
+change passed in 43 seconds, which is the practical move and also the honest
+one — a directory-wide run buys nothing when the gate grades specific lines.
+
+That narrowing is worth stating as a rule, because the wrong instinct is to run
+wider for safety: a red suite means **no coverage report is written at all**,
+so a run wide enough to include a known flake grades nothing, while the narrow
+run grades exactly what the change touched. Wide is not safer here, it is
+strictly worse.
+
+Hit again on the first upstream back-merge, in a different shape: three suites
+under `lib/server/functions/__tests__/` (`anonymous-feature-flags`,
+`portal-data-visibility-gate`, `portal-gate-public-posts`) failed with `Hook
+timed out in 10000ms` at a `beforeEach` that does the first dynamic `import()`,
+in a 439-file run **with coverage** (import time 1813s across workers). All
+three pass alone, 43 of 43. The root config raised `testTimeout` to 20s for
+exactly this reason and left `hookTimeout` at the 10s default, so the suites
+that import in a hook rather than in the test body never got the headroom.
+Raising `hookTimeout` to match is the obvious fix; not done inside the
+back-merge, for the reason above -- a change to shared test infrastructure
+needs its own run to be falsifiable.
+
+## 1x — An upstream suite named `*-integration.test.ts` never runs here, and passes by absence
+
+The root vitest config excludes `**/*-integration.test.ts`, for the API suite
+that needs a live server. Upstream does not have that exclusion, so when a
+back-merge brought `hooks-after-integration.test.ts` -- six tests on the
+ordering of the sign-in after-hooks, running entirely on mocks -- vitest
+collected nothing, said nothing, and the diff-coverage gate reported forty
+lines of `hooksAfter` as never executed. Running the file by name printed
+`No test files found` with the exclude list, which is the only place the cause
+is visible.
+
+Renaming the file (`-composition`) was the whole fix, with a header line
+saying why. Every back-merge should grep the incoming test files against the
+root `exclude` list before reading a coverage hole as a missing test.
+
+## 1x — A red test means no coverage report at all, which reads as a broken setup
+
+vitest's `coverage.reportOnFailure` defaults to false. So a single flaky
+`beforeEach` timeout in a 439-file run left `coverage/local/` empty, and the
+diff gate said `no coverage report was found under coverage` -- the same
+message a wrong `reportsDirectory` would produce. One full 250-second rerun
+went into finding that out. Locally, pass `--coverage.reportOnFailure=true`
+whenever the run is there to measure coverage; CI never sees this because its
+coverage job only runs after the unit shards are green.
+
+## 1x — Upstream and fork migrations collide on `idx` and on `when`, and the migrator hides it
+
+Both sides number their migrations by appending, so after a week apart upstream
+and this fork each had a `0273`, a `0274` and a `0275` with different contents.
+The file names do not clash (the tag is part of the name), the journal does:
+three `idx` values are taken twice, and worse, upstream's first new entry
+carried **the same `when`** as ours (`1785700000031`), because both were written
+by hand off the same predecessor.
+
+The migrator (`fleet/migrator.ts`) applies an entry only when its `when` is
+above the newest applied one, and its gap detection asks whether the `when` is
+already recorded -- which ours was. So on an instance already at our 0275, an
+upstream migration merged as-is would be skipped in silence, and the first sign
+would be a runtime error on a missing column. No test on either side sees this:
+a fresh database applies everything in journal order and is fine.
+
+What worked: cherry-pick, resolve the journal to **ours**, then append the
+upstream entry renumbered to the next free tag with `when` = ours + 1, `git mv`
+the SQL file to the new number, extend the `migrator-gate` span, regenerate
+`CONTRACT.md`, and say so in the pick's commit body. Check `when` against
+`packages/db/drizzle/meta/_journal.json` **before** the pick rather than after
+the drift check, which passes either way because it too starts from an empty
+database. Every future back-merge that carries a migration will hit this.
+
 ## 1x — A Stryker survivor list is stale the moment you write a test against it
 
 The gate prints its survivors and writes `.mutation-tmp/report.json`. Both are
@@ -125,79 +259,6 @@ wrong one.
 does not compile. A plain `/* ... */` between attributes does. Costs one
 typecheck round trip every time, and it comes up whenever an attribute needs a
 note -- which for this work is every `i18n-allow`.
-
-## 6x — Test suites are flaky under parallel load
-
-`principals/__tests__/seat-usage.db.test.ts` and
-`tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
-the ~120 fixture-backed suites run together, and pass when run alone. Measured
-over nine full runs of that set: 3 failures in 6 runs on one branch, 1 in 3 on an
-unmodified tree — different files, same shape. `seat-usage` asserts
-`after.members === before.members + 2` against a database-wide count and saw +4,
-so something outside its own rolled-back transaction commits rows while it runs.
-
-The cost is not the flake itself, it is that it makes any change to shared test
-infrastructure unfalsifiable: proving a fixture change innocent took six 75-second
-full-set runs plus a stash-and-compare, because a single red run says nothing.
-Either make the whole-DB counts workspace-scoped, or serialise the suites that
-count globally.
-
-Hit again while measuring what coverage costs a shard. Locally, shard 1/4 with
-coverage failed 4 tests and without coverage failed 1 — which reads as "coverage
-broke the suite" until you notice the one failure is in both runs
-(`singletons-not-shared.test.ts`, a 20s timeout) and the other three are
-`channel-accounts/__tests__/channel-account.service.test.ts`, a real-DB suite,
-two of them with `Cannot access '__vite_ssr_import_4__' before initialization`.
-All four CI shards passed with coverage on 4 vCPU. So the local failures are load
-— this laptop runs vitest 11-way with Postgres on the same box — but ruling that
-out took a second full 3-minute shard run as a control. That is the cost of the
-flakiness: no single run means anything, so every measurement needs a twin.
-
-Hit a third time, and this one is not a DB suite at all:
-`lib/client/mutations/__tests__/settings.test.ts` times out (`Test timed out in
-20000ms`) whenever it runs inside a wider selection, and passes alone. The reason
-is visible once measured: alone it needs 16.7s of test time against the 20s
-`testTimeout` in `vitest.config.ts`, so it has 3s of headroom and any contention
-eats it. It cost two full runs plus a stash-and-compare to prove it was not the
-change under test — the same twin-measurement tax as above, now for a suite that
-touches no database. A suite that close to the timeout is a failure waiting for a
-busy machine; the fix is to find what takes 16s in there, not to raise the limit.
-
-Hit a fourth time, in the one run a final report actually rests on: the whole
-suite, 1429 files. `settings.test.ts` timed out again and took
-`policy/module-state/__tests__/module-state.test.ts` with it — that suite walks
-the source tree, needed 32s under the load of a full run, and lives under the
-same 20s ceiling. Both pass in seconds when the two of them run alone. So a full
-local run now ends with three red lines none of which mean anything until a
-control run has been done, and two of the three are known by name. Either pin a
-per-suite `testTimeout` for these two or make the scanner cache its walk; the
-alternative is that every full run ends in a diagnosis.
-
-Hit a fifth time, and this one was self-inflicted in a way worth naming: the
-coverage run and the full suite were started as two background jobs at the same
-time, to save wall clock. Four tests failed across them —
-`signup-policy.db.test.ts` twice, `settings.test.ts`, and a `beforeEach` timeout
-in `anonymous-feature-flags.test.ts` — none of them related to the change, and
-each passed alone afterwards. The coverage run also exited non-zero, which means
-**no report was written at all** and the gate reported that it graded nothing.
-So the two jobs cost three runs instead of saving one. On this machine the two
-heavy jobs are strictly sequential; there is no version of overlapping them that
-produces a readable result.
-
-Hit a sixth time, and it moved the diagnosis: this run was **not** parallel with
-anything. One directory, `lib/server/functions/__tests__`, 106 files, nothing
-else on the machine — and `anonymous-feature-flags.test.ts` still timed out in
-its `beforeEach` at 10s. So the entry's own title undersells it: the load that
-breaks these suites is vitest's own 11-way fan-out inside a single run, not two
-jobs competing. Narrowing the run to the four suites that actually reach the
-change passed in 43 seconds, which is the practical move and also the honest
-one — a directory-wide run buys nothing when the gate grades specific lines.
-
-That narrowing is worth stating as a rule, because the wrong instinct is to run
-wider for safety: a red suite means **no coverage report is written at all**,
-so a run wide enough to include a known flake grades nothing, while the narrow
-run grades exactly what the change touched. Wide is not safer here, it is
-strictly worse.
 
 ## 5x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
