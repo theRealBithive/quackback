@@ -103,6 +103,104 @@ terminal row in one pass") saw `pruned` come back 0 for a row it had just aged
 so whichever process prunes first takes the other's row and its count. Same
 shape as `seat-usage`: a database-wide count asserted across parallel suites.
 
+## 5x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
+
+An entry declares a whole file, and the gate fails on any survivor in it. A change that
+adds three lines to an upstream file therefore has to pin **every** branch that file
+already had, including ones its own diff never touched.
+
+Measured on `post.board.ts`: declaring it produced nine survivors. Six were real and are
+now killed — one of them, `db.query.posts.findFirst({ where: ... })` losing its `where`,
+is the same class of bug as an integration lookup returning _an_ integration instead of
+_the_ one. Two more sit on branches a foreign key and an open transaction make
+unreachable, so no input reaches them. The last is `db.query.boards.findFirst({ where: ...
+})` for the board the post came _from_: dropping the `where` returns a different board and
+really does change the payload, but which row an unordered query hands back is not
+something a test may rely on, and the board is fetched for its `name`, so the lookup
+cannot be removed either. It is upstream code the change did not touch.
+
+That one mutant blocks the entry for the whole file, because declaring it would assert
+"these suites hold this file" — and they do not. So the file goes back to being reported
+by name as ungraded, and six verified kills sit in the suite without the gate knowing.
+
+**A per-file `except` list, addressed by line text the way `equivalents` already is, would
+let a change declare the part it owns** and leave the untouched remainder named in the
+report. Without it the incentive runs the wrong way: the cheapest way to keep a gate green
+is to not declare the file, which is the outcome the manifest exists to prevent.
+
+The tests stay either way — writing them turned up two existing tests that never entered
+the branch they named (see the entry below on hand-typed TypeIDs).
+
+Second occurrence, on the work item URL fix. Declaring `url.ts` — one changed
+line, a regex — meant asserting that its suite pins the **whole** file, including
+`normalizeGitLabInstanceUrl`, which the change never touched. Nine mutants
+survived the first run and eight of them were in that pre-existing half. Eight
+were worth killing anyway, but the ninth forced a contract decision (`http://`
+as an instance address) that had nothing to do with the change and could not be
+deferred, because the gate is per file and there is no way to say "grade the
+line I touched".
+
+The shape that would help is unchanged: a per-file `except` list, or scoping an
+entry to a diff range. Until then, declaring a file with pre-existing untested
+neighbours is a decision to be made deliberately, not a formality.
+
+Third occurrence, on the GitLab token renewal — and this one found a way around
+it worth repeating. Declaring the two files the change touched produced **48**
+survivors, 41 of them in halves the change never opened: `oauth.ts` carries an
+authorization-URL builder and a code exchange, and `token-refresh.ts` carries a
+`db.query.integrations.findFirst({ where })` whose unfiltered mutant is the same
+undeterminable case as `post.board.ts` above.
+
+So the new function moved into its own module, `gitlab/server/token-renewal.ts`,
+which the new suite pins on its own: 22 mutants, 22 killed, and the two
+pre-existing files reported by name as ungraded. **Putting new logic in a new
+file is currently the only way to have it mutation-graded without adopting its
+neighbours**, and it is worth doing deliberately for that reason alone — not
+only when the module boundary is independently justified. Jira's
+`server/token.ts` is the same shape, probably for the same reason.
+
+The seven survivors that remained were all real: nothing asserted the request
+was a POST, nothing passed `credentials: undefined` — which is what the
+framework actually passes when no platform credentials are stored
+(`credentials ?? undefined`), so the optional chaining that mutant removed is
+load-bearing rather than defensive.
+
+Fourth occurrence, and the largest so far, on the notification names of the
+i18n work. The change added four exports to `notifications/catalog.ts` — three
+id builders and a group-label map — and declaring that file produced **57
+survivors plus 7 mutants nothing executed**, against 0 for everything else in
+the run. None of the 57 were in the four new exports. They were upstream's
+25-row data table: every `surfaces: ['admin', 'portal']` as `[]` and as `''`,
+because nothing in the repository asserts which settings surface renders which
+notification row, and `catalogByGroup`, which the suite beside the module never
+calls.
+
+The workaround recorded above worked again, and it is now the third time:
+the four exports moved into `notifications/message-ids.ts`, its suite pins it
+whole, and `catalog.ts` went back to **byte-identical to upstream** — which is
+worth as much as the grading, because it is a file that no longer appears in a
+sync. 459 mutants, 453 killed, 6 excused, 0 ungraded.
+
+The thing to take from the fourth occurrence is that the decision is cheap to
+get right and expensive to get wrong in only one direction. Declaring a file
+costs a gate run (~8 minutes here) to find out whether the claim was true, and
+the answer arrives as a survivor count that says nothing about which half it
+came from until you read every line number. Reading the file first and asking
+"does the suite I wrote assert the parts of this I am not touching" takes a
+minute. For an upstream file with a data table in it, the answer is no.
+
+Fifth occurrence, on the portal board count. The change added two lines to the
+join in `listPublicBoardsWithStats` (`board.public.ts`), and declaring that file
+would have asserted that the suites pin `getPublicBoardBySlug`, `countBoards` and
+four error-message strings the change never touched. Same way out as the three
+before it: the shared status predicate went into its own module,
+`post.portal-default-status.ts`, declared and graded on its own, and the join
+lines stayed ungraded by the gate. What stood in for the missing `except` list
+was the mutate-run-restore loop from the Stryker entry, five hand-written
+mutants against the new DB suite, five killed, twelve seconds each. That loop is
+now the standing substitute for scoping an entry to a diff range, and it is a
+minute of throwaway scripting per change that the gate could do by itself.
+
 ## 1x — A line that is only an arrow function passed as a JSX prop reads as uncovered until the handler actually fires
 
 Filling a diff-coverage hole for `onEdit={() => onEdit(row)}`-shaped lines
@@ -488,92 +586,6 @@ seconds); and the script fails loudly if no file appeared, because a silent
 no-op would quietly restore the number. CI cannot catch that rot on its own —
 the `check` job builds before it typechecks, and the build writes the same file
 — which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
-
-## 4x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
-
-An entry declares a whole file, and the gate fails on any survivor in it. A change that
-adds three lines to an upstream file therefore has to pin **every** branch that file
-already had, including ones its own diff never touched.
-
-Measured on `post.board.ts`: declaring it produced nine survivors. Six were real and are
-now killed — one of them, `db.query.posts.findFirst({ where: ... })` losing its `where`,
-is the same class of bug as an integration lookup returning _an_ integration instead of
-_the_ one. Two more sit on branches a foreign key and an open transaction make
-unreachable, so no input reaches them. The last is `db.query.boards.findFirst({ where: ...
-})` for the board the post came _from_: dropping the `where` returns a different board and
-really does change the payload, but which row an unordered query hands back is not
-something a test may rely on, and the board is fetched for its `name`, so the lookup
-cannot be removed either. It is upstream code the change did not touch.
-
-That one mutant blocks the entry for the whole file, because declaring it would assert
-"these suites hold this file" — and they do not. So the file goes back to being reported
-by name as ungraded, and six verified kills sit in the suite without the gate knowing.
-
-**A per-file `except` list, addressed by line text the way `equivalents` already is, would
-let a change declare the part it owns** and leave the untouched remainder named in the
-report. Without it the incentive runs the wrong way: the cheapest way to keep a gate green
-is to not declare the file, which is the outcome the manifest exists to prevent.
-
-The tests stay either way — writing them turned up two existing tests that never entered
-the branch they named (see the entry below on hand-typed TypeIDs).
-
-Second occurrence, on the work item URL fix. Declaring `url.ts` — one changed
-line, a regex — meant asserting that its suite pins the **whole** file, including
-`normalizeGitLabInstanceUrl`, which the change never touched. Nine mutants
-survived the first run and eight of them were in that pre-existing half. Eight
-were worth killing anyway, but the ninth forced a contract decision (`http://`
-as an instance address) that had nothing to do with the change and could not be
-deferred, because the gate is per file and there is no way to say "grade the
-line I touched".
-
-The shape that would help is unchanged: a per-file `except` list, or scoping an
-entry to a diff range. Until then, declaring a file with pre-existing untested
-neighbours is a decision to be made deliberately, not a formality.
-
-Third occurrence, on the GitLab token renewal — and this one found a way around
-it worth repeating. Declaring the two files the change touched produced **48**
-survivors, 41 of them in halves the change never opened: `oauth.ts` carries an
-authorization-URL builder and a code exchange, and `token-refresh.ts` carries a
-`db.query.integrations.findFirst({ where })` whose unfiltered mutant is the same
-undeterminable case as `post.board.ts` above.
-
-So the new function moved into its own module, `gitlab/server/token-renewal.ts`,
-which the new suite pins on its own: 22 mutants, 22 killed, and the two
-pre-existing files reported by name as ungraded. **Putting new logic in a new
-file is currently the only way to have it mutation-graded without adopting its
-neighbours**, and it is worth doing deliberately for that reason alone — not
-only when the module boundary is independently justified. Jira's
-`server/token.ts` is the same shape, probably for the same reason.
-
-The seven survivors that remained were all real: nothing asserted the request
-was a POST, nothing passed `credentials: undefined` — which is what the
-framework actually passes when no platform credentials are stored
-(`credentials ?? undefined`), so the optional chaining that mutant removed is
-load-bearing rather than defensive.
-
-Fourth occurrence, and the largest so far, on the notification names of the
-i18n work. The change added four exports to `notifications/catalog.ts` — three
-id builders and a group-label map — and declaring that file produced **57
-survivors plus 7 mutants nothing executed**, against 0 for everything else in
-the run. None of the 57 were in the four new exports. They were upstream's
-25-row data table: every `surfaces: ['admin', 'portal']` as `[]` and as `''`,
-because nothing in the repository asserts which settings surface renders which
-notification row, and `catalogByGroup`, which the suite beside the module never
-calls.
-
-The workaround recorded above worked again, and it is now the third time:
-the four exports moved into `notifications/message-ids.ts`, its suite pins it
-whole, and `catalog.ts` went back to **byte-identical to upstream** — which is
-worth as much as the grading, because it is a file that no longer appears in a
-sync. 459 mutants, 453 killed, 6 excused, 0 ungraded.
-
-The thing to take from the fourth occurrence is that the decision is cheap to
-get right and expensive to get wrong in only one direction. Declaring a file
-costs a gate run (~8 minutes here) to find out whether the claim was true, and
-the answer arrives as a survivor count that says nothing about which half it
-came from until you read every line number. Reading the file first and asking
-"does the suite I wrote assert the parts of this I am not touching" takes a
-minute. For an upstream file with a data table in it, the answer is no.
 
 ## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
 

@@ -174,6 +174,13 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/components/admin/settings/integrations/__tests__/oauth-connection-actions.test.tsx',
         ],
       },
+      {
+        file: 'apps/web/src/lib/server/domains/posts/post.portal-default-status.ts',
+        suites: [
+          'apps/web/src/lib/server/domains/boards/__tests__/board-public-post-count.db.test.ts',
+          'apps/web/src/lib/server/domains/posts/__tests__/post-public.test.ts',
+        ],
+      },
     ])
   })
 

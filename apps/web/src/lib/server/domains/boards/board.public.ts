@@ -3,6 +3,7 @@ import { getTableColumns } from 'drizzle-orm'
 import type { BoardId } from '@quackback/ids'
 import { InternalError } from '@/lib/shared/errors'
 import type { BoardWithStats } from './board.types'
+import { portalDefaultStatusFilter } from '../posts/post.portal-default-status'
 import { boardViewFilter, postViewFilter, ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy'
 
 /**
@@ -58,9 +59,12 @@ export async function listPublicBoardsWithStats(
   actor: Actor = ANONYMOUS_ACTOR
 ): Promise<BoardWithStats[]> {
   try {
-    // The post-count join must apply postViewFilter, not just isNull(deletedAt) —
-    // otherwise the count leaks pending/spam/archived posts to non-team users
-    // and disagrees with what the actual post list shows them.
+    // The post-count join must count exactly what the default portal list
+    // shows this actor, or the number beside a board disagrees with the list
+    // under it. That means postViewFilter (not just isNull(deletedAt), which
+    // would leak pending/spam posts to non-team users), no merged posts, and
+    // the portal's default status filter: complete and closed posts are not
+    // shown, so they are not counted.
     const rows = await db
       .select({
         ...getTableColumns(boards),
@@ -69,7 +73,13 @@ export async function listPublicBoardsWithStats(
       .from(boards)
       .leftJoin(
         posts,
-        and(eq(posts.boardId, boards.id), isNull(posts.deletedAt), postViewFilter(actor))
+        and(
+          eq(posts.boardId, boards.id),
+          isNull(posts.deletedAt),
+          isNull(posts.canonicalPostId),
+          portalDefaultStatusFilter(),
+          postViewFilter(actor)
+        )
       )
       // boardViewFilter embeds isNull(boards.deletedAt) in every branch — no
       // outer guard needed here. Callers of postViewFilter still need their
