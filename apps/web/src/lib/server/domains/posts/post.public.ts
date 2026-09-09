@@ -2,7 +2,6 @@ import {
   db,
   eq,
   and,
-  or,
   inArray,
   desc,
   sql,
@@ -26,6 +25,7 @@ import {
   type PrincipalId,
   type SegmentId,
 } from '@quackback/ids'
+import { portalDefaultStatusFilter } from './post.portal-default-status'
 import type { PublicPostListResult } from './post.types'
 import type { RespondedFilter } from '@/lib/shared/types/filters'
 import { postViewFilter, isTeamActor, ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy'
@@ -166,12 +166,10 @@ function buildPostFilterConditions(params: PostListParams, actor: Actor) {
   } else if (statusIds && statusIds.length > 0) {
     conditions.push(inArray(posts.statusId, statusIds))
   } else {
-    // Default: exclude complete/closed posts — only show active-category statuses (or unstatused)
-    const activeStatusSubquery = db
-      .select({ id: postStatuses.id })
-      .from(postStatuses)
-      .where(eq(postStatuses.category, 'active'))
-    conditions.push(or(isNull(posts.statusId), inArray(posts.statusId, activeStatusSubquery))!)
+    // Default: hide complete/closed posts. The predicate is shared with the
+    // board count in board.public.ts, so the number beside a board and the
+    // list under it agree.
+    conditions.push(portalDefaultStatusFilter())
   }
 
   if (tagIds && tagIds.length > 0) {
