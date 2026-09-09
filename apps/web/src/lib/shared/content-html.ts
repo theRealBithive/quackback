@@ -173,7 +173,13 @@ export function generateContentHTML(content: JSONContent): string {
         const imgHeight =
           node.attrs?.height !== undefined ? safePositiveInt(node.attrs.height, 0) : 0
         if (imgWidth && imgHeight) {
-          const style = `style="aspect-ratio: ${imgWidth} / ${imgHeight};"`
+          // `auto` is load-bearing. A pasted screenshot is inserted with no
+          // dimensions, so what gets stored is the editor extension's 500x500
+          // default, and a bare `aspect-ratio: 500 / 500` forces a wide
+          // screenshot into a square. With `auto` the browser reserves the
+          // stored box only until the image has loaded, then uses the image's
+          // own proportions.
+          const style = `style="aspect-ratio: auto ${imgWidth} / ${imgHeight};"`
           return `<img src="${src}" alt="${alt}" width="${imgWidth}" height="${imgHeight}" class="max-w-full h-auto rounded-lg" ${style} />`
         }
         // Only apply width (not height) so h-auto preserves aspect ratio
