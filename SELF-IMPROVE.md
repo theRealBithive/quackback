@@ -755,6 +755,32 @@ Both traps and this recipe belong in the helper the first occurrence asked for.
 Every remaining batch of the language work mounts routes, so the helper is now
 the cheaper thing to build.
 
+## 2x — The coverage and mutation gates read HEAD, not the working tree
+
+Both gates ask git for the diff between the merge base and `HEAD`
+(`git diff -U0 <merge-base> HEAD` in `scripts/mutation-check.ts`, the same in
+`diff-coverage-check.ts`). So running either one over uncommitted work does not
+grade that work: it grades the previous commit and reports a confident PASS.
+
+That is exactly how it reads on screen. The run said `3 file(s), 80 line(s) — 12
+executed, 0 never executed` and `PASS: every line this change added was executed
+by a test` — while the new module, its suite and the component it rewired were
+all still unstaged. Nothing in the output says "your change is not in this
+measurement", because from the gate's point of view there is no change.
+
+The cost is a wasted 60-second coverage run and, worse, a moment of believing an
+untested file was covered. Committing first turned the same command into
+`5 file(s), 209 line(s) — 57 executed, 1 never executed` and named the line.
+
+Either would fix it: have both gates refuse to run with a dirty tree, or have
+them diff the working tree (`git diff <merge-base>` without `HEAD`) and say which
+of the two they did in the line they already print about the merge base.
+
+Hit again on a one-line serializer fix: the run over an unstaged change printed
+`Judged 0 file(s), 0 line(s) — 0 executed` and still ended in `PASS: every line
+this change added was executed by a test`. Zero lines judged is the clearest
+possible sign that the gate saw no change, and it is printed as a pass.
+
 ## 1x — A migration passes every local gate and fails CI on schema drift
 
 `bun run db:check-drift` is a CI step (inside the `test` shard, not `check`), and
@@ -898,27 +924,6 @@ Two ways out, and the second is better: copy the file to the scratchpad first
 and copy it back, or commit the change before probing and use
 `git checkout HEAD -- <file>` knowingly — the probe is then genuinely the only
 thing that gets discarded.
-
-## 1x — The coverage and mutation gates read HEAD, not the working tree
-
-Both gates ask git for the diff between the merge base and `HEAD`
-(`git diff -U0 <merge-base> HEAD` in `scripts/mutation-check.ts`, the same in
-`diff-coverage-check.ts`). So running either one over uncommitted work does not
-grade that work: it grades the previous commit and reports a confident PASS.
-
-That is exactly how it reads on screen. The run said `3 file(s), 80 line(s) — 12
-executed, 0 never executed` and `PASS: every line this change added was executed
-by a test` — while the new module, its suite and the component it rewired were
-all still unstaged. Nothing in the output says "your change is not in this
-measurement", because from the gate's point of view there is no change.
-
-The cost is a wasted 60-second coverage run and, worse, a moment of believing an
-untested file was covered. Committing first turned the same command into
-`5 file(s), 209 line(s) — 57 executed, 1 never executed` and named the line.
-
-Either would fix it: have both gates refuse to run with a dirty tree, or have
-them diff the working tree (`git diff <merge-base>` without `HEAD`) and say which
-of the two they did in the line they already print about the merge base.
 
 ## 1x — A cache key nested under another's prefix, with six copies of the patch that reads it
 
