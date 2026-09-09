@@ -637,3 +637,33 @@ describe('pickAvatarUrl — the OIDC `picture` claim', () => {
     expect(pickAvatarUrl({ picture: 'javascript:alert(1)' })).toBeUndefined()
   })
 })
+
+describe('resolveIdentity — required paths served only by userinfo', () => {
+  it('lands a required nested claim under its parent even when the ID token put a scalar there', async () => {
+    const exp = Math.floor(Date.now() / 1000) + 3600
+    const fetchUserInfo = vi.fn(async () => ({
+      sub: 'sub-nested',
+      profile: { department: 'Engineering' },
+    }))
+
+    const result = await resolveIdentity({
+      tokens: {
+        idToken: fakeJwt({
+          sub: 'sub-nested',
+          email: 'n@example.com',
+          name: 'Nested',
+          profile: 'legacy-profile-id',
+          exp,
+        }),
+        accessToken: 'opaque-access-token',
+      },
+      fetchUserInfo,
+      requiredClaimPaths: ['profile.department'],
+    })
+
+    expect(fetchUserInfo).toHaveBeenCalledTimes(1)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.identity.claims.profile).toEqual({ department: 'Engineering' })
+  })
+})

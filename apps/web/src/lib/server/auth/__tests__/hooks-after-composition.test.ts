@@ -1,6 +1,11 @@
 /**
  * Integration test for the `hooksAfter` middleware composition.
  *
+ * Named `-composition` rather than `-integration` on purpose: the root vitest
+ * config excludes `*-integration.test.ts` for suites that need a live server,
+ * and this one runs entirely on mocks. Under the upstream name it was never
+ * collected here.
+ *
  * Each individual hook helper has its own unit test in this directory.
  * What can ONLY be verified at composition level is the ordering — the
  * doc-comment on `hooksAfter` calls out two load-bearing invariants:

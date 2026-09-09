@@ -199,4 +199,112 @@ describe('handleAvatarBackfillAfter', () => {
     )
     expect(mockUserFindFirst).not.toHaveBeenCalled()
   })
+
+  it('finds the userinfo endpoint through the discovery document when none is configured', async () => {
+    mockUserFindFirst.mockResolvedValue({ image: null })
+    mockAccountFindFirst.mockResolvedValue({
+      accountId: 'sub-1',
+      idToken: null,
+      accessToken: 'live-access-token',
+    })
+    mockSafeFetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ userinfo_endpoint: 'https://idp.acme.test/discovered-userinfo' }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ sub: 'sub-1', picture: 'https://cdn.acme.test/from-discovery.png' }),
+          { status: 200 }
+        )
+      )
+
+    await handleAvatarBackfillAfter(
+      ctx(),
+      REGISTERED,
+      providerRow({ discoveryUrl: 'https://idp.acme.test/.well-known/openid-configuration' })
+    )
+
+    expect(mockSafeFetch).toHaveBeenNthCalledWith(
+      1,
+      'https://idp.acme.test/.well-known/openid-configuration',
+      expect.anything()
+    )
+    expect(mockSafeFetch).toHaveBeenNthCalledWith(
+      2,
+      'https://idp.acme.test/discovered-userinfo',
+      expect.objectContaining({ headers: { Authorization: 'Bearer live-access-token' } })
+    )
+    expect(mockUpdateSet).toHaveBeenCalledWith({
+      image: 'https://cdn.acme.test/from-discovery.png',
+    })
+  })
+
+  it.each([
+    ['the discovery document cannot be fetched', () => new Response('', { status: 503 })],
+    [
+      'the discovery document names no userinfo endpoint',
+      () => new Response(JSON.stringify({ issuer: 'https://idp.acme.test' }), { status: 200 }),
+    ],
+    [
+      'the userinfo endpoint in the discovery document is not a string',
+      () => new Response(JSON.stringify({ userinfo_endpoint: 42 }), { status: 200 }),
+    ],
+  ])('leaves the avatar alone when %s', async (_label, discoveryResponse) => {
+    mockUserFindFirst.mockResolvedValue({ image: null })
+    mockAccountFindFirst.mockResolvedValue({
+      accountId: 'sub-1',
+      idToken: null,
+      accessToken: 'live-access-token',
+    })
+    mockSafeFetch.mockResolvedValueOnce(discoveryResponse())
+
+    await handleAvatarBackfillAfter(
+      ctx(),
+      REGISTERED,
+      providerRow({ discoveryUrl: 'https://idp.acme.test/.well-known/openid-configuration' })
+    )
+
+    expect(mockSafeFetch).toHaveBeenCalledTimes(1)
+    expect(mockUpdateSet).not.toHaveBeenCalled()
+  })
+
+  it('leaves the avatar alone when the discovery request itself fails', async () => {
+    mockUserFindFirst.mockResolvedValue({ image: null })
+    mockAccountFindFirst.mockResolvedValue({
+      accountId: 'sub-1',
+      idToken: null,
+      accessToken: 'live-access-token',
+    })
+    mockSafeFetch.mockRejectedValueOnce(new Error('network down'))
+
+    await handleAvatarBackfillAfter(
+      ctx(),
+      REGISTERED,
+      providerRow({ discoveryUrl: 'https://idp.acme.test/.well-known/openid-configuration' })
+    )
+
+    expect(mockUpdateSet).not.toHaveBeenCalled()
+  })
+
+  it('leaves the avatar alone when the userinfo request fails', async () => {
+    mockUserFindFirst.mockResolvedValue({ image: null })
+    mockAccountFindFirst.mockResolvedValue({
+      accountId: 'sub-1',
+      idToken: null,
+      accessToken: 'live-access-token',
+    })
+    mockSafeFetch.mockRejectedValueOnce(new Error('network down'))
+
+    await handleAvatarBackfillAfter(
+      ctx(),
+      REGISTERED,
+      providerRow({ userInfoUrl: 'https://idp.acme.test/userinfo' })
+    )
+
+    expect(mockSafeFetch).toHaveBeenCalledTimes(1)
+    expect(mockUpdateSet).not.toHaveBeenCalled()
+  })
 })

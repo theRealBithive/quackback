@@ -118,4 +118,21 @@ describe('deleteIdentityProviderLogoKey', () => {
     expect(hoisted.capturedSet).toEqual({ logoKey: null })
     expect(hoisted.invalidateSettingsCache).toHaveBeenCalledOnce()
   })
+
+  it('still clears the stored key when removing the old object fails', async () => {
+    hoisted.existingRow = { logoKey: 'idp-logos/2026/09/x.png' }
+    hoisted.deleteObject.mockRejectedValueOnce(new Error('s3 down'))
+    const res = await deleteIdentityProviderLogoKey(ID)
+    expect(res).toEqual({ success: true })
+    expect(hoisted.capturedSet).toEqual({ logoKey: null })
+    expect(hoisted.invalidateSettingsCache).toHaveBeenCalledOnce()
+  })
+
+  it('throws when the provider does not exist, touching neither storage nor the row', async () => {
+    hoisted.existingRow = null
+    await expect(deleteIdentityProviderLogoKey(ID)).rejects.toThrow('Identity provider not found.')
+    expect(hoisted.deleteObject).not.toHaveBeenCalled()
+    expect(hoisted.capturedSet).toBeNull()
+    expect(hoisted.invalidateSettingsCache).not.toHaveBeenCalled()
+  })
 })

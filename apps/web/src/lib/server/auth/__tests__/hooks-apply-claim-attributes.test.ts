@@ -304,4 +304,30 @@ describe('applyClaimAttributesAfter', () => {
       metadata: JSON.stringify({ department: 'Engineering' }),
     })
   })
+
+  it('explains each skipped write in the log when AUTH_HOOKS_DEBUG is on', async () => {
+    const previous = process.env.AUTH_HOOKS_DEBUG
+    process.env.AUTH_HOOKS_DEBUG = '1'
+    try {
+      await applyClaimAttributesAfter(
+        ctxFor(),
+        providersWith(),
+        new Set(['sso']),
+        fresh({ department: [{ id: '1' }, { id: '2' }] })
+      )
+    } finally {
+      if (previous === undefined) delete process.env.AUTH_HOOKS_DEBUG
+      else process.env.AUTH_HOOKS_DEBUG = previous
+    }
+
+    expect(mockLogDebug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user_1',
+        provider_id: 'sso',
+        key: 'department',
+        reason: 'type_mismatch',
+      }),
+      'claim attribute write skipped'
+    )
+  })
 })
