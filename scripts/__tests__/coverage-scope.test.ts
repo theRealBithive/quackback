@@ -50,6 +50,7 @@ describe('the coverage scope the gate grades against (B7)', () => {
     expect(coverageScope().exclude).toEqual([
       ...coverageConfigDefaults.exclude,
       'scripts/*-check.ts',
+      'packages/db/src/generate-sample-csv.ts',
     ])
   })
 

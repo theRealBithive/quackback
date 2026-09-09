@@ -42,7 +42,7 @@ vi.mock('@/lib/server/domains/companies', () => ({
   listCompanies: vi.fn(),
 }))
 
-import { boardsExporter } from '../entities/taxonomy'
+import { boardsExporter, tagsExporter } from '../entities/taxonomy'
 import { postsExporter } from '../entities/posts'
 import { commentsExporter } from '../entities/comments'
 import { votesExporter } from '../entities/votes'
@@ -181,10 +181,40 @@ describe('kbArticlesExporter.serialize', () => {
   })
 })
 
+describe('tagsExporter.serialize', () => {
+  it('writes the portal visibility as the last column so an internal tag survives an export and re-import', () => {
+    const internalTag = {
+      id: 'tag_1',
+      name: 'Churn risk',
+      color: '#ff0000',
+      description: 'Only the team sees this',
+      isPublic: false,
+    }
+    expect(tagsExporter.header).toBe('id,name,color,description,is_public')
+    expect(tagsExporter.serialize(internalTag as never)).toBe(
+      'tag_1,"Churn risk",#ff0000,"Only the team sees this",false'
+    )
+  })
+
+  it('a tag shown on the portal reads true', () => {
+    const publicTag = {
+      id: 'tag_2',
+      name: 'Bug',
+      color: '#00ff00',
+      description: 'Something is broken',
+      isPublic: true,
+    }
+    expect(tagsExporter.serialize(publicTag as never)).toBe(
+      'tag_2,"Bug",#00ff00,"Something is broken",true'
+    )
+  })
+})
+
 describe('boardsExporter / headers', () => {
   it('every entity declares a manifest key and archive file name', () => {
     for (const entity of [
       boardsExporter,
+      tagsExporter,
       postsExporter,
       commentsExporter,
       votesExporter,

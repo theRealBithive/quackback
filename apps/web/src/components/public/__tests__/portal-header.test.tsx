@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { IntlProvider } from 'react-intl'
 import { GermanIntlWrapper } from '@/test/render-with-intl'
 
@@ -76,8 +76,13 @@ vi.mock('@/lib/server/functions/conversation', () => ({
   getMyConversationsFn: vi.fn(),
 }))
 
+// Captures the header's broadcast onSuccess so a test can play the
+// "signed in from another tab" event without a BroadcastChannel.
+let broadcastOnSuccess: (() => void) | undefined
 vi.mock('@/lib/client/hooks/use-auth-broadcast', () => ({
-  useAuthBroadcast: () => {},
+  useAuthBroadcast: (opts: { onSuccess?: () => void }) => {
+    broadcastOnSuccess = opts.onSuccess
+  },
 }))
 
 vi.mock('@/lib/client/auth-client', () => ({
@@ -157,6 +162,7 @@ describe('PortalHeader — sign-out cache hygiene', () => {
     mockInvalidateQueries.mockClear()
     mockRemoveQueries.mockClear()
     mockSignOut.mockClear()
+    broadcastOnSuccess = undefined
   })
   afterEach(() => cleanup())
 
@@ -282,5 +288,17 @@ describe('PortalHeader — Sign up button visibility', () => {
     renderHeader({ userRole: null, isLoggedIn: false })
     expect(screen.getByRole('button', { name: /log in/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /sign up/i })).toBeNull()
+  })
+  it('a sign-in completed in another tab drops the viewer-scoped caches so a team member gains internal tags', () => {
+    renderHeader({ userRole: null, isLoggedIn: false })
+    expect(broadcastOnSuccess).toBeDefined()
+
+    act(() => broadcastOnSuccess?.())
+
+    const removedKeys = mockRemoveQueries.mock.calls.map(
+      (call) => (call as unknown as [{ queryKey: unknown[] }])[0].queryKey
+    )
+    expect(removedKeys).toEqual(expect.arrayContaining([...VIEWER_SCOPED_PORTAL_QUERY_KEYS]))
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['votedPosts'] })
   })
 })
