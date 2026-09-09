@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { IdentitySourcesEditor, ClaimsTable } from '../claims-table'
 import { buildClaimsTableModel } from '../provider-shared'
@@ -83,6 +83,21 @@ describe('ClaimsTable', () => {
     expect(screen.queryByRole('button', { name: /Remove Email/ })).not.toBeInTheDocument()
   })
 
+  it('routes Edit and Remove on the role row to the row itself, not another row', () => {
+    const mapping: IdentityProviderClaimMapping = {
+      role: {
+        claimPath: 'groups',
+        rules: [{ whenContains: 'engineering', role: 'member' }],
+      },
+      attributes: { map: [{ claimPath: 'org.department', attributeKey: 'department' }] },
+    }
+    const { onEdit, onRemove } = renderTable(mapping)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit role rules' }))
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ kind: 'role' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove role rules' }))
+    expect(onRemove).toHaveBeenCalledWith(expect.objectContaining({ kind: 'role' }))
+  })
+
   it('renders read-only with no action column or flag checkboxes', () => {
     renderTable(
       { attributes: { map: [{ claimPath: 'dept', attributeKey: 'department' }] } },
@@ -163,5 +178,26 @@ describe('IdentitySourcesEditor', () => {
     render(<IdentitySourcesEditor sources={['userinfo', 'idToken']} onChange={onChange} />)
     await userEvent.click(screen.getByRole('button', { name: 'Use standard sources' }))
     expect(onChange).toHaveBeenCalledWith(['idToken', 'userinfo'])
+  })
+
+  it('turns off a source that is not the last one identity can be read from', () => {
+    const onChange = vi.fn()
+    render(<IdentitySourcesEditor sources={['idToken', 'userinfo']} onChange={onChange} />)
+    fireEvent.click(screen.getByLabelText('Userinfo'))
+    expect(onChange).toHaveBeenCalledWith(['idToken'])
+  })
+
+  it('moves a source earlier in read order', () => {
+    const onChange = vi.fn()
+    render(<IdentitySourcesEditor sources={['idToken', 'userinfo']} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Move Userinfo up' }))
+    expect(onChange).toHaveBeenCalledWith(['userinfo', 'idToken'])
+  })
+
+  it('moves a source later in read order', () => {
+    const onChange = vi.fn()
+    render(<IdentitySourcesEditor sources={['idToken', 'userinfo']} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Move ID token down' }))
+    expect(onChange).toHaveBeenCalledWith(['userinfo', 'idToken'])
   })
 })

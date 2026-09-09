@@ -386,6 +386,42 @@ describe('upsertIdentityProvider — detailsChangedAt restamp (Fix 6)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Claim-mapping save-risk acknowledgement gates: identifierChanged and
+// hasAdminRules from mappingSaveRisks each require an explicit
+// acknowledgement flag on the input before the write is allowed through.
+// ---------------------------------------------------------------------------
+
+describe('upsertIdentityProvider — claim-mapping acknowledgement required (lines 472-482)', () => {
+  beforeEach(() => {
+    hoisted.txSelectResult = [EXISTING_ROW]
+  })
+
+  it('throws MAPPING_IDENTIFIER_ACK_REQUIRED when the account-id claim changes without acknowledgement', async () => {
+    await expect(
+      upsertIdentityProvider({
+        ...BASE_INPUT,
+        id: 'idp_existing' as `idp_${string}`,
+        claimMapping: { profile: { claims: { id: 'oid' } } },
+      })
+    ).rejects.toMatchObject({ code: 'MAPPING_IDENTIFIER_ACK_REQUIRED' })
+    expect(hoisted.capturedSetPatch).toBeNull()
+  })
+
+  it('throws MAPPING_ADMIN_ACK_REQUIRED when a new admin role rule is saved without acknowledgement', async () => {
+    await expect(
+      upsertIdentityProvider({
+        ...BASE_INPUT,
+        id: 'idp_existing' as `idp_${string}`,
+        claimMapping: {
+          role: { claimPath: 'groups', rules: [{ whenContains: 'admins', role: 'admin' }] },
+        },
+      })
+    ).rejects.toMatchObject({ code: 'MAPPING_ADMIN_ACK_REQUIRED' })
+    expect(hoisted.capturedSetPatch).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Fix 7: the manual OIDC endpoints (authorizationUrl / tokenUrl / userInfoUrl)
 // are server-fetched too, so they get the SAME SSRF guard + restamp treatment
 // as discoveryUrl — a stale test must not vouch for a swapped token endpoint.

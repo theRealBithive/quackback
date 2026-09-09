@@ -63,7 +63,11 @@ vi.mock('@/lib/server/functions/sso', () => ({
   fetchDiscoveryScopesFn: vi.fn(async () => ({ scopes: [] })),
 }))
 
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+const { toastSpy } = vi.hoisted(() => ({
+  toastSpy: { success: vi.fn(), error: vi.fn() },
+}))
+
+vi.mock('sonner', () => ({ toast: toastSpy }))
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -85,6 +89,8 @@ beforeEach(() => {
   upsertSpy.mockClear()
   credentialsSpy.mockClear()
   navigateSpy.mockClear()
+  toastSpy.success.mockClear()
+  toastSpy.error.mockClear()
 })
 
 describe('<ProviderCreatePage>', () => {
@@ -197,6 +203,21 @@ describe('<ProviderCreatePage>', () => {
     saveAndTest()
     await waitFor(() => expect(navigateSpy).toHaveBeenCalled())
     expect(lastNavigate().search).toEqual({})
+  })
+
+  it('stops and reports the error when creating the provider itself fails', async () => {
+    upsertSpy.mockRejectedValueOnce(new Error('registrationId already in use'))
+    renderPage()
+    await userEvent.type(screen.getByLabelText('Client ID'), 'client-123')
+    await userEvent.type(screen.getByLabelText('Client secret'), 's3cret')
+    saveAndTest()
+    await waitFor(() =>
+      expect(toastSpy.error).toHaveBeenCalledWith('registrationId already in use')
+    )
+    expect(credentialsSpy).not.toHaveBeenCalled()
+    expect(navigateSpy).not.toHaveBeenCalled()
+    // The form stays put so the admin can fix the registrationId and retry.
+    expect(screen.getByLabelText('Client ID')).toBeInTheDocument()
   })
 
   it('seeds the canonical discovery URL for a fixed-discovery family', async () => {

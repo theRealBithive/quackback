@@ -53,6 +53,8 @@ const { upsertSpy, mappingSpy, deleteSpy, credentialsSpy } = vi.hoisted(() => ({
         autoCreateUsers?: boolean
         autoProvisionRole?: string | null
         label?: string
+        discoveryUrl?: string | null
+        authorizationUrl?: string | null
       }
     }) => undefined
   ),
@@ -566,6 +568,81 @@ describe('<ProviderDetailPage> connection', () => {
     expect(lastSavedMapping()).toEqual({ ...claimMapping, profile: { allowMissingEmail: true } })
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
   })
+
+  it('says the fix already works when the same account would now resolve fully', () => {
+    // Original test failed under the settings in place at the time; the admin
+    // has since fixed the mapping, so replaying it under the CURRENT draft
+    // resolves a full identity. That is a "test again to confirm" case, not
+    // a diagnosis of what's still broken.
+    renderPage(
+      makeProvider({
+        lastSuccessfulTestAt: '2026-05-01T00:00:00.000Z',
+        lastTestCapture: {
+          version: 2,
+          registrationId: 'oidc_x',
+          capturedAt: '2026-05-02T00:00:00.000Z',
+          detailsChangedAtAtStart: null,
+          outcome: 'mapping_failed',
+          claims: { sub: 's', email: 'jane@acme.com', name: 'Jane Smith' },
+          replay: {
+            sources: [
+              {
+                source: 'idToken',
+                claims: { sub: 's', email: 'jane@acme.com', name: 'Jane Smith' },
+              },
+              {
+                source: 'userinfo',
+                claims: { sub: 's', email: 'jane@acme.com', name: 'Jane Smith' },
+              },
+            ],
+          },
+        },
+      })
+    )
+    expect(
+      screen.getByText(/last test failed with the previous settings\. Test again to confirm/i)
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/could not identify the account/i)).not.toBeInTheDocument()
+  })
+
+  it('says the account could not be identified when the test capture carries no subject', () => {
+    renderPage(
+      makeProvider({
+        lastSuccessfulTestAt: '2026-05-01T00:00:00.000Z',
+        lastTestCapture: {
+          version: 2,
+          registrationId: 'oidc_x',
+          capturedAt: '2026-05-02T00:00:00.000Z',
+          detailsChangedAtAtStart: null,
+          outcome: 'mapping_failed',
+          claims: { email: 'x@example.test', name: 'No Subject' },
+          replay: {
+            sources: [
+              { source: 'idToken', claims: { email: 'x@example.test', name: 'No Subject' } },
+              { source: 'userinfo', claims: { email: 'x@example.test', name: 'No Subject' } },
+            ],
+          },
+        },
+      })
+    )
+    expect(
+      screen.getByText(
+        /could not identify the account\. Check the profile fields under User details/i
+      )
+    ).toBeInTheDocument()
+  })
+
+  it('keeps the connection editor open and reports the error when the secret fails to save', async () => {
+    credentialsSpy.mockRejectedValueOnce(new Error('KMS unavailable'))
+    renderPage(makeProvider({}))
+    editConnection()
+    fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 's3cret' } })
+    saveConnection()
+    await waitFor(() => expect(toastSpy.error).toHaveBeenCalledWith('KMS unavailable'))
+    // onDone() never ran: the form (and its Client ID field) is still shown.
+    expect(screen.getByLabelText('Client ID')).toBeInTheDocument()
+    expect(openTestSpy).not.toHaveBeenCalled()
+  })
 })
 
 /**
@@ -697,6 +774,51 @@ describe('<ProviderDetailPage> connection options', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Custom OIDC' }))
     expect(screen.getByText('Manual endpoints')).toBeInTheDocument()
   })
+
+  it('saves a discovery URL typed for a custom OIDC provider', async () => {
+    renderPage(makeProvider({ kind: 'other', discoveryUrl: '' }))
+    editConnection()
+    fireEvent.change(screen.getByLabelText('Discovery URL'), {
+      target: { value: 'https://idp.example/.well-known/openid-configuration' },
+    })
+    saveConnection()
+    await waitFor(() => expect(upsertSpy).toHaveBeenCalled())
+    expect(lastUpsert().discoveryUrl).toBe('https://idp.example/.well-known/openid-configuration')
+  })
+
+  it('saves a sign-in prompt chosen from Connection options', async () => {
+    renderPage(makeProvider({}))
+    editConnection()
+    openConnectionOptions()
+    fireEvent.click(screen.getByLabelText('Sign-in prompt'))
+    fireEvent.click(await screen.findByTestId('prompt-choice-omit'))
+    saveConnection()
+    await waitFor(() => expect(upsertSpy).toHaveBeenCalled())
+    expect(lastUpsert().prompt).toBe('omit')
+  })
+
+  it('saves a client authentication method chosen from Connection options', async () => {
+    renderPage(makeProvider({}))
+    editConnection()
+    openConnectionOptions()
+    fireEvent.click(screen.getByLabelText('Client authentication'))
+    fireEvent.click(await screen.findByRole('option', { name: 'Send credentials as HTTP Basic' }))
+    saveConnection()
+    await waitFor(() => expect(upsertSpy).toHaveBeenCalled())
+    expect(lastUpsert().tokenEndpointAuthMethod).toBe('basic')
+  })
+
+  it('saves a manual authorization URL typed for a custom provider', async () => {
+    renderPage(makeProvider({ kind: 'other' }))
+    editConnection()
+    openConnectionOptions()
+    fireEvent.change(screen.getByLabelText('Authorization URL'), {
+      target: { value: 'https://idp.example/authorize' },
+    })
+    saveConnection()
+    await waitFor(() => expect(upsertSpy).toHaveBeenCalled())
+    expect(lastUpsert().authorizationUrl).toBe('https://idp.example/authorize')
+  })
 })
 
 /**
@@ -776,6 +898,15 @@ describe('<ProviderDetailPage> sign-in & access', () => {
     saveSignIn()
     await waitFor(() => expect(screen.getByLabelText('Display name')).toHaveFocus())
     expect(upsertSpy).not.toHaveBeenCalled()
+  })
+
+  it('saves a new account role chosen from the New account role picker', async () => {
+    renderPage(makeProvider({ autoCreateUsers: true, autoProvisionRole: 'user' }))
+    fireEvent.click(screen.getByLabelText('New account role'))
+    fireEvent.click(await screen.findByRole('option', { name: 'Admin' }))
+    saveSignIn()
+    await waitFor(() => expect(upsertSpy).toHaveBeenCalled())
+    expect(lastUpsert().autoProvisionRole).toBe('admin')
   })
 })
 

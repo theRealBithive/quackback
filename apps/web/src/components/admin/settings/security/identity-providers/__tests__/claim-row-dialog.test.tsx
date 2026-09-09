@@ -242,6 +242,36 @@ describe('ClaimRowDialog', () => {
     expect(screen.queryByRole('option', { name: /^Email/ })).not.toBeInTheDocument()
   })
 
+  it('lets an admin switch the target back to Role rules after picking a person attribute', async () => {
+    const onCommit = vi.fn()
+    const targets = availableAddTargets({ mapping: null, definitions: DEFS })
+    render(
+      <ClaimRowDialog
+        open
+        mode="add"
+        availableTargets={targets}
+        definitions={DEFS}
+        registrationId="oidc_x"
+        canTest
+        onOpenChange={vi.fn()}
+        onCommit={onCommit}
+      />
+    )
+    // Role rules is the default target; switch away to a person attribute...
+    await userEvent.click(screen.getByRole('combobox', { name: 'Set from this provider' }))
+    await userEvent.click(screen.getByRole('option', { name: /Plan/ }))
+    expect(screen.queryByRole('combobox', { name: 'Role claim path' })).not.toBeInTheDocument()
+    // ...then back to Role rules, which must re-show the role rules editor.
+    await userEvent.click(screen.getByRole('combobox', { name: 'Set from this provider' }))
+    await userEvent.click(screen.getByRole('option', { name: /Role rules/ }))
+    expect(screen.getByRole('combobox', { name: 'Role claim path' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(onCommit).toHaveBeenCalledWith({
+      type: 'role',
+      mapping: { claimPath: 'groups', rules: [] },
+    })
+  })
+
   it('includes sub in identity suggestions', async () => {
     render(
       <ClaimRowDialog

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { OutcomePreviewRail } from '../outcome-preview-rail'
 import type { SsoTestCapture } from '@/lib/shared/sso-test-capture'
 import type { IdentityProviderClaimMapping } from '@/lib/shared/oidc-claim-mapping'
@@ -205,5 +205,37 @@ describe('OutcomePreviewRail', () => {
   it('shows Member (runtime default) when Accounts role is null', () => {
     renderRail({ draft: { role: { claimPath: 'groups', rules: [] } } })
     expect(screen.getByText(/Member \(runtime default\)/)).toBeInTheDocument()
+  })
+
+  it('names the claim path an admin would map to supply the missing email', () => {
+    renderRail({
+      capture: v2({
+        replay: {
+          sources: [
+            { source: 'idToken', claims: { sub: 'person-123', name: 'Jane' } },
+            { source: 'userinfo', claims: { sub: 'person-123' } },
+          ],
+        },
+      }),
+    })
+    expect(screen.getByText('Not supplied by email')).toBeInTheDocument()
+  })
+
+  it('reveals protocol claims like aud only after asking to see them', () => {
+    renderRail({
+      capture: v2({
+        claims: {
+          sub: 'person-123',
+          email: 'jane@example.test',
+          name: 'Jane',
+          groups: ['engineering'],
+          aud: 'client-abc',
+        },
+      }),
+    })
+    fireEvent.click(screen.getByText('View test details'))
+    expect(screen.queryByText('aud')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Show protocol claims'))
+    expect(screen.getByText('aud')).toBeInTheDocument()
   })
 })

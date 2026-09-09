@@ -1,10 +1,30 @@
 import { describe, it, expect } from 'vitest'
+import fc from 'fast-check'
 import {
   captureIdentityCaption,
   captureSuggestionClaims,
   isReplayableCapture,
   parseSsoTestCapture,
 } from '../sso-test-capture'
+
+/**
+ * Contract for `sso-test-capture.ts`, confirmed before these tests were
+ * written (module doc: "Tolerate a missing or malformed column; never fail a
+ * provider list.").
+ *
+ * V1 Parsing a malformed or partially-invalid stored capture never throws —
+ *    it always returns null instead, so a bad database column can never fail
+ *    the identity-provider list or detail read.
+ * V2 A source-snapshot entry is accepted only if it is either a genuine
+ *    claims record or a valid "unavailable" reason for a known source name;
+ *    an entry naming a known source but supplying neither is rejected — the
+ *    whole capture parses to null — rather than accepted as an ambiguous or
+ *    empty snapshot.
+ * V3 A V2 capture is accepted only with a valid outcome ('success' or
+ *    'mapping_failed') and a `replay.sources` array whose every entry is
+ *    independently valid — one invalid source entry anywhere invalidates the
+ *    whole capture, it is not simply dropped.
+ */
 
 describe('parseSsoTestCapture', () => {
   const valid = {
@@ -92,6 +112,111 @@ describe('parseSsoTestCapture', () => {
         replay: { sources: [{ source: 'scim', claims: {} }] },
       })
     ).toBeNull()
+  })
+
+  it('rejects a V2 capture whose source entry has neither claims nor an unavailable reason (V2)', () => {
+    expect(
+      parseSsoTestCapture({
+        version: 2,
+        registrationId: 'oidc_x',
+        capturedAt: '2026-09-07T12:00:00.000Z',
+        detailsChangedAtAtStart: null,
+        outcome: 'success',
+        claims: { sub: 'u1' },
+        // A known source name, but no `claims` record and no `unavailable`
+        // reason — an ambiguous snapshot the parser must not guess about.
+        replay: { sources: [{ source: 'idToken' }] },
+      })
+    ).toBeNull()
+  })
+
+  it('rejects a V2 capture whose unavailable reason is not one of the known ones (V2)', () => {
+    expect(
+      parseSsoTestCapture({
+        version: 2,
+        registrationId: 'oidc_x',
+        capturedAt: '2026-09-07T12:00:00.000Z',
+        detailsChangedAtAtStart: null,
+        outcome: 'success',
+        claims: { sub: 'u1' },
+        replay: { sources: [{ source: 'idToken', unavailable: 'gremlins' }] },
+      })
+    ).toBeNull()
+  })
+})
+
+describe('property-based tests (fast-check)', () => {
+  it('V1: parsing never throws, for any input at all', () => {
+    fc.assert(
+      fc.property(fc.anything(), (value) => {
+        expect(() => parseSsoTestCapture(value)).not.toThrow()
+      })
+    )
+  })
+
+  const KNOWN_SOURCES = ['idToken', 'userinfo', 'accessTokenJwt'] as const
+  const KNOWN_UNAVAILABLE = ['absent', 'unreadable', 'fetch_failed'] as const
+
+  const genGoodSnapshot = () =>
+    fc.oneof(
+      fc.record({
+        source: fc.constantFrom(...KNOWN_SOURCES),
+        claims: fc.dictionary(fc.string({ minLength: 1, maxLength: 8 }), fc.string()),
+      }),
+      fc.record({
+        source: fc.constantFrom(...KNOWN_SOURCES),
+        unavailable: fc.constantFrom(...KNOWN_UNAVAILABLE),
+      })
+    )
+
+  const genAmbiguousSnapshot = () => fc.record({ source: fc.constantFrom(...KNOWN_SOURCES) })
+
+  const genV2Shell = (sourcesArb: fc.Arbitrary<unknown[]>) =>
+    fc.record({
+      version: fc.constant(2),
+      registrationId: fc.string({ minLength: 1, maxLength: 10 }),
+      capturedAt: fc.constant('2026-09-07T12:00:00.000Z'),
+      detailsChangedAtAtStart: fc.constant(null),
+      outcome: fc.constantFrom('success', 'mapping_failed'),
+      claims: fc.dictionary(fc.string({ minLength: 1, maxLength: 8 }), fc.string()),
+      replay: sourcesArb.map((sources) => ({ sources })),
+    })
+
+  it('V3: a capture whose replay sources are all well-formed always parses', () => {
+    fc.assert(
+      fc.property(
+        genV2Shell(fc.array(genGoodSnapshot(), { minLength: 1, maxLength: 4 })),
+        (candidate) => {
+          const parsed = parseSsoTestCapture(candidate)
+          expect(parsed).not.toBeNull()
+          expect(parsed?.replay?.sources.length).toBe(
+            (candidate.replay as { sources: unknown[] }).sources.length
+          )
+        }
+      )
+    )
+  })
+
+  it('V2/V3: one ambiguous source entry anywhere invalidates the whole capture', () => {
+    fc.assert(
+      fc.property(
+        fc.array(genGoodSnapshot(), { minLength: 0, maxLength: 3 }),
+        fc.array(genGoodSnapshot(), { minLength: 0, maxLength: 3 }),
+        genAmbiguousSnapshot(),
+        (before, after, ambiguous) => {
+          const value = {
+            version: 2,
+            registrationId: 'oidc_x',
+            capturedAt: '2026-09-07T12:00:00.000Z',
+            detailsChangedAtAtStart: null,
+            outcome: 'success',
+            claims: {},
+            replay: { sources: [...before, ambiguous, ...after] },
+          }
+          expect(parseSsoTestCapture(value)).toBeNull()
+        }
+      )
+    )
   })
 })
 

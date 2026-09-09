@@ -1,7 +1,37 @@
 import { describe, it, expect } from 'vitest'
+import fc from 'fast-check'
 import type { IdentityProviderClaimMapping } from '../oidc-claim-mapping'
-import { previewClaimMapping, selectMappingCapture } from '../sso-mapping-preview'
+import {
+  captureConfigIsStale,
+  effectiveEmailPath,
+  effectiveNamePath,
+  previewClaimMapping,
+  selectMappingCapture,
+} from '../sso-mapping-preview'
 import type { SsoTestCapture } from '../sso-test-capture'
+
+/**
+ * Contract for `sso-mapping-preview.ts`, confirmed before these tests were
+ * written (module doc: "Draft mapping preview. Replays captured source
+ * snapshots through the same binder production uses. No alternate value
+ * extraction.").
+ *
+ * V1 The preview never derives identity/role/people results from any claim
+ *    data other than what the selected capture actually recorded and replays
+ *    through the same binder production sign-in uses.
+ * V2 Configuration staleness is computed relative to the instant the capture
+ *    actually reflects — the handshake's start for a replayable capture, or
+ *    the capture's own timestamp for a legacy one — never relative to the
+ *    current wall-clock time: it is false whenever current details changed at
+ *    or before that instant, and can only be true when they changed strictly
+ *    after it.
+ * V3 effectiveIdPath/effectiveEmailPath/effectiveNamePath return the draft's
+ *    configured claim path when the admin set one, and otherwise a fixed
+ *    standard default (`sub`/`email`/`name`) — never any other value.
+ * V4 A capture recorded for a different provider, or missing a source the
+ *    current draft configuration requires, is never used to produce an
+ *    identity/role/people result — the preview reports "needs retest".
+ */
 
 const REG = 'oidc_x'
 
@@ -283,5 +313,110 @@ describe('previewClaimMapping', () => {
     })
     expect(preview.status).toBe('mapping_failed')
     expect(preview.identity?.email).toBe('jane@example.test')
+  })
+})
+
+describe('captureConfigIsStale (V2)', () => {
+  it('a legacy (non-replayable) capture is judged against its own capturedAt timestamp', () => {
+    const legacyCapture: SsoTestCapture = {
+      registrationId: REG,
+      capturedAt: '2026-09-01T00:00:00.000Z',
+      identity: { id: 'person-123', sources: { id: 'idToken' } },
+      claims: { sub: 'person-123' },
+    }
+    expect(captureConfigIsStale('2026-09-01T00:01:00.000Z', legacyCapture)).toBe(true)
+    expect(captureConfigIsStale('2026-08-31T23:59:00.000Z', legacyCapture)).toBe(false)
+    expect(captureConfigIsStale('2026-09-01T00:00:00.000Z', legacyCapture)).toBe(false)
+  })
+
+  it('no detailsChangedAt is never stale, whatever the capture looks like', () => {
+    const legacyCapture: SsoTestCapture = {
+      registrationId: REG,
+      capturedAt: '2026-09-01T00:00:00.000Z',
+      identity: { id: 'person-123', sources: { id: 'idToken' } },
+      claims: { sub: 'person-123' },
+    }
+    expect(captureConfigIsStale(null, legacyCapture)).toBe(false)
+    expect(captureConfigIsStale(undefined, legacyCapture)).toBe(false)
+    expect(captureConfigIsStale(null, v2Capture())).toBe(false)
+  })
+})
+
+describe('effectiveEmailPath / effectiveNamePath (V3)', () => {
+  it('effectiveEmailPath returns the configured claim, or "email" when none is set', () => {
+    expect(effectiveEmailPath(null)).toBe('email')
+    expect(effectiveEmailPath({ profile: { claims: { email: 'upn' } } })).toBe('upn')
+  })
+
+  it('effectiveNamePath returns the configured claim, or "name" when none is set', () => {
+    expect(effectiveNamePath(null)).toBe('name')
+    expect(effectiveNamePath({ profile: { claims: { name: 'displayName' } } })).toBe('displayName')
+  })
+})
+
+describe('property-based tests (fast-check)', () => {
+  const nonBlankClaimPath = fc
+    .string({ minLength: 1, maxLength: 24 })
+    .filter((s) => s.trim().length > 0 && s === s.trim())
+
+  it('V3: effective path is exactly the configured claim, else exactly the fixed default', () => {
+    fc.assert(
+      fc.property(
+        fc.option(nonBlankClaimPath, { nil: undefined }),
+        fc.option(nonBlankClaimPath, { nil: undefined }),
+        (emailPath, namePath) => {
+          const draft = { profile: { claims: { email: emailPath, name: namePath } } }
+          const email = effectiveEmailPath(draft)
+          const name = effectiveNamePath(draft)
+          expect(email).toBe(emailPath === undefined ? 'email' : emailPath)
+          expect(name).toBe(namePath === undefined ? 'name' : namePath)
+        }
+      )
+    )
+  })
+
+  it('V2: staleness never fires at or before the reference instant, and always fires strictly after it (legacy capture)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 1_000_000_000 }),
+        fc.integer({ min: 0, max: 1_000_000_000 }),
+        (baseOffsetMs, deltaMs) => {
+          const referenceMs = Date.parse('2026-01-01T00:00:00.000Z') + baseOffsetMs
+          const capture: SsoTestCapture = {
+            registrationId: REG,
+            capturedAt: new Date(referenceMs).toISOString(),
+            identity: { id: 'person-123', sources: { id: 'idToken' } },
+            claims: { sub: 'person-123' },
+          }
+          const atOrBefore = new Date(referenceMs - deltaMs).toISOString()
+          const strictlyAfter = new Date(referenceMs + deltaMs + 1).toISOString()
+          expect(captureConfigIsStale(atOrBefore, capture)).toBe(false)
+          expect(captureConfigIsStale(strictlyAfter, capture)).toBe(true)
+        }
+      )
+    )
+  })
+
+  it('V2: staleness for a replayable capture is anchored to the handshake start, not capturedAt', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 1_000_000_000 }),
+        fc.integer({ min: 0, max: 1_000_000_000 }),
+        (baseOffsetMs, deltaMs) => {
+          const startMs = Date.parse('2026-01-01T00:00:00.000Z') + baseOffsetMs
+          const capture = v2Capture({
+            detailsChangedAtAtStart: new Date(startMs).toISOString(),
+            // capturedAt deliberately far later than the handshake start, so a
+            // property that mistakenly anchored on capturedAt instead would
+            // disagree with one anchored on the start time.
+            capturedAt: new Date(startMs + 60_000).toISOString(),
+          })
+          const atOrBefore = new Date(startMs - deltaMs).toISOString()
+          const strictlyAfter = new Date(startMs + deltaMs + 1).toISOString()
+          expect(captureConfigIsStale(atOrBefore, capture)).toBe(false)
+          expect(captureConfigIsStale(strictlyAfter, capture)).toBe(true)
+        }
+      )
+    )
   })
 })

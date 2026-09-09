@@ -287,6 +287,93 @@ describe('runHandshake — avatar / picture claim', () => {
   })
 })
 
+/**
+ * Userinfo is a second, optional source. When the ID token alone already
+ * carries enough to resolve an identity, a userinfo outage must be reported
+ * as a red step but must not fail the whole test sign-in.
+ */
+describe('runHandshake — userinfo fetch failure is non-fatal', () => {
+  async function runWithFailingUserinfo(finalMock: () => Promise<Response>) {
+    const { publicKey, privateKey } = await generateKeyPair('RS256', { extractable: true })
+    const publicJwk = await exportJWK(publicKey)
+    publicJwk.kid = 'test-key'
+    publicJwk.alg = 'RS256'
+    const issuer = 'https://idp.example'
+    // email + name already on the ID token, so identity resolves regardless
+    // of what happens to userinfo.
+    const idToken = await new SignJWT({
+      email: 'alice@idp.example',
+      name: 'Alice Example',
+      nonce: 'nonce789',
+    })
+      .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
+      .setIssuer(issuer)
+      .setAudience('cid')
+      .setSubject('user-sub-123')
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .sign(privateKey)
+
+    safeFetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          issuer,
+          token_endpoint: `${issuer}/token`,
+          jwks_uri: `${issuer}/jwks`,
+          userinfo_endpoint: `${issuer}/userinfo`,
+        }),
+        { status: 200 }
+      )
+    )
+    safeFetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ id_token: idToken, access_token: 'at', token_type: 'Bearer' }),
+        { status: 200 }
+      )
+    )
+    safeFetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ keys: [publicJwk] }), { status: 200 })
+    )
+    safeFetchMock.mockImplementationOnce(finalMock)
+
+    return runHandshake(baseInput)
+  }
+
+  it('records a red userinfo step and still succeeds when userinfo answers with an error status (456-457)', async () => {
+    const result = await runWithFailingUserinfo(
+      async () => new Response('server error', { status: 500 })
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const step = result.steps.find((s) => s.stage === 'userinfo')
+    expect(step).toMatchObject({ ok: false, label: 'Userinfo failed (500)' })
+    expect(result.identity?.email).toBe('alice@idp.example')
+    const userinfoSource = result.capture?.replay.sources.find((s) => s.source === 'userinfo')
+    expect(userinfoSource).toMatchObject({
+      source: 'userinfo',
+      unavailable: 'fetch_failed',
+    })
+  })
+
+  it('records a red userinfo step and still succeeds when the userinfo fetch throws (467, 472-473)', async () => {
+    const result = await runWithFailingUserinfo(async () => {
+      throw new TypeError('fetch failed: ECONNRESET')
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const step = result.steps.find((s) => s.stage === 'userinfo')
+    expect(step).toMatchObject({ ok: false, label: 'Userinfo unreachable or unsafe to fetch' })
+    expect(result.identity?.email).toBe('alice@idp.example')
+    const userinfoSource = result.capture?.replay.sources.find((s) => s.source === 'userinfo')
+    expect(userinfoSource).toMatchObject({
+      source: 'userinfo',
+      unavailable: 'fetch_failed',
+    })
+  })
+})
+
 describe('runHandshake — provider that releases no email', () => {
   it('fails when the placeholder option is off, naming both remedies', async () => {
     const result = await runWorldCHandshake({ allowMissingEmail: false })

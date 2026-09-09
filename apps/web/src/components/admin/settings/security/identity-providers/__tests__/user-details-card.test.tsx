@@ -5,7 +5,7 @@
  * new admin rules) still confirm before writing.
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { IdentityProviderId } from '@quackback/ids'
@@ -464,5 +464,48 @@ describe('UserDetailsCard save coordination', () => {
       { claimPath: 'dept', attributeKey: 'department' },
       { claimPath: 'costCenter', attributeKey: 'department' },
     ])
+  })
+
+  it('removes role rules with an Undo instead of a confirmation, and Undo restores them', () => {
+    renderCard(
+      makeProvider({
+        claimMapping: {
+          role: {
+            claimPath: 'groups',
+            rules: [{ whenContains: 'engineering', role: 'member' }],
+          },
+        },
+      })
+    )
+    expect(screen.getByRole('button', { name: 'Edit role rules' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove role rules' }))
+    expect(screen.queryByRole('button', { name: 'Edit role rules' })).not.toBeInTheDocument()
+    expect(toastSpy).toHaveBeenCalledWith(
+      'Removed role rules.',
+      expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) })
+    )
+    const undo = toastSpy.mock.calls.at(-1)![1].action.onClick
+    act(() => undo())
+    expect(screen.getByRole('button', { name: 'Edit role rules' })).toBeInTheDocument()
+  })
+
+  it('opens the role rules editor pre-filled with the existing rule', () => {
+    renderCard(
+      makeProvider({
+        claimMapping: {
+          role: {
+            claimPath: 'groups',
+            rules: [{ whenContains: 'platform-admins', role: 'admin' }],
+          },
+        },
+      })
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Edit role rules' }))
+    expect(
+      screen.getByRole('combobox', { name: 'Claim value to match (rule 1)' })
+    ).toHaveTextContent('platform-admins')
+    expect(screen.getByRole('combobox', { name: 'Quackback role (rule 1)' })).toHaveTextContent(
+      'Admin'
+    )
   })
 })
