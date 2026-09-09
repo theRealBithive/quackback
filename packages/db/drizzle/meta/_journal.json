@@ -1779,6 +1779,13 @@
       "when": 1785700000034,
       "tag": "0276_identity_provider_logo_key",
       "breakpoints": true
+    },
+    {
+      "idx": 254,
+      "version": "7",
+      "when": 1785700000035,
+      "tag": "0277_post_tags_is_public",
+      "breakpoints": true
     }
   ]
 }
