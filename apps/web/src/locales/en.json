@@ -1368,6 +1368,7 @@
   "auth.blocked.unable_to_create_session": "Something went wrong signing you in. Please try again.",
   "auth.blocked.unable_to_create_user": "Something went wrong creating your account. Please try again.",
   "auth.blocked.unable_to_link_account": "Something went wrong while connecting your sign-in. Please try again.",
+  "auth.blocked.user_info_is_missing": "Your identity provider didn't share a usable profile. Ask your administrator to release an email address, or to map the claim that carries it.",
   "auth.blocked.verified_domain_requires_sso": "Your email is on a domain that requires single sign-on. Use the SSO option to continue.",
   "portal.auth.complete.closing": "This window will close automatically.",
   "portal.auth.complete.failedGeneric": "Sign-in failed. Return to the original window and try again.",

@@ -1368,6 +1368,7 @@
   "auth.blocked.unable_to_create_session": "为你登录时出错。请重试。",
   "auth.blocked.unable_to_create_user": "创建你的账户时出错。请重试。",
   "auth.blocked.unable_to_link_account": "关联你的登录时出错。请重试。",
+  "auth.blocked.user_info_is_missing": "你的身份提供商未提供可用的个人资料。请让管理员开放电子邮件地址，或映射包含该地址的 claim。",
   "auth.blocked.verified_domain_requires_sso": "你的邮箱所属域名要求使用单点登录。请通过 SSO 选项继续。",
   "portal.auth.complete.closing": "此窗口将自动关闭。",
   "portal.auth.complete.failedGeneric": "登录失败。请返回原窗口后重试。",

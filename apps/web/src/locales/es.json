@@ -1368,6 +1368,7 @@
   "auth.blocked.unable_to_create_session": "Algo salió mal al iniciar tu sesión. Inténtalo de nuevo.",
   "auth.blocked.unable_to_create_user": "Algo salió mal al crear tu cuenta. Inténtalo de nuevo.",
   "auth.blocked.unable_to_link_account": "Algo salió mal al vincular tu inicio de sesión. Inténtalo de nuevo.",
+  "auth.blocked.user_info_is_missing": "Tu proveedor de identidad no compartió un perfil utilizable. Pide a tu administración que comparta una dirección de correo o que asigne el claim que la contiene.",
   "auth.blocked.verified_domain_requires_sso": "Tu correo pertenece a un dominio que exige inicio de sesión único. Continúa con la opción de SSO.",
   "portal.auth.complete.closing": "Esta ventana se cerrará automáticamente.",
   "portal.auth.complete.failedGeneric": "Error al iniciar sesión. Vuelve a la ventana original e inténtalo de nuevo.",

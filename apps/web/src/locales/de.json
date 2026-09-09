@@ -1368,6 +1368,7 @@
   "auth.blocked.unable_to_create_session": "Beim Anmelden ist etwas schiefgelaufen. Versuchen Sie es bitte erneut.",
   "auth.blocked.unable_to_create_user": "Beim Anlegen Ihres Kontos ist etwas schiefgelaufen. Versuchen Sie es bitte erneut.",
   "auth.blocked.unable_to_link_account": "Beim Verknüpfen Ihrer Anmeldung ist etwas schiefgelaufen. Versuchen Sie es bitte erneut.",
+  "auth.blocked.user_info_is_missing": "Ihr Identitätsanbieter hat kein verwertbares Profil übermittelt. Bitten Sie Ihre Administration, eine E-Mail-Adresse freizugeben oder den Claim zuzuordnen, der sie enthält.",
   "auth.blocked.verified_domain_requires_sso": "Ihre E-Mail gehört zu einer Domain, die Single Sign-on erfordert. Fahren Sie über die SSO-Option fort.",
   "portal.auth.complete.closing": "Dieses Fenster schließt sich automatisch.",
   "portal.auth.complete.failedGeneric": "Die Anmeldung ist fehlgeschlagen. Kehren Sie zum ursprünglichen Fenster zurück und versuchen Sie es erneut.",

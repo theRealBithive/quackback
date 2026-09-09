@@ -1368,6 +1368,7 @@
   "auth.blocked.unable_to_create_session": "為您登入時發生錯誤。請重試。",
   "auth.blocked.unable_to_create_user": "建立您的帳戶時發生錯誤。請重試。",
   "auth.blocked.unable_to_link_account": "關聯您的登入時發生錯誤。請重試。",
+  "auth.blocked.user_info_is_missing": "您的身分提供者未提供可用的個人資料。請讓管理員開放電子郵件地址，或對應包含該地址的 claim。",
   "auth.blocked.verified_domain_requires_sso": "您的電子郵件所屬網域要求使用單一登入。請透過 SSO 選項繼續。",
   "portal.auth.complete.closing": "此視窗將自動關閉。",
   "portal.auth.complete.failedGeneric": "登入失敗。請返回原視窗後重試。",

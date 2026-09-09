@@ -1368,6 +1368,7 @@
   "auth.blocked.unable_to_create_session": "Algo deu errado ao fazer seu login. Tente novamente.",
   "auth.blocked.unable_to_create_user": "Algo deu errado ao criar sua conta. Tente novamente.",
   "auth.blocked.unable_to_link_account": "Algo deu errado ao vincular seu login. Tente novamente.",
+  "auth.blocked.user_info_is_missing": "Seu provedor de identidade não compartilhou um perfil utilizável. Peça à administração para liberar um endereço de e-mail ou mapear a claim que o contém.",
   "auth.blocked.verified_domain_requires_sso": "Seu e-mail pertence a um domínio que exige logon único. Continue pela opção de SSO.",
   "portal.auth.complete.closing": "Esta janela será fechada automaticamente.",
   "portal.auth.complete.failedGeneric": "Falha ao entrar. Volte à janela original e tente novamente.",
