@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 7x — Test suites are flaky under parallel load
+## 8x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -89,6 +89,19 @@ that import in a hook rather than in the test body never got the headroom.
 Raising `hookTimeout` to match is the obvious fix; not done inside the
 back-merge, for the reason above -- a change to shared test infrastructure
 needs its own run to be falsifiable.
+
+Eighth hit, on the back-merge of upstream #506–#520: a run over 345 suites with
+coverage ended on one red test, `policy/module-state/__tests__/module-state.test.ts`
+(`Test timed out in 20000ms` on the scanner walk), and the same file passed alone in
+under a second of test time. Another scanner-shaped suite that walks the source tree
+and lives close to the 20s ceiling under contention; nothing in the change touched it.
+The re-run of the same set, capped at six workers, went red on a different file
+instead: `jobs/__tests__/runner.test.ts` ("reaps a stranded lease and prunes an aged
+terminal row in one pass") saw `pruned` come back 0 for a row it had just aged
+400 days, and passed three times in a row alone. `job-queue.test.ts` and
+`worker.test.ts` prune the same shared `job_queue` table from their own workers,
+so whichever process prunes first takes the other's row and its count. Same
+shape as `seat-usage`: a database-wide count asserted across parallel suites.
 
 ## 1x — A line that is only an arrow function passed as a JSX prop reads as uncovered until the handler actually fires
 
