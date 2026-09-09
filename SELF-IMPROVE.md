@@ -90,6 +90,50 @@ Raising `hookTimeout` to match is the obvious fix; not done inside the
 back-merge, for the reason above -- a change to shared test infrastructure
 needs its own run to be falsifiable.
 
+## 1x — A line that is only an arrow function passed as a JSX prop reads as uncovered until the handler actually fires
+
+Filling a diff-coverage hole for `onEdit={() => onEdit(row)}`-shaped lines
+(`claims-table.tsx`, `use-sso-test-sign-in.tsx`) it looked safe to assume that
+simply rendering the component past the point where such a prop is created
+already counts as covering the line — the closure exists, so the statement
+"ran". Reasoning about it that way is wrong, and the wrongness is invisible
+from the terminal summary (`Statements 92%` reads the same either way).
+
+v8/istanbul records the statement for a line like this as the arrow's _body_,
+not its creation, so the count on that line is how many times the callback was
+**invoked** (the control clicked), not how many times the enclosing JSX was
+rendered. The only way to see this directly is to dump the report itself:
+
+```
+node -e "const r=require('./coverage/client/coverage-final.json'); \
+  for (const f of Object.values(r)) if (f.path.endsWith('claims-table.tsx')) { \
+    for (const [id, loc] of Object.entries(f.statementMap)) \
+      if (loc.start.line===90) console.log(id, f.s[id]) }"
+```
+
+`count=0` on the prop line next to `count=23` on the surrounding block is the
+proof; nothing about reading the source settles it either way. Generalises to
+every interactive component in this repo: a coverage hole on a line whose only
+content is a prop-value arrow function means "write a test that clicks the
+control", never "render something that passes near it".
+
+## 1x — A test file named after a TanStack Router `$param` file collides with shell parameter expansion
+
+Route files in this repo are named with a literal `$` for a dynamic segment
+(`settings.security.sso_.$providerId.tsx`). Naming the co-located test file the
+same way — `settings.security.sso_.$providerId.test.tsx` — and then passing it
+unquoted to `bun x vitest run <path>` lets the shell (fish and bash both) treat
+`$providerId` as a variable reference, which expands to empty since no such
+variable is set. The path vitest receives has a chunk silently deleted, matches
+zero files, and — per the entry further down on `vitest run <paths>` ignoring a path that matches nothing — vitest says nothing
+and the run reports green with one file fewer than intended.
+
+Caught before it ever ran once, by naming the new file
+`settings.security.sso_.providerId.test.tsx` (`$` dropped) instead. The safer
+general fix is to always single-quote a path containing `$` (`'…$providerId…'`),
+but renaming is one character simpler and does not depend on remembering to
+quote correctly every time the file is touched again.
+
 ## 1x — An upstream suite named `*-integration.test.ts` never runs here, and passes by absence
 
 The root vitest config excludes `**/*-integration.test.ts`, for the API suite
