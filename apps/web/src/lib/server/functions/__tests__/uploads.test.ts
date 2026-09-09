@@ -36,9 +36,16 @@ vi.mock('../widget-auth', () => ({
   getWidgetSession: vi.fn(),
 }))
 
+vi.mock('../auth-helpers', () => ({
+  requireAuth: vi.fn(),
+}))
+
 import { getWidgetSession } from '../widget-auth'
 import type { WidgetAuthContext } from '../widget-auth'
-import { getWidgetImageUploadUrlFn } from '../uploads'
+import { getWidgetImageUploadUrlFn, getIdentityProviderLogoUploadUrlFn } from '../uploads'
+import { requireAuth } from '../auth-helpers'
+import { generatePresignedUploadUrl } from '../../storage/s3'
+import { PERMISSIONS } from '@/lib/shared/permissions'
 
 const mockSession: WidgetAuthContext = {
   settings: { id: 'workspace_test1' as WorkspaceId, slug: 'test', name: 'Test' },
@@ -89,5 +96,35 @@ describe('getWidgetImageUploadUrlFn', () => {
     })
     expect(result.uploadUrl).toContain('widget-images/screenshot.png')
     expect(result.publicUrl).toContain('widget-images/screenshot.png')
+  })
+})
+
+describe('getIdentityProviderLogoUploadUrlFn', () => {
+  const requestUpload = getIdentityProviderLogoUploadUrlFn as unknown as (args: {
+    data: unknown
+  }) => Promise<{ uploadUrl: string; key: string }>
+  const request = { filename: 'logo.png', contentType: 'image/png', fileSize: 1024 }
+
+  beforeEach(() => {
+    vi.mocked(requireAuth).mockReset()
+    vi.mocked(generatePresignedUploadUrl).mockClear()
+  })
+
+  it('issues no upload URL to a caller without auth.manage', async () => {
+    vi.mocked(requireAuth).mockRejectedValueOnce(new Error('Forbidden'))
+
+    await expect(requestUpload({ data: request })).rejects.toThrow('Forbidden')
+
+    expect(requireAuth).toHaveBeenCalledWith({ permission: PERMISSIONS.AUTH_MANAGE })
+    expect(generatePresignedUploadUrl).not.toHaveBeenCalled()
+  })
+
+  it('keeps provider logos under their own idp-logos prefix, apart from workspace logos', async () => {
+    vi.mocked(requireAuth).mockResolvedValueOnce({} as never)
+
+    const result = await requestUpload({ data: request })
+
+    expect(result.key).toBe('idp-logos/logo.png')
+    expect(result.uploadUrl).toContain('idp-logos/logo.png')
   })
 })
