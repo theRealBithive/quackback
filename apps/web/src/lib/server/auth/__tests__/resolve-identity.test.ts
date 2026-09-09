@@ -359,6 +359,32 @@ describe('resolveIdentity — subject consistency (OIDC Core 5.3.2)', () => {
     expect(result.identity.sources.id).toBe('userinfo')
   })
 
+  it('incomplete subject replacement discards prior subject role and People claims', async () => {
+    const result = await resolveIdentity({
+      tokens: {
+        idToken: fakeJwt({
+          sub: 'from-token',
+          groups: ['eng'],
+          org: { department: 'TokenDept' },
+        }),
+        accessToken: 'at',
+      },
+      fetchUserInfo: async () => ({
+        sub: 'from-userinfo',
+        email: 'e@x.com',
+        name: 'N',
+        groups: ['ops'],
+        org: { department: 'UserinfoDept' },
+      }),
+      requiredClaimPaths: ['groups', 'org.department'],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.identity.id).toBe('from-userinfo')
+    expect(result.identity.claims.groups).toEqual(['ops'])
+    expect(result.identity.claims.org).toEqual({ department: 'UserinfoDept' })
+  })
+
   it('does NOT apply the rule to the access token, whose subject may differ', async () => {
     // 5.3.2 is scoped to the userinfo response. An access token is
     // audience-scoped and pairwise subjects legitimately differ, so enforcing
@@ -392,8 +418,27 @@ describe('resolveIdentity — failure', () => {
         throw new Error('network down')
       },
     })
-    // The ID token already had everything, so the outage is irrelevant.
+    // The ID token already had everything, so the fast path never even calls
+    // fetchUserInfo — this only proves an outage nobody asked about is inert.
     expect(result.ok).toBe(true)
+  })
+
+  it('resolves the id from the ID token when userinfo actually throws (World B, no fast path)', async () => {
+    // World B's ID token carries only `sub` — email/name live at userinfo —
+    // so, unlike the case above, the resolver must actually call
+    // fetchUserInfo here. When it throws, resolveIdentity must not propagate
+    // the error: the id already resolved from the ID token, so sign-in
+    // degrades gracefully (no email/name) instead of crashing.
+    const result = await resolveWorld(WORLD_B, {
+      fetchUserInfo: async () => {
+        throw new Error('userinfo network down')
+      },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.identity.id).toBe(WORLD_B.expect.id)
+    expect(result.identity.email).toBeUndefined()
+    expect(result.identity.name).toBeUndefined()
   })
 })
 

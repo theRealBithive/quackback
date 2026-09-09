@@ -1368,6 +1368,7 @@
   "auth.blocked.unable_to_create_session": "Un problème est survenu lors de votre connexion. Veuillez réessayer.",
   "auth.blocked.unable_to_create_user": "Un problème est survenu lors de la création de votre compte. Veuillez réessayer.",
   "auth.blocked.unable_to_link_account": "Un problème est survenu lors du rattachement de votre connexion. Veuillez réessayer.",
+  "auth.blocked.user_info_is_missing": "Votre fournisseur d’identité n’a pas transmis de profil exploitable. Demandez à votre administration de transmettre une adresse e-mail ou de mapper la revendication qui la contient.",
   "auth.blocked.verified_domain_requires_sso": "Votre adresse e-mail appartient à un domaine qui exige l’authentification unique. Utilisez l’option SSO pour continuer.",
   "portal.auth.complete.closing": "Cette fenêtre se fermera automatiquement.",
   "portal.auth.complete.failedGeneric": "La connexion a échoué. Revenez à la fenêtre d’origine et réessayez.",

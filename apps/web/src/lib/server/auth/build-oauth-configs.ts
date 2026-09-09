@@ -22,8 +22,15 @@
 import type { IdentityProvider } from '@/lib/server/domains/settings/identity-providers.service'
 import { authorizeRequestFor, supportsPrompt } from '@/lib/shared/oidc-request'
 import { resolveIdentity, pickAvatarUrl } from './resolve-identity'
-import { synthesizeName } from './placeholder-identity'
-import { allowsMissingEmail, claimMappingFor } from '@/lib/shared/oidc-claim-mapping'
+import { finalizeProfileOutcome } from '@/lib/shared/sso-profile-outcome'
+import {
+  allowsMissingEmail,
+  claimMappingFor,
+  identityMappingFor,
+} from '@/lib/shared/oidc-claim-mapping'
+
+/** Closed reasons the production adapter may report. Never include claims. */
+export type IdentityProfileFailureReason = 'no_identity' | 'subject_mismatch' | 'missing_email'
 
 // Re-exported so server callers keep this import path. The implementation lives
 // in `shared` because the admin editor needs it too, and having exactly one
@@ -126,6 +133,8 @@ export interface BuildGenericOAuthConfigsArgs {
   /** Called with the claims behind a successful resolution, so downstream
    *  consumers need not re-derive them from stored tokens. */
   onResolved?: (registrationId: string, accountId: string, claims: Record<string, unknown>) => void
+  /** Value-free failure signal. Callers may log the reason, never a profile. */
+  onIdentityFailure?: (registrationId: string, reason: IdentityProfileFailureReason) => void
   /**
    * Returns the placeholder address to use for a provider that released none.
    *
@@ -161,6 +170,7 @@ export async function buildGenericOAuthConfigs({
   fetchUserInfo,
   onResolutionWarning,
   onResolved,
+  onIdentityFailure,
   placeholderEmailFor,
   mapProfileToUser,
   buildLoginHintParams,
@@ -217,6 +227,7 @@ export async function buildGenericOAuthConfigs({
     // leave two resolution paths — the thing this work exists to remove.
     const resolvedUserInfoUrl = userInfoUrl
     const mapping = claimMappingFor(provider.claimMapping)
+    const identityMapping = identityMappingFor(provider.claimMapping)
     const requiredClaimPaths = [
       ...(mapping.attributes?.map ?? []).map((entry) => entry.claimPath),
       ...(mapping.role?.claimPath ? [mapping.role.claimPath] : []),
@@ -228,6 +239,7 @@ export async function buildGenericOAuthConfigs({
           resolvedUserInfoUrl && tokens.accessToken && fetchUserInfo
             ? await fetchUserInfo(resolvedUserInfoUrl, tokens.accessToken)
             : null,
+        mapping: identityMapping,
         requiredClaimPaths: requiredClaimPaths.length > 0 ? requiredClaimPaths : undefined,
         // Pursue the avatar through the cascade — a `picture` claim commonly
         // lives only at userinfo, past where id + email + name already stopped
@@ -235,7 +247,10 @@ export async function buildGenericOAuthConfigs({
         // backfill via `onResolved`.
         wantImage: true,
       })
-      if (!result.ok) return null
+      if (!result.ok) {
+        onIdentityFailure?.(provider.registrationId, result.reason)
+        return null
+      }
       const { id, email, name, image, emailVerified, claims, warnings } = result.identity
       // Phase one of observe-then-enforce: the discrepancy is recorded, not
       // acted on, so the real rate is known before a release starts refusing
@@ -249,17 +264,36 @@ export async function buildGenericOAuthConfigs({
       // that resolves identity from userinfo or an access token.
       onResolved?.(provider.registrationId, id, claims)
 
+      const outcome = finalizeProfileOutcome(
+        {
+          identity: { id, email, name, emailVerified },
+          acceptedClaims: claims,
+          warnings: warnings ?? [],
+          provenance: {},
+        },
+        { allowMissingEmail: allowsMissingEmail(provider.claimMapping) }
+      )
+
       // Gap-fill runs LAST, after every real source has been tried, so it can
       // never shadow something the provider actually sent.
       //
       // A synthesized name needs no opt-in: it only ever rescues a sign-in that
       // would fail outright, and a display name creates nothing irreversible.
       // A minted address does, so it stays behind `allowMissingEmail`, which is
-      // off unless an admin turned it on.
-      const resolvedName = name ?? synthesizeName(claims, id)
+      // off unless an admin turned it on. Production alone materializes it.
+      const resolvedName = outcome.name
       let resolvedEmail = email
-      if (!resolvedEmail && allowsMissingEmail(provider.claimMapping) && placeholderEmailFor) {
+      let resolvedEmailVerified = emailVerified
+      if (outcome.kind === 'placeholder_required' && placeholderEmailFor) {
         resolvedEmail = await placeholderEmailFor(provider.registrationId, id)
+        resolvedEmailVerified = false
+      }
+
+      // Better-Auth logs the entire userInfo on email_is_missing. Returning
+      // null keeps a claims profile (and any leftover raw email) off that path.
+      if (!resolvedEmail) {
+        onIdentityFailure?.(provider.registrationId, 'missing_email')
+        return null
       }
 
       // Better-Auth's genericOAuth derives the avatar from `image` only, so
@@ -270,11 +304,14 @@ export async function buildGenericOAuthConfigs({
 
       // Raw claims first, mapped fields last: the mapped values are the
       // resolved answer and must not be shadowed by a same-named raw claim.
+      // email_verified is rewritten from the resolved address so mapProfileToUser
+      // cannot re-verify a leftover true from a different source.
       return {
         ...claims,
         id,
-        emailVerified,
-        ...(resolvedEmail ? { email: resolvedEmail } : {}),
+        email: resolvedEmail,
+        emailVerified: resolvedEmailVerified,
+        email_verified: resolvedEmailVerified,
         ...(resolvedName ? { name: resolvedName } : {}),
         ...(resolvedImage ? { image: resolvedImage } : {}),
       }

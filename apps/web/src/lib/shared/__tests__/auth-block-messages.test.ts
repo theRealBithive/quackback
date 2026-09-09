@@ -74,7 +74,7 @@ describe('sign-in messages in the catalogue (S1, S9, S10)', () => {
 
   it('has the outcomes it claims to, so the check is not empty (S1)', () => {
     // Without this the assertion above would pass against an empty map.
-    expect(outcomes()).toHaveLength(31)
+    expect(outcomes()).toHaveLength(32)
   })
 
   it('says what the module says, so the catalogue cannot drift (S9)', () => {

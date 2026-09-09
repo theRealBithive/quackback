@@ -1368,6 +1368,7 @@
   "auth.blocked.unable_to_create_session": "حدث خطأ أثناء تسجيل دخولك. حاول مرة أخرى.",
   "auth.blocked.unable_to_create_user": "حدث خطأ أثناء إنشاء حسابك. حاول مرة أخرى.",
   "auth.blocked.unable_to_link_account": "حدث خطأ أثناء ربط تسجيل الدخول. حاول مرة أخرى.",
+  "auth.blocked.user_info_is_missing": "لم يشارك مزوّد الهوية ملفًا شخصيًا قابلًا للاستخدام. اطلب من الإدارة إتاحة عنوان بريد إلكتروني أو ربط المطالبة (claim) التي تحمله.",
   "auth.blocked.verified_domain_requires_sso": "بريدك الإلكتروني ضمن نطاق يتطلب الدخول الموحّد. تابع باستخدام خيار الدخول الموحّد.",
   "portal.auth.complete.closing": "ستُغلق هذه النافذة تلقائيًا.",
   "portal.auth.complete.failedGeneric": "فشل تسجيل الدخول. عد إلى النافذة الأصلية وحاول مرة أخرى.",
