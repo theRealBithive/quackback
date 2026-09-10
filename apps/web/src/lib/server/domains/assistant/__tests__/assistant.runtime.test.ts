@@ -424,15 +424,12 @@ describe('respondEligible (silence rule)', () => {
 
 describe('assembleCitations', () => {
   const ledger = new Map<string, AssistantCitation>([
-    [
-      'kb_article_1',
-      { type: 'article', id: 'kb_article_1', title: 'T1', url: '/hc/articles/g/a1' },
-    ],
+    ['article_1', { type: 'article', id: 'article_1', title: 'T1', url: '/hc/articles/g/a1' }],
   ])
 
   it('keeps only surfaced ids, enriched from the ledger', () => {
-    expect(assembleCitations([{ type: 'article', id: 'kb_article_1' }], ledger)).toEqual([
-      { type: 'article', id: 'kb_article_1', title: 'T1', url: '/hc/articles/g/a1' },
+    expect(assembleCitations([{ type: 'article', id: 'article_1' }], ledger)).toEqual([
+      { type: 'article', id: 'article_1', title: 'T1', url: '/hc/articles/g/a1' },
     ])
   })
 
@@ -454,13 +451,13 @@ describe('assembleCitations', () => {
     expect(
       assembleCitations(
         [
-          { type: 'article', id: 'kb_article_1' },
+          { type: 'article', id: 'article_1' },
           { type: 'article', id: 'kb_article_HALLUCINATED' },
-          { type: 'article', id: 'kb_article_1' },
+          { type: 'article', id: 'article_1' },
         ],
         ledger
       )
-    ).toEqual([{ type: 'article', id: 'kb_article_1', title: 'T1', url: '/hc/articles/g/a1' }])
+    ).toEqual([{ type: 'article', id: 'article_1', title: 'T1', url: '/hc/articles/g/a1' }])
   })
 
   it('round-trips a post citation the same way as an article one (post grounding source)', () => {
@@ -474,13 +471,13 @@ describe('assembleCitations', () => {
     expect(
       assembleCitations(
         [
-          { type: 'article', id: 'kb_article_1' },
+          { type: 'article', id: 'article_1' },
           { type: 'post', id: 'post_1' },
         ],
         postLedger
       )
     ).toEqual([
-      { type: 'article', id: 'kb_article_1', title: 'T1', url: '/hc/articles/g/a1' },
+      { type: 'article', id: 'article_1', title: 'T1', url: '/hc/articles/g/a1' },
       { type: 'post', id: 'post_1', title: 'Dark mode request', url: '/b/general/posts/post_1' },
     ])
   })
@@ -496,13 +493,13 @@ describe('assembleCitations', () => {
     expect(
       assembleCitations(
         [
-          { type: 'article', id: 'kb_article_1' },
+          { type: 'article', id: 'article_1' },
           { type: 'snippet', id: 'assistant_snippet_1' },
         ],
         snippetLedger
       )
     ).toEqual([
-      { type: 'article', id: 'kb_article_1', title: 'T1', url: '/hc/articles/g/a1' },
+      { type: 'article', id: 'article_1', title: 'T1', url: '/hc/articles/g/a1' },
       { type: 'snippet', id: 'assistant_snippet_1', title: 'Refund window', url: '' },
     ])
   })
@@ -518,19 +515,19 @@ describe('assembleCitations', () => {
     expect(
       assembleCitations(
         [
-          { type: 'article', id: 'kb_article_1' },
+          { type: 'article', id: 'article_1' },
           { type: 'summary', id: 'conversation_1' },
         ],
         summaryLedger
       )
     ).toEqual([
-      { type: 'article', id: 'kb_article_1', title: 'T1', url: '/hc/articles/g/a1' },
+      { type: 'article', id: 'article_1', title: 'T1', url: '/hc/articles/g/a1' },
       { type: 'summary', id: 'conversation_1', title: 'Past conversation', url: '' },
     ])
   })
 
   it('drops everything when nothing cleared the confidence floor (empty ledger)', () => {
-    expect(assembleCitations([{ type: 'article', id: 'kb_article_1' }], new Map())).toEqual([])
+    expect(assembleCitations([{ type: 'article', id: 'article_1' }], new Map())).toEqual([])
   })
 })
 
@@ -558,7 +555,7 @@ describe('structural completion check', () => {
     expect(() =>
       validateAssistantCompletion({
         text: 'Use the reset link. [1]',
-        citations: [{ type: 'article', id: 'kb_article_1' }],
+        citations: [{ type: 'article', id: 'article_1' }],
       })
     ).not.toThrow()
   })
@@ -612,7 +609,7 @@ describe('runAssistantTurn', () => {
   })
 
   it('runs the tool round trip and assembles citations from what search surfaced', async () => {
-    mockRetrieve.mockResolvedValue([makeKbArticle('kb_article_1')])
+    mockRetrieve.mockResolvedValue([makeKbArticle('article_1')])
     const deltas: string[] = []
     mockChat.mockImplementation(
       (opts: {
@@ -628,7 +625,7 @@ describe('runAssistantTurn', () => {
           )
           const object = {
             text: 'Use the reset link.',
-            citations: [{ type: 'article', id: 'kb_article_1' }],
+            citations: [{ type: 'article', id: 'article_1' }],
           }
           yield { type: 'TEXT_MESSAGE_CONTENT', delta: JSON.stringify(object) }
           yield { type: 'CUSTOM', name: 'structured-output.complete', value: { object } }
@@ -652,9 +649,9 @@ describe('runAssistantTurn', () => {
       citations: [
         {
           type: 'article',
-          id: 'kb_article_1',
-          title: 'Title kb_article_1',
-          url: '/hc/en/articles/1-slug-kb_article_1',
+          id: 'article_1',
+          title: 'Title article_1',
+          url: '/hc/en/articles/1-slug-article_1',
           updatedAt: '2026-06-01T00:00:00.000Z',
         },
       ],
@@ -676,7 +673,7 @@ describe('runAssistantTurn', () => {
   })
 
   it('derives a team content audience for the copilot surface (structural leak gate)', async () => {
-    mockRetrieve.mockResolvedValue([makeKbArticle('kb_article_1')])
+    mockRetrieve.mockResolvedValue([makeKbArticle('article_1')])
     mockChat.mockImplementation(
       (opts: {
         tools: Array<{ name: string; execute: (args: unknown, o: unknown) => Promise<unknown> }>
@@ -690,7 +687,7 @@ describe('runAssistantTurn', () => {
           )
           const object = {
             text: 'Here is the policy.',
-            citations: [{ type: 'article', id: 'kb_article_1' }],
+            citations: [{ type: 'article', id: 'article_1' }],
           }
           yield* completeRun(object)
         })()
@@ -745,7 +742,7 @@ describe('runAssistantTurn', () => {
   })
 
   it('internalSourced stays false when every retrieved source is public', async () => {
-    mockRetrieve.mockResolvedValue([makeKbArticle('kb_article_1', { isPublic: true })])
+    mockRetrieve.mockResolvedValue([makeKbArticle('article_1', { isPublic: true })])
     mockChat.mockImplementation(
       (opts: {
         tools: Array<{ name: string; execute: (args: unknown, o: unknown) => Promise<unknown> }>
@@ -759,7 +756,7 @@ describe('runAssistantTurn', () => {
           )
           yield* completeRun({
             text: 'Here is the policy.',
-            citations: [{ type: 'article', id: 'kb_article_1' }],
+            citations: [{ type: 'article', id: 'article_1' }],
           })
         })()
     )
@@ -792,7 +789,7 @@ describe('runAssistantTurn', () => {
   })
 
   it("carries the source's updatedAt on every surface's citations (freshness line; the orchestrator strips it at persistence)", async () => {
-    mockRetrieve.mockResolvedValue([makeKbArticle('kb_article_1')])
+    mockRetrieve.mockResolvedValue([makeKbArticle('article_1')])
     const turnWith = (copilot = false) => {
       mockChat.mockImplementation(
         (opts: {
@@ -807,7 +804,7 @@ describe('runAssistantTurn', () => {
             )
             yield* completeRun({
               text: 'Here is the policy.',
-              citations: [{ type: 'article', id: 'kb_article_1' }],
+              citations: [{ type: 'article', id: 'article_1' }],
             })
           })()
       )
@@ -874,7 +871,7 @@ describe('runAssistantTurn', () => {
     // A grounded source in the ledger plus report_inability: an honest "I
     // can't help" must not dress itself in sources, so the cited id is dropped
     // and its inline marker stripped.
-    mockRetrieve.mockResolvedValue([makeKbArticle('kb_article_1')])
+    mockRetrieve.mockResolvedValue([makeKbArticle('article_1')])
     mockChat.mockImplementation(
       (opts: {
         tools: Array<{ name: string; execute: (args: unknown, o: unknown) => Promise<unknown> }>
@@ -893,7 +890,7 @@ describe('runAssistantTurn', () => {
           )
           const object = {
             text: 'The docs only cover part of this. [1] I cannot answer fully.',
-            citations: [{ type: 'article', id: 'kb_article_1' }],
+            citations: [{ type: 'article', id: 'article_1' }],
           }
           yield { type: 'CUSTOM', name: 'structured-output.complete', value: { object } }
           yield { type: 'RUN_FINISHED', usage: undefined }
@@ -1154,7 +1151,7 @@ describe('runAssistantTurn', () => {
   })
 
   it('logs answerKind "answered" in the usage-log metadata for a normal grounded reply', async () => {
-    mockRetrieve.mockResolvedValue([makeKbArticle('kb_article_1')])
+    mockRetrieve.mockResolvedValue([makeKbArticle('article_1')])
     mockChat.mockImplementation(
       (opts: {
         tools: Array<{ name: string; execute: (args: unknown, o: unknown) => Promise<unknown> }>
@@ -1168,7 +1165,7 @@ describe('runAssistantTurn', () => {
           )
           const object = {
             text: 'Use the reset link.',
-            citations: [{ type: 'article', id: 'kb_article_1' }],
+            citations: [{ type: 'article', id: 'article_1' }],
           }
           yield { type: 'TEXT_MESSAGE_CONTENT', delta: JSON.stringify(object) }
           yield { type: 'CUSTOM', name: 'structured-output.complete', value: { object } }
@@ -1192,11 +1189,11 @@ describe('runAssistantTurn', () => {
       citationCandidates: 1,
       completionDisposition: 'answer',
     })
-    expect(lastLoggedMetadata?.citedSources).toEqual([{ type: 'article', id: 'kb_article_1' }])
+    expect(lastLoggedMetadata?.citedSources).toEqual([{ type: 'article', id: 'article_1' }])
   })
 
   it('logs citedSources with one entry per distinct source actually cited, dropping a hallucinated id', async () => {
-    mockRetrieve.mockResolvedValue([makeKbArticle('kb_article_1'), makeKbArticle('kb_article_2')])
+    mockRetrieve.mockResolvedValue([makeKbArticle('article_1'), makeKbArticle('article_2')])
     mockChat.mockImplementation(
       (opts: {
         tools: Array<{ name: string; execute: (args: unknown, o: unknown) => Promise<unknown> }>
@@ -1211,11 +1208,11 @@ describe('runAssistantTurn', () => {
           const object = {
             text: 'Use the reset link. [1][2][3]',
             citations: [
-              { type: 'article', id: 'kb_article_1' },
+              { type: 'article', id: 'article_1' },
               // A duplicate reference to the same source collapses to one entry.
-              { type: 'article', id: 'kb_article_1' },
+              { type: 'article', id: 'article_1' },
               // A hallucinated id the ledger never surfaced is dropped.
-              { type: 'article', id: 'kb_article_missing' },
+              { type: 'article', id: 'article_missing' },
             ],
           }
           yield { type: 'TEXT_MESSAGE_CONTENT', delta: JSON.stringify(object) }
@@ -1229,7 +1226,7 @@ describe('runAssistantTurn', () => {
       messages: customerAsks('how do I reset my password?'),
     })
 
-    expect(lastLoggedMetadata?.citedSources).toEqual([{ type: 'article', id: 'kb_article_1' }])
+    expect(lastLoggedMetadata?.citedSources).toEqual([{ type: 'article', id: 'article_1' }])
   })
 
   it('omits citedSources from the logged metadata when nothing was cited', async () => {
