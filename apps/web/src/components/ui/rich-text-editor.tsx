@@ -1,5 +1,6 @@
 import {
   useEditor,
+  useEditorState,
   EditorContent,
   ReactRenderer,
   type Editor,
@@ -2011,13 +2012,25 @@ interface BubbleMenuContentProps {
 
 function BubbleMenuContent({ editor, disabled }: BubbleMenuContentProps) {
   const intl = useIntl()
+  // Same subscription trick as MenuBar: active-state without full re-renders.
+  const active = useEditorState({
+    editor,
+    selector: ({ editor: e }) => ({
+      bold: e.isActive('bold'),
+      italic: e.isActive('italic'),
+      underline: e.isActive('underline'),
+      strike: e.isActive('strike'),
+      code: e.isActive('code'),
+      link: e.isActive('link'),
+    }),
+  })
   return (
     <div className="flex items-center gap-0.5 rounded-lg border bg-popover p-1 shadow-md">
       <ToolbarButton
         icon={<Bold className="size-4" />}
         onClick={() => editor.chain().focus().toggleBold().run()}
         disabled={disabled}
-        isActive={editor.isActive('bold')}
+        isActive={active.bold}
         title={shortcutTitle(
           intl,
           { id: 'ui.editor.action.bold', defaultMessage: 'Bold' },
@@ -2028,7 +2041,7 @@ function BubbleMenuContent({ editor, disabled }: BubbleMenuContentProps) {
         icon={<Italic className="size-4" />}
         onClick={() => editor.chain().focus().toggleItalic().run()}
         disabled={disabled}
-        isActive={editor.isActive('italic')}
+        isActive={active.italic}
         title={shortcutTitle(
           intl,
           { id: 'ui.editor.action.italic', defaultMessage: 'Italic' },
@@ -2039,7 +2052,7 @@ function BubbleMenuContent({ editor, disabled }: BubbleMenuContentProps) {
         icon={<UnderlineIcon className="size-4" />}
         onClick={() => editor.chain().focus().toggleUnderline().run()}
         disabled={disabled}
-        isActive={editor.isActive('underline')}
+        isActive={active.underline}
         title={shortcutTitle(
           intl,
           { id: 'ui.editor.action.underline', defaultMessage: 'Underline' },
@@ -2050,7 +2063,7 @@ function BubbleMenuContent({ editor, disabled }: BubbleMenuContentProps) {
         icon={<Strikethrough className="size-4" />}
         onClick={() => editor.chain().focus().toggleStrike().run()}
         disabled={disabled}
-        isActive={editor.isActive('strike')}
+        isActive={active.strike}
         title={shortcutTitle(
           intl,
           { id: 'ui.editor.action.strikethrough', defaultMessage: 'Strikethrough' },
@@ -2062,7 +2075,7 @@ function BubbleMenuContent({ editor, disabled }: BubbleMenuContentProps) {
         icon={<Code className="size-4" />}
         onClick={() => editor.chain().focus().toggleCode().run()}
         disabled={disabled}
-        isActive={editor.isActive('code')}
+        isActive={active.code}
         title={shortcutTitle(
           intl,
           { id: 'ui.editor.action.inlineCode', defaultMessage: 'Inline Code' },
@@ -2541,6 +2554,30 @@ function MenuBar({
   const isBottom = variant === 'bottom'
   // Muted ghost buttons on the transparent bottom row; filled active-state on top.
   const btn = isBottom ? ('quiet' as const) : ('default' as const)
+  // Subscribe to the marks/nodes the toolbar reflects so active-state stays
+  // current without re-rendering the whole editor on every keystroke
+  // (useEditor's default re-renders all children per transaction).
+  const active = useEditorState({
+    editor,
+    selector: ({ editor: e }) => ({
+      bold: e.isActive('bold'),
+      italic: e.isActive('italic'),
+      link: e.isActive('link'),
+      bulletList: e.isActive('bulletList'),
+      orderedList: e.isActive('orderedList'),
+      codeBlock: e.isActive('codeBlock'),
+      heading1: e.isActive('heading', { level: 1 }),
+      heading2: e.isActive('heading', { level: 2 }),
+      heading3: e.isActive('heading', { level: 3 }),
+    }),
+  })
+  const canUndoRedo = useEditorState({
+    editor,
+    selector: ({ editor: e }) => ({
+      undo: e.can().undo(),
+      redo: e.can().redo(),
+    }),
+  })
   const setLink = useCallback(() => {
     const previousUrl = editor.getAttributes('link').href
     let url = window.prompt(
@@ -2584,8 +2621,8 @@ function MenuBar({
     input.click()
   }, [editor, onImageUpload])
 
-  const canUndo = editor.can().chain().focus().undo().run()
-  const canRedo = editor.can().chain().focus().redo().run()
+  const canUndo = canUndoRedo.undo
+  const canRedo = canUndoRedo.redo
 
   return (
     <div
@@ -2607,7 +2644,7 @@ function MenuBar({
             icon={<Heading1 className="size-4" />}
             onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
             disabled={disabled}
-            isActive={editor.isActive('heading', { level: 1 })}
+            isActive={active.heading1}
             title={intl.formatMessage({
               id: 'ui.editor.action.heading1',
               defaultMessage: 'Heading 1',
@@ -2618,7 +2655,7 @@ function MenuBar({
             icon={<Heading2 className="size-4" />}
             onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
             disabled={disabled}
-            isActive={editor.isActive('heading', { level: 2 })}
+            isActive={active.heading2}
             title={intl.formatMessage({
               id: 'ui.editor.action.heading2',
               defaultMessage: 'Heading 2',
@@ -2629,7 +2666,7 @@ function MenuBar({
             icon={<Heading3 className="size-4" />}
             onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
             disabled={disabled}
-            isActive={editor.isActive('heading', { level: 3 })}
+            isActive={active.heading3}
             title={intl.formatMessage({
               id: 'ui.editor.action.heading3',
               defaultMessage: 'Heading 3',
@@ -2644,8 +2681,8 @@ function MenuBar({
         variant={btn}
         icon={<Bold className="size-4" />}
         onClick={() => editor.chain().focus().toggleBold().run()}
-        disabled={disabled || !editor.can().chain().focus().toggleBold().run()}
-        isActive={editor.isActive('bold')}
+        disabled={disabled}
+        isActive={active.bold}
         title={intl.formatMessage({
           id: 'ui.editor.action.bold',
           defaultMessage: 'Bold',
@@ -2655,8 +2692,8 @@ function MenuBar({
         variant={btn}
         icon={<Italic className="size-4" />}
         onClick={() => editor.chain().focus().toggleItalic().run()}
-        disabled={disabled || !editor.can().chain().focus().toggleItalic().run()}
-        isActive={editor.isActive('italic')}
+        disabled={disabled}
+        isActive={active.italic}
         title={intl.formatMessage({
           id: 'ui.editor.action.italic',
           defaultMessage: 'Italic',
@@ -2670,7 +2707,7 @@ function MenuBar({
         icon={<ListBulletIcon className="size-4" />}
         onClick={() => editor.chain().focus().toggleBulletList().run()}
         disabled={disabled}
-        isActive={editor.isActive('bulletList')}
+        isActive={active.bulletList}
         title={intl.formatMessage({
           id: 'ui.editor.action.bulletList',
           defaultMessage: 'Bullet List',
@@ -2681,7 +2718,7 @@ function MenuBar({
         icon={<ListOrdered className="size-4" />}
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
         disabled={disabled}
-        isActive={editor.isActive('orderedList')}
+        isActive={active.orderedList}
         title={intl.formatMessage({
           id: 'ui.editor.action.orderedList',
           defaultMessage: 'Ordered List',
@@ -2695,7 +2732,7 @@ function MenuBar({
         icon={<LinkIcon className="size-4" />}
         onClick={setLink}
         disabled={disabled}
-        isActive={editor.isActive('link')}
+        isActive={active.link}
         title={intl.formatMessage({
           id: 'ui.editor.action.insertLink',
           defaultMessage: 'Insert Link',
@@ -2709,7 +2746,7 @@ function MenuBar({
           icon={<Code2 className="size-4" />}
           onClick={() => editor.chain().focus().toggleCodeBlock().run()}
           disabled={disabled}
-          isActive={editor.isActive('codeBlock')}
+          isActive={active.codeBlock}
           title={intl.formatMessage({
             id: 'ui.editor.action.codeBlock',
             defaultMessage: 'Code Block',
