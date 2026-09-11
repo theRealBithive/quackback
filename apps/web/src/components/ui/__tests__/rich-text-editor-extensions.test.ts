@@ -13,6 +13,7 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import { createIntl } from 'react-intl'
+import { Editor } from '@tiptap/core'
 import type { EditorFeatures } from '../rich-text-editor'
 import {
   buildExtensions,
@@ -106,6 +107,35 @@ describe('buildExtensions', () => {
     expect(withoutNames).toContain('image')
   })
 
+  it('does not materialize 0×0 or 500×500 on a stored image that omitted dimensions', () => {
+    const editor = new Editor({
+      extensions: build(
+        { images: true, slashMenu: false, emojiPicker: false, mentions: false },
+        { placeholder: '' }
+      ),
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'image', attrs: { src: 'https://cdn.example.com/wide.png' } }],
+          },
+        ],
+      },
+    })
+    try {
+      const img = editor.getJSON().content?.[0]?.content?.[0] as
+        | { type?: string; attrs?: { src?: string; width?: number | null; height?: number | null } }
+        | undefined
+      expect(img?.type).toBe('image')
+      expect(img?.attrs?.src).toBe('https://cdn.example.com/wide.png')
+      expect(img?.attrs?.width).toBeNull()
+      expect(img?.attrs?.height).toBeNull()
+    } finally {
+      editor.destroy()
+    }
+  })
+
   it('includes slashCommands extension by default', () => {
     const exts = build({}, { placeholder: '' })
     const names = exts.map((e) => (e as { name: string }).name)
@@ -143,7 +173,7 @@ describe('buildExtensions', () => {
   })
 
   it('COMMENT_EDITOR_FEATURES registers enterAsHardBreak (plain Enter is a newline)', () => {
-    const names = buildExtensions(COMMENT_EDITOR_FEATURES, { placeholder: '' }).map(
+    const names = build(COMMENT_EDITOR_FEATURES, { placeholder: '' }).map(
       (e) => (e as { name: string }).name
     )
     expect(names).toContain('enterAsHardBreak')
@@ -521,7 +551,7 @@ describe('generateContentHTML — chatImage nodes', () => {
     expect(html).toContain('<img')
     expect(html).toContain('src="https://example.com/photo.png"')
     expect(html).toContain('alt="A screenshot"')
-    expect(html).toContain('class="max-w-xs rounded-md"')
+    expect(html).toContain('class="max-w-xs h-auto object-contain rounded-md"')
   })
 
   it('renders nothing for a chatImage with no src', () => {
