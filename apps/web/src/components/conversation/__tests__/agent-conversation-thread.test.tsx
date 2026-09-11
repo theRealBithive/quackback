@@ -490,7 +490,7 @@ describe('AgentConversationThread — ticket capability wiring', () => {
       </QueryClientProvider>
     )
     const trigger = await screen.findByRole('button', { name: 'Reply' })
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+    fireEvent.click(trigger)
     expect(await screen.findByRole('menuitemradio', { name: 'Note' })).toBeInTheDocument()
   })
 
@@ -533,7 +533,7 @@ describe('AgentConversationThread — conversation kind unaffected', () => {
   it('still renders the conversation detail panel and the Reply/Note switcher', async () => {
     renderThread({ kind: 'conversation', id: 'conversation_1' })
     const trigger = await screen.findByRole('button', { name: 'Reply' })
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+    fireEvent.click(trigger)
     expect(await screen.findByRole('menuitemradio', { name: 'Note' })).toBeInTheDocument()
     expect(screen.getByTestId('inbox-detail-panel')).toBeInTheDocument()
     expect(screen.getByTestId('composer-ai-actions')).toHaveAttribute('data-active-mode', 'reply')
