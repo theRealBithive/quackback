@@ -9,7 +9,7 @@ import { GermanIntlWrapper } from '@/test/render-with-intl'
 const {
   mockGetRouteContext,
   mockOpenAuthPopover,
-  mockOauth2,
+  mockSocial,
   mockResolveSole,
   mockHasAny,
   mockHasDistinctSignup,
@@ -19,7 +19,7 @@ const {
 } = vi.hoisted(() => ({
   mockGetRouteContext: vi.fn(),
   mockOpenAuthPopover: vi.fn(),
-  mockOauth2: vi.fn(),
+  mockSocial: vi.fn(),
   mockResolveSole: vi.fn((): string | null => null),
   mockHasAny: vi.fn((): boolean => false),
   mockHasDistinctSignup: vi.fn((): boolean => true),
@@ -87,7 +87,7 @@ vi.mock('@/lib/client/hooks/use-auth-broadcast', () => ({
 
 vi.mock('@/lib/client/auth-client', () => ({
   signOut: mockSignOut,
-  authClient: { signIn: { oauth2: mockOauth2 } },
+  authClient: { signIn: { social: mockSocial } },
 }))
 
 vi.mock('@/components/notifications', () => ({
@@ -197,7 +197,7 @@ describe('PortalHeader — sign-out cache hygiene', () => {
 describe('PortalHeader — single-IdP redirect', () => {
   beforeEach(() => {
     mockOpenAuthPopover.mockClear()
-    mockOauth2.mockClear()
+    mockSocial.mockClear()
     mockHasAny.mockReturnValue(true) // the portal has a usable sign-in method
     mockResolveSole.mockReturnValue(null)
     mockHasDistinctSignup.mockReturnValue(true)
@@ -208,7 +208,7 @@ describe('PortalHeader — single-IdP redirect', () => {
     mockResolveSole.mockReturnValue('oidc_entra')
     renderHeader({ userRole: null, isLoggedIn: false })
     fireEvent.click(screen.getByRole('button', { name: /log in/i }))
-    expect(mockOauth2).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'oidc_entra' }))
+    expect(mockSocial).toHaveBeenCalledWith(expect.objectContaining({ provider: 'oidc_entra' }))
     expect(mockOpenAuthPopover).not.toHaveBeenCalled()
   })
 
@@ -217,7 +217,7 @@ describe('PortalHeader — single-IdP redirect', () => {
     renderHeader({ userRole: null, isLoggedIn: false })
     fireEvent.click(screen.getByRole('button', { name: /log in/i }))
     expect(mockOpenAuthPopover).toHaveBeenCalledWith(expect.objectContaining({ mode: 'login' }))
-    expect(mockOauth2).not.toHaveBeenCalled()
+    expect(mockSocial).not.toHaveBeenCalled()
   })
 })
 

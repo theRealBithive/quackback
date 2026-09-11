@@ -100,7 +100,7 @@ Profiles: **Owner** = admin class + an admin-owned full API key (scoped keys hol
 
 ## 2. Surfaces and their enforced authorization
 
-### Server functions (`requireAuth`) — 679 surfaces
+### Server functions (`requireAuth`) — 682 surfaces
 
 | Surface | Enforces |
 | --- | --- |
@@ -141,6 +141,8 @@ Profiles: **Owner** = admin class + an admin-owned full API key (scoped keys hol
 | `integrations/salesforce/server/functions.ts`::getSalesforceConnectUrl | integration.manage |
 | `integrations/shortcut/server/functions.ts`::saveShortcutTokenFn | integration.manage |
 | `integrations/shortcut/server/functions.ts`::fetchShortcutProjectsFn | integration.manage |
+| `integrations/slack/server/agent/settings.ts`::getSlackAgentSettingsFn | assistant.manage |
+| `integrations/slack/server/agent/settings.ts`::setSlackAssistantEnabledFn | assistant.manage |
 | `integrations/slack/server/functions.ts`::getSlackConnectUrl | integration.manage |
 | `integrations/slack/server/functions.ts`::fetchSlackChannelsFn | integration.manage |
 | `integrations/stripe/server/functions.ts`::saveStripeKeyFn | integration.manage |
@@ -263,9 +265,13 @@ Profiles: **Owner** = admin class + an admin-owned full API key (scoped keys hol
 | `lib/server/functions/billing.ts`::fetchBillingCatalogueFn | END_USER (any authenticated) |
 | `lib/server/functions/billing.ts`::fetchUpgradeContextFn | END_USER (any authenticated) |
 | `lib/server/functions/billing.ts`::fetchBillingInvoicesFn | billing.manage |
-| `lib/server/functions/billing.ts`::fetchSeatsPreviewFn | billing.manage |
 | `lib/server/functions/billing.ts`::fetchPlanUsageFn | billing.manage |
+| `lib/server/functions/billing.ts`::fetchDowngradePreviewFn | billing.manage |
 | `lib/server/functions/billing.ts`::fetchFreeDowngradePreviewFn | billing.manage |
+| `lib/server/functions/billing.ts`::fetchPendingDowngradeFn | billing.manage |
+| `lib/server/functions/billing.ts`::beginPlanDowngradeFn | billing.manage |
+| `lib/server/functions/billing.ts`::cancelPlanDowngradeFn | billing.manage |
+| `lib/server/functions/billing.ts`::shouldLockAdminToBillingFn | END_USER (any authenticated) |
 | `lib/server/functions/blocking.ts`::getPersonBlockStatusFn | people.view |
 | `lib/server/functions/blocking.ts`::blockPersonFn | people.manage |
 | `lib/server/functions/blocking.ts`::unblockPersonFn | people.manage |
@@ -460,9 +466,6 @@ Profiles: **Owner** = admin class + an admin-owned full API key (scoped keys hol
 | `lib/server/functions/integrations.ts`::addNotificationChannelFn | integration.manage |
 | `lib/server/functions/integrations.ts`::updateNotificationChannelFn | integration.manage |
 | `lib/server/functions/integrations.ts`::removeNotificationChannelFn | integration.manage |
-| `lib/server/functions/integrations.ts`::fetchBoardRoutingRulesFn | integration.manage |
-| `lib/server/functions/integrations.ts`::saveBoardRoutingRuleFn | integration.manage |
-| `lib/server/functions/integrations.ts`::removeBoardRoutingRuleFn | integration.manage |
 | `lib/server/functions/link-preview.ts`::unfurlLinkFn | END_USER (any authenticated) |
 | `lib/server/functions/macros.ts`::listMacrosFn | conversation.reply |
 | `lib/server/functions/macros.ts`::createMacroFn | conversation.manage |
@@ -990,7 +993,7 @@ Key scopes are enforced: an API key holds exactly its stored scopes (owner permi
 
 ## 4. Entry points without a requireAuth/key gate
 
-191 of 982 entry points hold no `requireAuth` / `withApiKeyAuth` / `requireTeamAuth` gate.
+195 of 989 entry points hold no `requireAuth` / `withApiKeyAuth` / `requireTeamAuth` gate.
 Each is expected to be intentionally public, a pre-auth flow, a signature-verified webhook, or a handler that delegates auth (e.g. the MCP route).
 **Adding a row here is an access-control change** — confirm the new entry point is meant to be reachable without a gate.
 
@@ -1039,6 +1042,7 @@ Each is expected to be intentionally public, a pre-auth flow, a signature-verifi
 | `lib/server/functions/invitations.ts`::getInvitationDetailsFn | server-fn |
 | `lib/server/functions/invitations.ts`::getInviteBrandingFn | server-fn |
 | `lib/server/functions/invitations.ts`::setPasswordFn | server-fn |
+| `lib/server/functions/locale.ts`::getPortalLocaleFn | server-fn |
 | `lib/server/functions/onboarding.ts`::getWorkspaceClaimFn | server-fn |
 | `lib/server/functions/onboarding.ts`::saveCloudOnboardingGoalFn | server-fn |
 | `lib/server/functions/onboarding.ts`::saveUserNameFn | server-fn |
@@ -1102,6 +1106,7 @@ Each is expected to be intentionally public, a pre-auth flow, a signature-verifi
 | `lib/server/functions/workspace-utils.ts`::requireWorkspaceRole | server-fn |
 | `routes/_portal.tsx`::setPortalFrameHeaders | server-fn |
 | `routes/[.]well-known.oauth-authorization-server.ts`::GET | route |
+| `routes/[.]well-known.oauth-protected-resource.api.mcp.ts`::GET | route |
 | `routes/[.]well-known.oauth-protected-resource.ts`::GET | route |
 | `routes/[.]well-known.openid-configuration.ts`::GET | route |
 | `routes/api/admin/assistant/copilot.ts`::POST | route |
@@ -1127,10 +1132,12 @@ Each is expected to be intentionally public, a pre-auth flow, a signature-verifi
 | `routes/api/import/index.ts`::POST | route |
 | `routes/api/import/runs.$runId.ts`::GET | route |
 | `routes/api/import/runs.ts`::GET | route |
+| `routes/api/integrations/$type/hooks/$kind.ts`::POST | route |
 | `routes/api/integrations/$type/identify.ts`::POST | route |
 | `routes/api/integrations/$type/webhook.ts`::POST | route |
 | `routes/api/internal/billing-projection.ts`::POST | route |
 | `routes/api/internal/identity-projection.ts`::POST | route |
+| `routes/api/internal/job-wake.ts`::POST | route |
 | `routes/api/mcp.ts`::DELETE | route |
 | `routes/api/mcp.ts`::GET | route |
 | `routes/api/mcp.ts`::POST | route |
