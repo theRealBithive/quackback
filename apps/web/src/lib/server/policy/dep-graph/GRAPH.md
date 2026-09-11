@@ -25,7 +25,7 @@ Hard rule (test-enforced, not just snapshotted): no package imports app code.
 Top-level directories of src, with lib split one level deeper; root-level files form `(root)`. The components -> lib/server edge is the TanStack Start server-function pattern, recorded as reality.
 
 Nodes (11): (root), components, integrations, lib/client, lib/server, lib/shared, locales, routes, styles, test, types
-Edges (28):
+Edges (26):
 
 - (root) -> components
 - (root) -> lib/server
@@ -53,13 +53,11 @@ Edges (28):
 - routes -> lib/server
 - routes -> lib/shared
 - test -> lib/client
-- test -> lib/shared
-- test -> locales
 
 ## 3. Server domains (lib/server/domains)
 
-Nodes (49): activity, ai, analytics, api, api-keys, assistant, billing, boards, changelog, channel-accounts, channels, comments, companies, company-attributes, conversation, conversation-attributes, conversation-views, embeddings, export, help-center, import, inbox, macros, merge-suggestions, moderation, notifications, office-hours, platform-credentials, post-tags, post-views, posts, principals, push-devices, roadmaps, roles, segments, sentiment, settings, sla, status, statuses, subscriptions, summary, teams, tickets, user-attributes, users, webhooks, workflows
-Edges (116):
+Nodes (50): activity, ai, analytics, api, api-keys, assistant, attribute-definitions, billing, boards, changelog, channel-accounts, channels, comments, companies, company-attributes, conversation, conversation-attributes, conversation-views, embeddings, export, help-center, import, inbox, macros, merge-suggestions, moderation, notifications, office-hours, platform-credentials, post-tags, post-views, posts, principals, push-devices, roadmaps, roles, segments, sentiment, settings, sla, status, statuses, subscriptions, summary, teams, tickets, user-attributes, users, webhooks, workflows
+Edges (120):
 
 - analytics -> api
 - analytics -> assistant
@@ -76,9 +74,12 @@ Edges (116):
 - assistant -> conversation-attributes
 - assistant -> embeddings
 - assistant -> help-center
+- assistant -> post-tags
+- assistant -> posts
 - assistant -> principals
 - assistant -> settings
 - assistant -> status
+- assistant -> statuses
 - assistant -> tickets
 - assistant -> workflows
 - billing -> ai
@@ -99,6 +100,7 @@ Edges (116):
 - comments -> settings
 - comments -> subscriptions
 - companies -> principals
+- company-attributes -> attribute-definitions
 - conversation -> ai
 - conversation -> assistant
 - conversation -> changelog
@@ -164,8 +166,8 @@ Edges (116):
 - tickets -> settings
 - tickets -> sla
 - tickets -> teams
+- user-attributes -> attribute-definitions
 - users -> principals
-- users -> user-attributes
 - webhooks -> settings
 - workflows -> assistant
 - workflows -> conversation
