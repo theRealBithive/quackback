@@ -172,14 +172,16 @@ describe('<TagList> — create dialog layout', () => {
     expect(description).toHaveValue('For urgent bugs')
   })
 
-  it('closes the dialog without saving when Cancel is clicked (T1)', () => {
+  it('closes the dialog without saving when Cancel is clicked (T1)', async () => {
     render(<TagList initialTags={[]} />)
 
     fireEvent.click(screen.getByRole('button', { name: /add new tag/i }))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Design' } })
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    expect(screen.queryByLabelText('Name')).toBeNull()
+    // The Base UI dialog unmounts its content after the close transition,
+    // not in the same tick as the click.
+    await waitFor(() => expect(screen.queryByLabelText('Name')).toBeNull())
     expect(mockCreate).not.toHaveBeenCalled()
   })
 })
