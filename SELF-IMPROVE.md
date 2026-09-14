@@ -1595,6 +1595,30 @@ first: a run of `ConditionalExpression → true` on one line with a long `&&`
 chain, or `Regex` mutants on a guard that returns the same value as the line
 after it.
 
+## 1x — `fc.date()` hands out `new Date(NaN)` inside a min/max range, so a date property fails on the seed
+
+A property "round-trips every ISO timestamp between 2000 and 2035" had been
+green for weeks and went red on a pull request that did not touch it, with
+`Counterexample: [new Date(NaN)]`. fast-check 4 generates an invalid date
+from `fc.date({ min, max })` unless `noInvalidDate: true` is set — measured
+at 31 of 20,000 samples, which at the default 100 runs is a red run roughly
+one time in seven, so it reads as a flake in the run that hits it and as a
+regression in the pull request that happens to be open. `toISOString()` on
+that value throws before the assertion runs. Every `fc.date` in this repo
+wants the option unless the property is about invalid dates; grep for it
+when a date property fails with no change near it.
+
+## 1x — The mutation gate is killed when run as a background command; run it in the foreground
+
+Two attempts to run `scripts/mutation-check.ts` in the background were
+stopped by the session's memory watchdog during Stryker's dry run (four
+test-runner processes plus the vitest sandboxes), while the system journal
+showed no OOM kill and `free` showed 20 GB available afterwards. The same
+command in the foreground finished in under three minutes both times. The
+budget has to fit the foreground call's ten-minute ceiling, so pass
+`MUTATION_BUDGET_SECONDS=570`; the runs here took 2m40s–4m40s for nine to
+eleven graded files.
+
 # Resolved
 
 ## 1x — A Stryker run leaves two things behind that nothing else guards
