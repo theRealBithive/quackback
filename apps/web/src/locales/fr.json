@@ -1343,6 +1343,7 @@
   "auth.blocked.account_not_linked": "Un compte avec cette adresse e-mail existe déjà. Connectez-vous avec votre méthode d’origine (par exemple un lien de connexion envoyé par e-mail) pour le confirmer, et votre connexion SSO sera rattachée.",
   "auth.blocked.auth_method_blocked": "Cette méthode de connexion n’est pas autorisée pour votre compte.",
   "auth.blocked.email_doesn_t_match": "Le fournisseur d’identité a renvoyé une adresse e-mail différente de celle de votre compte. Connectez-vous avec un compte IdP utilisant la même adresse e-mail.",
+  "auth.blocked.email_does_not_match": "Le fournisseur d’identité a renvoyé une adresse e-mail différente de celle de votre compte. Connectez-vous avec un compte IdP utilisant la même adresse e-mail.",
   "auth.blocked.email_is_missing": "Votre fournisseur d’identité n’a pas transmis d’adresse e-mail. Demandez à votre administration d’activer la portée e-mail pour cette application.",
   "auth.blocked.email_not_found": "Votre fournisseur d’identité n’a pas transmis d’adresse e-mail. Demandez à votre administration d’activer la portée e-mail pour cette application.",
   "auth.blocked.failed_to_create_user": "Nous n’avons pas pu créer de compte pour ce lien. Il a peut-être expiré, ou cet espace de travail n’accepte pas de nouveaux comptes. Demandez une invitation à une administration, puis utilisez le lien envoyé.",

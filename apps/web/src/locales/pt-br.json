@@ -1343,6 +1343,7 @@
   "auth.blocked.account_not_linked": "Já existe uma conta com este e-mail. Entre pelo seu método original (por exemplo, um link de login enviado por e-mail) para confirmá-la, e seu login SSO será vinculado.",
   "auth.blocked.auth_method_blocked": "Esse método de login não é permitido para sua conta.",
   "auth.blocked.email_doesn_t_match": "O provedor de identidade retornou um e-mail diferente do da sua conta. Entre com uma conta do IdP que use o mesmo endereço de e-mail.",
+  "auth.blocked.email_does_not_match": "O provedor de identidade retornou um e-mail diferente do da sua conta. Entre com uma conta do IdP que use o mesmo endereço de e-mail.",
   "auth.blocked.email_is_missing": "Seu provedor de identidade não compartilhou um endereço de e-mail. Peça à administração para habilitar o escopo de e-mail neste aplicativo.",
   "auth.blocked.email_not_found": "Seu provedor de identidade não compartilhou um endereço de e-mail. Peça à administração para habilitar o escopo de e-mail neste aplicativo.",
   "auth.blocked.failed_to_create_user": "Não conseguimos criar uma conta para esse link. Ele pode ter expirado, ou este workspace não está aceitando novas contas. Peça um convite a uma administração e use o link enviado.",

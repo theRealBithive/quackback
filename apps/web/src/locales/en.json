@@ -1343,6 +1343,7 @@
   "auth.blocked.account_not_linked": "An account with this email already exists. Sign in with your original method (for example an emailed sign-in link) to confirm it, and your SSO login will be connected.",
   "auth.blocked.auth_method_blocked": "That sign-in method isn't allowed for your account.",
   "auth.blocked.email_doesn_t_match": "The identity provider returned a different email than your account. Sign in with an IdP account that uses the same email address.",
+  "auth.blocked.email_does_not_match": "The identity provider returned a different email than your account. Sign in with an IdP account that uses the same email address.",
   "auth.blocked.email_is_missing": "Your identity provider didn't share an email address. Ask your administrator to enable the email scope for this app.",
   "auth.blocked.email_not_found": "Your identity provider didn't share an email address. Ask your administrator to enable the email scope for this app.",
   "auth.blocked.failed_to_create_user": "We couldn't create an account for that link. It may have expired, or this workspace isn't accepting new accounts. Ask an admin to invite you, then use the link they send.",
