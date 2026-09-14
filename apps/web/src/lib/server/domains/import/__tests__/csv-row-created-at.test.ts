@@ -20,9 +20,18 @@ describe('csvRowSchema created_at', () => {
   })
 
   it('round-trips every ISO timestamp between 2000 and 2035 to the same instant (V1)', () => {
+    // fast-check 4 hands out `new Date(NaN)` from `fc.date()` even inside a
+    // min/max range unless told not to (31 of 20,000 samples, measured), and
+    // an invalid date has no ISO string to round-trip. The property is about
+    // parseable timestamps (V1); the unparseable case is V2's, so the
+    // generator states that domain here.
     fc.assert(
       fc.property(
-        fc.date({ min: new Date('2000-01-01T00:00:00Z'), max: new Date('2035-12-31T23:59:59Z') }),
+        fc.date({
+          min: new Date('2000-01-01T00:00:00Z'),
+          max: new Date('2035-12-31T23:59:59Z'),
+          noInvalidDate: true,
+        }),
         (date) => {
           const parsed = csvRowSchema.parse({ ...baseRow, created_at: date.toISOString() })
           expect(parsed.created_at.getTime()).toBe(date.getTime())
