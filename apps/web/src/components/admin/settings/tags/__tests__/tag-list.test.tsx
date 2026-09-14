@@ -1,15 +1,20 @@
 // @vitest-environment happy-dom
 /**
- * Tag settings — "Show on portal" visibility control.
+ * Tag settings — create/edit dialog and portal visibility.
  *
- * Covers the admin-facing half of tag portal visibility: the create/edit
- * dialog exposes a switch that defaults to public for new tags, mirrors the
- * saved flag when editing, and sends `isPublic` on save; internal tags are
- * marked in the list so the state is visible without opening the dialog.
+ * The dialog defaults new tags to Portal, mirrors the saved flag when
+ * editing, and sends `isPublic` on save. Internal tags are marked in the
+ * list so the state is visible without opening the dialog.
+ *
+ * ## T — Tags (upstream #527)
+ * - T1 Typing a description updates the field; Cancel closes the dialog
+ *   without saving; picking a colour from the list row changes that tag's
+ *   colour.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import type { PostTag } from '@/lib/shared/db-types'
+import { PRESET_COLORS } from '@/components/shared/color-picker'
 
 const mockCreate = vi.fn()
 const mockUpdate = vi.fn()
@@ -56,26 +61,35 @@ beforeEach(() => {
   mockUpdate.mockImplementation(async ({ data }) => ({ ...PUBLIC_TAG, ...data }))
 })
 
-function portalSwitch() {
-  return screen.getByRole('switch', { name: /show on portal/i })
+function portalRadio() {
+  return screen.getByRole('radio', { name: /^portal$/i })
+}
+
+function internalRadio() {
+  return screen.getByRole('radio', { name: /^internal$/i })
 }
 
 describe('<TagList> — portal visibility', () => {
-  it('marks internal tags in the list and leaves public tags unmarked', () => {
+  it('renders each tag as a colored chip and labels Portal vs Internal', () => {
     render(<TagList initialTags={[PUBLIC_TAG, INTERNAL_TAG]} />)
 
-    const internalRow = screen.getByText('Churn risk').closest('div')!
-    expect(within(internalRow).getByText('Internal')).toBeTruthy()
-
-    const publicRow = screen.getByText('Bug').closest('div')!
+    const publicRow = screen.getByRole('button', { name: 'Bug' }).closest('.group') as HTMLElement
+    expect(within(publicRow).getByText('Portal')).toBeTruthy()
     expect(within(publicRow).queryByText('Internal')).toBeNull()
+
+    const internalRow = screen
+      .getByRole('button', { name: 'Churn risk' })
+      .closest('.group') as HTMLElement
+    expect(within(internalRow).getByText('Internal')).toBeTruthy()
+    expect(within(internalRow).queryByText('Portal')).toBeNull()
   })
 
   it('defaults a new tag to public and sends isPublic on create', async () => {
     render(<TagList initialTags={[]} />)
 
     fireEvent.click(screen.getByRole('button', { name: /add new tag/i }))
-    expect(portalSwitch()).toHaveAttribute('aria-checked', 'true')
+    expect(portalRadio()).toHaveAttribute('aria-checked', 'true')
+    expect(internalRadio()).toHaveAttribute('aria-checked', 'false')
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Design' } })
     fireEvent.click(screen.getByRole('button', { name: /create tag/i }))
@@ -87,13 +101,14 @@ describe('<TagList> — portal visibility', () => {
     )
   })
 
-  it('lets an admin create an internal tag by turning the switch off', async () => {
+  it('lets an admin create an internal tag by choosing Internal', async () => {
     render(<TagList initialTags={[]} />)
 
     fireEvent.click(screen.getByRole('button', { name: /add new tag/i }))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Churn risk' } })
-    fireEvent.click(portalSwitch())
-    expect(portalSwitch()).toHaveAttribute('aria-checked', 'false')
+    fireEvent.click(internalRadio())
+    expect(internalRadio()).toHaveAttribute('aria-checked', 'true')
+    expect(portalRadio()).toHaveAttribute('aria-checked', 'false')
 
     fireEvent.click(screen.getByRole('button', { name: /create tag/i }))
 
@@ -108,9 +123,9 @@ describe('<TagList> — portal visibility', () => {
     render(<TagList initialTags={[INTERNAL_TAG]} />)
 
     fireEvent.click(screen.getByRole('button', { name: /edit tag/i }))
-    expect(portalSwitch()).toHaveAttribute('aria-checked', 'false')
+    expect(internalRadio()).toHaveAttribute('aria-checked', 'true')
 
-    fireEvent.click(portalSwitch())
+    fireEvent.click(portalRadio())
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
 
     await waitFor(() =>
@@ -118,5 +133,80 @@ describe('<TagList> — portal visibility', () => {
         data: expect.objectContaining({ id: 'post_tag_internal', isPublic: true }),
       })
     )
+  })
+})
+
+describe('<TagList> — create dialog layout', () => {
+  it('keeps Create tag disabled until a name is entered', () => {
+    render(<TagList initialTags={[]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /add new tag/i }))
+    expect(screen.getByRole('button', { name: /create tag/i })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Design' } })
+    expect(screen.getByRole('button', { name: /create tag/i })).toBeEnabled()
+  })
+
+  it('does not leak the PostTag type name as a placeholder', () => {
+    render(<TagList initialTags={[]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /add new tag/i }))
+    expect(screen.queryByText('PostTag name')).toBeNull()
+  })
+
+  it('opens the color palette from a single swatch', () => {
+    render(<TagList initialTags={[]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /add new tag/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^color$/i }))
+    expect(screen.getByPlaceholderText('#000000')).toBeTruthy()
+  })
+
+  it('updates the description field as the admin types (T1)', () => {
+    render(<TagList initialTags={[]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /add new tag/i }))
+    const description = screen.getByPlaceholderText('When to use this tag')
+    fireEvent.change(description, { target: { value: 'For urgent bugs' } })
+
+    expect(description).toHaveValue('For urgent bugs')
+  })
+
+  it('closes the dialog without saving when Cancel is clicked (T1)', () => {
+    render(<TagList initialTags={[]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /add new tag/i }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Design' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByLabelText('Name')).toBeNull()
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+})
+
+describe('<TagList> — list row color popover', () => {
+  it("lets an admin pick a colour from the list row popover, changing that tag's colour (T1)", async () => {
+    render(<TagList initialTags={[PUBLIC_TAG]} />)
+
+    // The trigger for the list row's popover is the tag's own colored chip.
+    fireEvent.click(screen.getByRole('button', { name: 'Bug' }))
+
+    // ColorPickerGrid swatches carry this exact class prefix; every <Button>
+    // from the design system also carries `rounded-full` (its default pill
+    // shape), so matching on `rounded-full` alone would over-select the
+    // row's own edit/delete/add-tag buttons too.
+    const swatches = screen
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('h-6 w-6 rounded-full'))
+    expect(swatches.length).toBe(PRESET_COLORS.length)
+
+    const nextColor = PRESET_COLORS[1]
+    fireEvent.click(swatches[1])
+
+    await waitFor(() => {
+      expect(mockUpdate).toHaveBeenCalledWith({
+        data: { id: PUBLIC_TAG.id, color: nextColor },
+      })
+    })
   })
 })

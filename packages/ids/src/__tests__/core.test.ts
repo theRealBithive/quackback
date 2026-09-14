@@ -1,4 +1,15 @@
+/**
+ * ## A — Article ids (upstream a720add94)
+ * - A1 An article id is emitted as `article_`; a `kb_article_` id is accepted wherever an article id is read (MCP tools, copilot report, Zod schemas) and rewritten to `article_`, so the retired prefix is never persisted.
+ * - A2 A prefix alias resolves to its canonical prefix, a canonical prefix to itself, an unknown prefix to nothing.
+ * - A3 A citation whose id is not a valid article id counts as no article rather than failing the report.
+ * - A4 The MCP update and delete article tools accept either prefix and act on the same article; delete reports the canonical id.
+ *
+ * This module pins A2 only (`resolvePrefix`); the other A-group tests live
+ * next to the modules that implement A1/A3/A4.
+ */
 import { describe, it, expect } from 'vitest'
+import fc from 'fast-check'
 import {
   generateId,
   createId,
@@ -7,14 +18,16 @@ import {
   parseTypeId,
   getTypeIdPrefix,
   isValidTypeId,
+  isTypeId,
   isUuid,
   isTypeIdFormat,
   batchFromUuid,
   batchToUuid,
   normalizeToUuid,
   ensureTypeId,
+  typeIdLookupKeys,
 } from '../core'
-import { ID_PREFIXES } from '../prefixes'
+import { ID_PREFIXES, ID_PREFIX_ALIASES, resolvePrefix } from '../prefixes'
 
 describe('TypeID Core', () => {
   describe('generateId', () => {
@@ -272,6 +285,115 @@ describe('TypeID Core', () => {
     it('throws for wrong prefix', () => {
       const boardId = generateId('board')
       expect(() => ensureTypeId(boardId, 'post')).toThrow('Invalid post ID')
+    })
+  })
+
+  describe('article prefix alias', () => {
+    it('createId(kb_article) emits article_', () => {
+      const id = createId('kb_article')
+      expect(id).toMatch(/^article_/)
+      expect(ID_PREFIXES.kb_article).toBe('article')
+    })
+
+    it('accepts retired kb_article_ ids as article ids', () => {
+      const canonical = generateId('article')
+      const legacy = `kb_article_${canonical.slice('article_'.length)}`
+      expect(isValidTypeId(legacy, 'article')).toBe(true)
+      expect(isValidTypeId(canonical, 'article')).toBe(true)
+      expect(isTypeId(legacy, 'article')).toBe(false)
+      expect(isTypeId(canonical, 'article')).toBe(true)
+      expect(toUuid(legacy)).toBe(toUuid(canonical))
+      expect(ensureTypeId(legacy, 'article')).toBe(canonical)
+      expect(normalizeToUuid(legacy, 'article')).toBe(toUuid(canonical))
+      expect(typeIdLookupKeys(legacy, 'article')).toEqual([canonical, legacy])
+      expect(typeIdLookupKeys(canonical, 'article')).toEqual([canonical, legacy])
+    })
+
+    it('typeIdLookupKeys is only the canonical form when there is no alias', () => {
+      const postId = generateId('post')
+      expect(typeIdLookupKeys(postId, 'post')).toEqual([postId])
+    })
+  })
+
+  describe('resolvePrefix', () => {
+    it('resolves the kb_article alias to its canonical article prefix (A2)', () => {
+      expect(resolvePrefix('kb_article')).toBe('article')
+    })
+
+    it('resolves a canonical prefix to itself (A2)', () => {
+      expect(resolvePrefix('post')).toBe('post')
+      expect(resolvePrefix('article')).toBe('article')
+    })
+
+    it('resolves an unknown prefix to undefined (A2)', () => {
+      expect(resolvePrefix('not_a_real_prefix')).toBeUndefined()
+      expect(resolvePrefix('')).toBeUndefined()
+    })
+
+    const canonicalPrefixes = Object.values(ID_PREFIXES)
+    const aliasPrefixes = Object.keys(ID_PREFIX_ALIASES)
+    const knownPrefixes = new Set<string>([...canonicalPrefixes, ...aliasPrefixes])
+
+    it('property: every canonical prefix resolves to itself (A2)', () => {
+      // Generator: the real ID_PREFIXES table, not a narrowed sample of it —
+      // this is the full domain the contract makes a promise about.
+      fc.assert(
+        fc.property(fc.constantFrom(...canonicalPrefixes), (prefix) => {
+          expect(resolvePrefix(prefix)).toBe(prefix)
+        })
+      )
+    })
+
+    it('property: every alias resolves to the prefix it aliases (A2)', () => {
+      // Generator: the real ID_PREFIX_ALIASES table.
+      fc.assert(
+        fc.property(fc.constantFrom(...aliasPrefixes), (alias) => {
+          expect(resolvePrefix(alias)).toBe(ID_PREFIX_ALIASES[alias])
+        })
+      )
+    })
+
+    // Generator note (specification, decided before running anything): drawn
+    // from arbitrary strings that are not themselves a canonical prefix or an
+    // alias — the exact complement of the two domains above, which is what
+    // "an unknown prefix" means in A2. This exclusion is the contract's own
+    // partition, not a narrowing applied after seeing a failure.
+    //
+    // The generator deliberately includes the names of `Object.prototype`
+    // members. `ID_PREFIX_ALIASES` is a plain object, and a bare bracket
+    // lookup on it once answered `resolvePrefix('__proto__')` with
+    // `Object.prototype` itself and `resolvePrefix('valueOf')` with a
+    // function — the counterexample this property found on its first run.
+    // `resolvePrefix` now consults only the table's own keys.
+    it('property: an unknown prefix resolves to undefined (A2)', () => {
+      // The generator is a mix of two sources, both filtered to the same
+      // "not a known prefix" domain the contract defines: arbitrary strings
+      // for broad exploration, plus the fixed list of Object.prototype member
+      // names named in the finding above. The second half is not a narrowing
+      // — it is there so this property deterministically reaches the
+      // interesting state on every run instead of only when fc.string()
+      // happens to draw one of those exact names by chance (observed: it did
+      // on one run and did not on the next, which would otherwise make this
+      // finding look intermittent rather than a real, always-reachable bug).
+      const objectPrototypeMemberNames = [
+        'valueOf',
+        'toString',
+        'constructor',
+        'hasOwnProperty',
+        'isPrototypeOf',
+        'propertyIsEnumerable',
+        'toLocaleString',
+        '__proto__',
+      ]
+      const unknownArb = fc
+        .oneof(fc.constantFrom(...objectPrototypeMemberNames), fc.string())
+        .filter((candidate) => !knownPrefixes.has(candidate))
+
+      fc.assert(
+        fc.property(unknownArb, (unknown) => {
+          expect(resolvePrefix(unknown)).toBeUndefined()
+        })
+      )
     })
   })
 })

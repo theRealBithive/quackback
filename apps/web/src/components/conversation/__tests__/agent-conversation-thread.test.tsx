@@ -184,13 +184,40 @@ vi.mock('@/lib/client/hooks/use-inbox-translation', () => ({
   }),
 }))
 vi.mock('@/lib/client/hooks/use-copilot-insert', () => ({ useCopilotInsert: () => vi.fn() }))
-vi.mock('@/lib/client/hooks/use-image-upload', () => ({
-  useImageUpload: () => ({ upload: vi.fn() }),
+// The composer's own upload options are captured rather than discarded: the
+// `onError` it hands the hook is the whole of C5 on this surface, and a mock
+// that returns only `upload` leaves that line with no caller.
+const { imageUploadOptions, toastError } = vi.hoisted(() => ({
+  imageUploadOptions: { current: null } as {
+    current: { onError?: (error: Error) => void } | null
+  },
+  toastError: vi.fn(),
 }))
+vi.mock('sonner', () => ({
+  toast: Object.assign(vi.fn(), {
+    error: toastError,
+    success: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+    message: vi.fn(),
+    loading: vi.fn(),
+    dismiss: vi.fn(),
+    custom: vi.fn(),
+    promise: vi.fn(),
+  }),
+  Toaster: () => null,
+}))
+vi.mock('@/lib/client/hooks/use-image-upload', () => ({
+  useImageUpload: (options: { onError?: (error: Error) => void }) => {
+    imageUploadOptions.current = options
+    return { upload: vi.fn() }
+  },
+}))
+const addFiles = vi.fn()
 vi.mock('@/lib/client/hooks/use-conversation-composer-attachments', () => ({
   useConversationComposerAttachments: () => ({
     pending: [],
-    addFiles: vi.fn(),
+    addFiles,
     remove: vi.fn(),
     clear: vi.fn(),
     uploading: false,
@@ -722,6 +749,56 @@ describe('AgentConversationThread — composer focus handle', () => {
     // The marker follows the note composer too — the modes share one box.
     act(() => composerRef.current?.focusComposer('note'))
     expect(screen.getByTestId('editor').closest('[data-inbox-composer]')).not.toBeNull()
+  })
+
+  it('pasting an image on the composer stages the attachment tray, not an inline node', async () => {
+    renderWithHandle({ kind: 'conversation', id: 'conversation_1' })
+    const editor = await screen.findByTestId('editor')
+    const box = editor.closest('[data-inbox-composer]')
+    expect(box).not.toBeNull()
+    const file = new File([new Uint8Array([1, 2, 3])], 'shot.png', { type: 'image/png' })
+    fireEvent.paste(box as HTMLElement, {
+      clipboardData: { files: [file], items: [] },
+    })
+    expect(addFiles).toHaveBeenCalledWith([file])
+  })
+
+  it('dropping an image on the composer stages the attachment tray, not an inline node (C1)', async () => {
+    addFiles.mockClear()
+    renderWithHandle({ kind: 'conversation', id: 'conversation_1' })
+    const editor = await screen.findByTestId('editor')
+    const box = editor.closest('[data-inbox-composer]') as HTMLElement
+    const file = new File([new Uint8Array([1, 2, 3])], 'shot.png', { type: 'image/png' })
+
+    // A handled drop is a cancelled one — the browser must not also navigate to
+    // the file or drop it into the contenteditable.
+    const handled = fireEvent.drop(box, { dataTransfer: { files: [file], items: [] } })
+
+    expect(handled).toBe(false)
+    expect(addFiles).toHaveBeenCalledWith([file])
+  })
+
+  it('leaves a drop carrying no image to the browser (C1)', async () => {
+    addFiles.mockClear()
+    renderWithHandle({ kind: 'conversation', id: 'conversation_1' })
+    const editor = await screen.findByTestId('editor')
+    const box = editor.closest('[data-inbox-composer]') as HTMLElement
+    const notes = new File(['hello'], 'notes.txt', { type: 'text/plain' })
+
+    expect(fireEvent.drop(box, { dataTransfer: { files: [notes], items: [] } })).toBe(true)
+    expect(fireEvent.drop(box, { dataTransfer: { files: [], items: [] } })).toBe(true)
+    expect(addFiles).not.toHaveBeenCalled()
+  })
+
+  it('shows an upload failure as a toast carrying the error’s own message (C5)', async () => {
+    toastError.mockClear()
+    renderWithHandle({ kind: 'conversation', id: 'conversation_1' })
+    await screen.findByTestId('editor')
+
+    expect(imageUploadOptions.current?.onError).toBeTypeOf('function')
+    imageUploadOptions.current!.onError!(new Error('The storage bucket is full'))
+
+    expect(toastError).toHaveBeenCalledWith('The storage bucket is full')
   })
 
   it('focusComposer("reply") focuses the reply editor already showing, leaving the mode alone', async () => {

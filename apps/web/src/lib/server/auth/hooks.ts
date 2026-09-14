@@ -38,12 +38,15 @@ import {
   type SignInRateLimiter,
 } from './signin-rate-limit'
 import { checkAnonMintRateLimit } from './widget-rate-limit'
+import { formatSignInDevice, forgetDevice, isDeviceUnseen } from './signin-device-tracker'
 import {
-  computeDeviceFingerprint,
-  forgetDevice,
-  isDeviceUnseen,
-  markDeviceSeen,
-} from './signin-device-tracker'
+  deviceCookieAttributes,
+  deviceCookieName,
+  mintDeviceId,
+  readDeviceCookie,
+  signDeviceCookie,
+} from './signin-device-cookie'
+import { getBaseUrl } from '@/lib/server/config'
 import { isSyntheticAnonEmail } from '@/lib/shared/anonymous-email'
 import { readSsoClaims, readSsoClaimsWithProvenance, type ClaimRead } from './read-sso-claims'
 import { applyClaimAttributesAfter } from './apply-claim-attributes'
@@ -1261,11 +1264,13 @@ export async function handleSignInSuccessAudit(ctx: {
 }
 
 /**
- * First-sight new-device notification. Atomic claim of the fingerprint;
- * on success we fire the email + audit row in parallel and refresh the
- * 90-day TTL. On failure we roll back the claim so the next sign-in
- * re-fires the alert rather than losing it to a transient SMTP outage.
- * All errors swallowed — store/SMTP outages must not break sign-in.
+ * First-sight new-device notification. Identity is the signed
+ * `qb.device.{userId}` cookie. Atomic claim of that id; on success we
+ * fire the email + audit row in parallel. On failure we roll back the
+ * claim so the next sign-in re-fires the alert rather than losing it
+ * to a transient SMTP outage. The cookie is written on every real
+ * sign-in (known or new) so a later request can reuse the id. All
+ * errors swallowed — store/SMTP outages must not break sign-in.
  *
  * Better Auth sets `newSession` whenever it writes a session cookie,
  * including `/get-session` sliding the 24h `updateAge`. That is not a
@@ -1283,6 +1288,7 @@ export async function handleNewDeviceNotification(
         session?: { token?: string }
       } | null
     }
+    setCookie?: (name: string, value: string, opts?: Record<string, unknown>) => string
   },
   workspace: Awaited<
     ReturnType<typeof import('@/lib/server/domains/settings/settings.service').getWorkspaceSettings>
@@ -1299,27 +1305,49 @@ export async function handleNewDeviceNotification(
   const headers = getRequestHeaders()
   const userAgent = headers.get('user-agent') ?? ''
   const ip = getClientIp(headers)
-  const fingerprint = computeDeviceFingerprint(userAgent, ip)
 
-  const unseen = await isDeviceUnseen(userId, fingerprint).catch(() => false)
+  const deviceId = ensureSignInDeviceId(ctx, userId, headers.get('cookie') ?? '')
+  if (!deviceId) return
+
+  const unseen = await isDeviceUnseen(userId, deviceId)
   if (!unseen) return
 
-  // Email + audit are independent — fire in parallel. TTL refresh
-  // runs only on full success so a failure can roll back via
-  // `forgetDevice` and re-fire on the next sign-in.
+  // Email + audit are independent — fire in parallel. A failure
+  // rolls back via `forgetDevice` so the next sign-in re-fires.
   try {
     const { sendNewSignInEmail } = await import('@quackback/email')
     const { recordAuditEvent } = await import('@/lib/server/audit/log')
     const { resolveAccountRecipient } = await import('@/lib/server/email/recipient')
     const occurredAt = new Date().toISOString()
+    const device = formatSignInDevice(userAgent)
+    const location = captureCountryFromHeaders(headers)
+    const base = getBaseUrl().replace(/\/$/, '')
+    const settingsUrl = base ? `${base}/settings/profile` : undefined
     // Account class, and deliberately no contact-address fallback: this alert
     // discloses IP, user agent and sign-in timing, and a contact address can be
     // one an agent typed into the inbox. An account with no deliverable address
-    // simply does not get the alert. The audit row and markDeviceSeen still run,
-    // or every subsequent sign-in would retry a send that can never succeed.
+    // simply does not get the alert. The audit row still runs, or every
+    // subsequent sign-in would retry a send that can never succeed.
     const to = await resolveAccountRecipient(userId as UserId)
     if (!to) {
       log.warn({ user_id: userId }, 'new-device alert skipped: no deliverable account address')
+    }
+    // Same predicate the profile page uses to hide PasswordForm. Fail open
+    // so a registry miss still sends the alert (password copy) rather than
+    // skipping it or blocking sign-in.
+    let ssoEnforced = false
+    if (to) {
+      try {
+        const { isHardBound } = await import('./auth-restrictions')
+        const { listIdentityProviders } =
+          await import('@/lib/server/domains/settings/identity-providers.service')
+        const { getRegisteredOidcProviderIds } = await import('./registered-providers')
+        const providers = await listIdentityProviders()
+        const registeredOidcIds = await getRegisteredOidcProviderIds(providers)
+        ssoEnforced = isHardBound('credential', email, providers, registeredOidcIds)
+      } catch (error) {
+        log.warn({ err: error }, 'sso-enforced lookup failed; sending password recovery copy')
+      }
     }
     await Promise.all([
       to
@@ -1328,7 +1356,10 @@ export async function handleNewDeviceNotification(
             workspaceName: workspace?.name,
             occurredAt,
             ipAddress: ip,
-            userAgent,
+            userAgent: device,
+            location,
+            settingsUrl: ssoEnforced ? undefined : settingsUrl,
+            ssoEnforced,
             logoUrl: workspace?.brandingData?.logoUrl ?? undefined,
           })
         : Promise.resolve(),
@@ -1337,13 +1368,46 @@ export async function handleNewDeviceNotification(
         outcome: 'success',
         actor: { userId: userId as `user_${string}`, email },
         headers,
-        metadata: { ip, userAgent },
+        metadata: { ip, userAgent, device, location },
       }),
     ])
-    await markDeviceSeen(userId)
   } catch (error) {
     log.error({ err: error }, 'new-device notification failed')
-    await forgetDevice(userId, fingerprint)
+    await forgetDevice(userId, deviceId)
+  }
+}
+
+/** Mint or reuse the cookie id and write it. Returns null when we
+ *  cannot identify this browser (missing workspace secret, userId that
+ *  is not a cookie-name token, or a freshly minted id that never
+ *  reached the browser). */
+function ensureSignInDeviceId(
+  ctx: {
+    setCookie?: (name: string, value: string, opts?: Record<string, unknown>) => string
+  },
+  userId: string,
+  cookieHeader: string
+): string | null {
+  try {
+    const existing = readDeviceCookie(cookieHeader, userId)
+    const deviceId = existing ?? mintDeviceId()
+    const value = signDeviceCookie(userId, deviceId)
+    if (typeof ctx.setCookie !== 'function') {
+      if (!existing) {
+        log.warn('device cookie not set: Better Auth setCookie missing on after-hook ctx')
+        return null
+      }
+      return deviceId
+    }
+    ctx.setCookie(
+      deviceCookieName(userId),
+      value,
+      deviceCookieAttributes(getBaseUrl().startsWith('https://'))
+    )
+    return deviceId
+  } catch (error) {
+    log.error({ err: error }, 'device cookie failed; treating device as known')
+    return null
   }
 }
 
@@ -1403,8 +1467,10 @@ export async function handleCountryCapture(ctx: {
  *     prior steps). Runs after the gates so it only records sign-ins
  *     that actually stuck.
  *  6. `handleNewDeviceNotification` — sends a "new device" email +
- *     records an audit row when the user's UA + /24-IP combination
- *     hasn't been seen for them within the last 90 days.
+ *     records an audit row when an additional signed device cookie
+ *     for this user hasn't been seen within the last 90 days. The
+ *     first recorded device is seeded silently. Alerts cannot be
+ *     disabled. Bowser labels the email; it is not the claim key.
  */
 export const hooksAfter = createAuthMiddleware(async (ctx) => {
   if (process.env.AUTH_HOOKS_DEBUG === '1') {
@@ -1508,7 +1574,7 @@ export const hooksAfter = createAuthMiddleware(async (ctx) => {
   await handleSignInSuccessAudit(ctx as Parameters<typeof handleSignInSuccessAudit>[0])
   // Geo-IP country from CDN headers; written best-effort, never blocks.
   await handleCountryCapture(ctx as Parameters<typeof handleCountryCapture>[0])
-  // Fires only on a real sign-in path when the UA + /24 is unseen.
+  // Fires only on a real sign-in path when an additional device is unseen.
   await handleNewDeviceNotification(
     ctx as Parameters<typeof handleNewDeviceNotification>[0],
     workspace

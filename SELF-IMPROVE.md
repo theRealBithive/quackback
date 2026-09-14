@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 8x — Test suites are flaky under parallel load
+## 9x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -102,6 +102,18 @@ terminal row in one pass") saw `pruned` come back 0 for a row it had just aged
 `worker.test.ts` prune the same shared `job_queue` table from their own workers,
 so whichever process prunes first takes the other's row and its count. Same
 shape as `seat-usage`: a database-wide count asserted across parallel suites.
+
+Ninth hit, on upstream batch A (#525–#539): the first coverage run over the 73
+suites the picks touched ended on two red files, `mutations/__tests__/settings.test.ts`
+(the 20s timeout again) and `help-center/__tests__/help-center-article.service.test.ts`
+(`Hook timed out in 10000ms` in a `beforeEach`), both green alone in 17 seconds. The
+widened run — 431 suites, to see whether existing tests already covered the holes —
+went red on `anonymous-feature-flags.test.ts`, also named above, also green alone.
+Three runs for one report. What worked, and is now the pattern: grep the known
+names out of the selection into their own small run, and point each run at its own
+`coverage/local-<n>` directory — the diff gate merges every `coverage-final.json`
+under `coverage/`, so the split costs nothing and a flake in one part no longer
+throws away the other's report.
 
 ## 5x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -200,220 +212,6 @@ was the mutate-run-restore loop from the Stryker entry, five hand-written
 mutants against the new DB suite, five killed, twelve seconds each. That loop is
 now the standing substitute for scoping an entry to a diff range, and it is a
 minute of throwaway scripting per change that the gate could do by itself.
-
-## 1x — A line that is only an arrow function passed as a JSX prop reads as uncovered until the handler actually fires
-
-Filling a diff-coverage hole for `onEdit={() => onEdit(row)}`-shaped lines
-(`claims-table.tsx`, `use-sso-test-sign-in.tsx`) it looked safe to assume that
-simply rendering the component past the point where such a prop is created
-already counts as covering the line — the closure exists, so the statement
-"ran". Reasoning about it that way is wrong, and the wrongness is invisible
-from the terminal summary (`Statements 92%` reads the same either way).
-
-v8/istanbul records the statement for a line like this as the arrow's _body_,
-not its creation, so the count on that line is how many times the callback was
-**invoked** (the control clicked), not how many times the enclosing JSX was
-rendered. The only way to see this directly is to dump the report itself:
-
-```
-node -e "const r=require('./coverage/client/coverage-final.json'); \
-  for (const f of Object.values(r)) if (f.path.endsWith('claims-table.tsx')) { \
-    for (const [id, loc] of Object.entries(f.statementMap)) \
-      if (loc.start.line===90) console.log(id, f.s[id]) }"
-```
-
-`count=0` on the prop line next to `count=23` on the surrounding block is the
-proof; nothing about reading the source settles it either way. Generalises to
-every interactive component in this repo: a coverage hole on a line whose only
-content is a prop-value arrow function means "write a test that clicks the
-control", never "render something that passes near it".
-
-## 1x — A test file named after a TanStack Router `$param` file collides with shell parameter expansion
-
-Route files in this repo are named with a literal `$` for a dynamic segment
-(`settings.security.sso_.$providerId.tsx`). Naming the co-located test file the
-same way — `settings.security.sso_.$providerId.test.tsx` — and then passing it
-unquoted to `bun x vitest run <path>` lets the shell (fish and bash both) treat
-`$providerId` as a variable reference, which expands to empty since no such
-variable is set. The path vitest receives has a chunk silently deleted, matches
-zero files, and — per the entry further down on `vitest run <paths>` ignoring a path that matches nothing — vitest says nothing
-and the run reports green with one file fewer than intended.
-
-Caught before it ever ran once, by naming the new file
-`settings.security.sso_.providerId.test.tsx` (`$` dropped) instead. The safer
-general fix is to always single-quote a path containing `$` (`'…$providerId…'`),
-but renaming is one character simpler and does not depend on remembering to
-quote correctly every time the file is touched again.
-
-## 1x — An upstream suite named `*-integration.test.ts` never runs here, and passes by absence
-
-The root vitest config excludes `**/*-integration.test.ts`, for the API suite
-that needs a live server. Upstream does not have that exclusion, so when a
-back-merge brought `hooks-after-integration.test.ts` -- six tests on the
-ordering of the sign-in after-hooks, running entirely on mocks -- vitest
-collected nothing, said nothing, and the diff-coverage gate reported forty
-lines of `hooksAfter` as never executed. Running the file by name printed
-`No test files found` with the exclude list, which is the only place the cause
-is visible.
-
-Renaming the file (`-composition`) was the whole fix, with a header line
-saying why. Every back-merge should grep the incoming test files against the
-root `exclude` list before reading a coverage hole as a missing test.
-
-## 1x — A red test means no coverage report at all, which reads as a broken setup
-
-vitest's `coverage.reportOnFailure` defaults to false. So a single flaky
-`beforeEach` timeout in a 439-file run left `coverage/local/` empty, and the
-diff gate said `no coverage report was found under coverage` -- the same
-message a wrong `reportsDirectory` would produce. One full 250-second rerun
-went into finding that out. Locally, pass `--coverage.reportOnFailure=true`
-whenever the run is there to measure coverage; CI never sees this because its
-coverage job only runs after the unit shards are green.
-
-## 1x — Upstream and fork migrations collide on `idx` and on `when`, and the migrator hides it
-
-Both sides number their migrations by appending, so after a week apart upstream
-and this fork each had a `0273`, a `0274` and a `0275` with different contents.
-The file names do not clash (the tag is part of the name), the journal does:
-three `idx` values are taken twice, and worse, upstream's first new entry
-carried **the same `when`** as ours (`1785700000031`), because both were written
-by hand off the same predecessor.
-
-The migrator (`fleet/migrator.ts`) applies an entry only when its `when` is
-above the newest applied one, and its gap detection asks whether the `when` is
-already recorded -- which ours was. So on an instance already at our 0275, an
-upstream migration merged as-is would be skipped in silence, and the first sign
-would be a runtime error on a missing column. No test on either side sees this:
-a fresh database applies everything in journal order and is fine.
-
-What worked: cherry-pick, resolve the journal to **ours**, then append the
-upstream entry renumbered to the next free tag with `when` = ours + 1, `git mv`
-the SQL file to the new number, extend the `migrator-gate` span, regenerate
-`CONTRACT.md`, and say so in the pick's commit body. Check `when` against
-`packages/db/drizzle/meta/_journal.json` **before** the pick rather than after
-the drift check, which passes either way because it too starts from an empty
-database. Every future back-merge that carries a migration will hit this.
-
-## 1x — A Stryker survivor list is stale the moment you write a test against it
-
-The gate prints its survivors and writes `.mutation-tmp/report.json`. Both are
-a photograph of the tree at the time the run started, and the whole point of
-reading them is to write tests -- so by the time the list is being worked
-through, it describes a tree that no longer exists. Two hours went into
-analysing a list where a third of the entries were already dead, including one
-that had been killed by a test written in the same session.
-
-Worse, the report and the truth can disagree for the same tree. A mutant
-reported as `Survived` at one line turned out to be killed by an existing test
-when the line was mutated by hand -- so a survivor list is not evidence that a
-mutant is unkillable, and an `equivalents` record written off the report alone
-can carry a reason that is simply false. That is the one thing the manifest's
-reason requirement exists to prevent, so it has to be checked rather than
-argued.
-
-The check is ten seconds per candidate and it belongs in a loop, because the
-value is in doing all of them:
-
-```python
-for label, expect, old, new in CASES:      # expect: 'killed' | 'equivalent'
-    assert pristine.count(old) == 1
-    src.write_text(pristine.replace(old, new))
-    r = subprocess.run(['bun', 'x', 'vitest', 'run', '<the pinning suite>'],
-                       capture_output=True, text=True)
-    got = 'killed' if ' failed' in r.stdout + r.stderr else 'equivalent'
-    print(('OK ' if got == expect else '!! ') + label)
-src.write_text(pristine)                   # restore, always
-```
-
-Copy the file to the scratchpad first. Predicting each outcome before running
-is what makes it useful: a `!!` line is either a wrong belief about the code or
-a test that does not do what its name says, and both are findings. Fifteen
-predictions were checked this way in one pass and one of them was wrong -- the
-one that would otherwise have become a false `equivalents` entry.
-
-## 1x — A widened AST rule looks right against its fixtures and wrong against the source
-
-The i18n gate's display rule was widened to read `{'Signed in as ' + name}`, by
-descending into a `BinaryExpression` the way it already descended into a
-conditional and a logical chain. 138 unit tests passed, including a new one for
-exactly that shape, and the docstring argued that the operator need not be
-consulted.
-
-Then `bun scripts/i18n-check.ts` reported two findings in the editor:
-`{toolbarPosition === 'top' && …}`. A comparison is a `BinaryExpression` too,
-and its operands are the name of a setting rather than words on a page. The
-unit fixtures had no comparison in a display position; the real file had two.
-
-So the acceptance test for a change to the rule is the gate's own run over the
-claimed files, not the unit suite. It takes seconds, it reads a few thousand
-lines of real source instead of a hand-written component, and it is the only
-thing that says whether a widened rule is now reporting noise -- which is how a
-gate gets switched off.
-
-## 1x — TipTap's `setOptions` does not reconfigure a plugin it already built
-
-`useEditor` calls `editor.setOptions({ extensions })` whenever the array's
-reference changes, and the repo's own comment above the `useMemo` says so. What
-it does not say is that the plugins built from those extensions stay as they
-were: `setOptions` replaces the options object and calls
-`view.updateState(this.state)`, and never rebuilds the extension manager.
-
-So an extension's _text_ is fixed at editor-creation time. Measured while
-translating the editor: on a language change the toolbar moved to French and
-the placeholder stayed German, because the placeholder lives inside a
-ProseMirror plugin. The slash-command titles are in the same place, and worse,
-because they are what the menu is _searched_ by -- a reader who switched to
-German would type `/tabelle` against an English list and find nothing.
-
-Adding the language to the `useMemo` dependency array does not fix it and reads
-exactly like it should. The fix is to remount, with a `key` on the memoised
-component, which costs the caret and nothing else. Anything else that has to
-follow a language change into an extension will hit this.
-
-A render test with a _single_ language cannot see any of it, and neither can two
-separate renders -- each builds its extensions once and agrees. Only an
-in-place switch inside one mounted tree reaches it.
-
-## 1x — A position-based i18n rule cannot see a literal bound to a name
-
-The gate reads a string in a display position: between tags, in one of the few
-readable attributes, in a display field of an object, as the default of a
-display prop, and either branch of a conditional in any of those. That covers
-80 of the 91 strings in this batch's six files.
-
-The remaining eleven all have one shape -- a literal assigned to a name, one hop
-from where it is shown: `?? 'Team'` into a variable that later becomes a title,
-`return 'Text'` from a helper the trigger renders, a `Record<string, string>` of
-group headings whose keys are domain words rather than readable names. No
-position rule reaches them, because at the literal there is no display position
-to read.
-
-What found them was sweeping every sentence-like literal in the claimed files
-against the gate's own report and reading the leftovers by hand: 57 leftovers in
-the editor, of which 53 were class names, key names and log prefixes and four
-were real. That sweep is a throwaway script in a scratchpad and should be part
-of the gate -- as a report rather than a failure, since it over-lists by design.
-Until it is, every batch has to redo it, and the plan's third rule class (the
-catalogue-module rule, for `errors.ts` and friends) is still unbuilt.
-
-## 1x — An `i18n-allow` note is anchored on the line it opens on
-
-Found in this gate's own use, one line after writing the first real one: a
-reason worth writing does not fit on a line, and a multi-line note above a
-string excused a line still inside the note. So a short note with no reason
-worked and a proper one read as a broken excuse -- the wrong way round.
-
-Fixed here by anchoring on the line the note _finishes_ on. Worth remembering as
-a shape rather than as a bug: a rule about "the line above" needs to say which
-line of a multi-line thing it means, and the reasonable-looking choice is the
-wrong one.
-
-## 1x — A JSX comment is not valid between attributes
-
-`{/* ... */}` in an attribute list is a JSX spread with an empty expression and
-does not compile. A plain `/* ... */` between attributes does. Costs one
-typecheck round trip every time, and it comes up whenever an attribute needs a
-note -- which for this work is every `i18n-allow`.
 
 ## 5x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
@@ -587,7 +385,7 @@ no-op would quietly restore the number. CI cannot catch that rot on its own —
 the `check` job builds before it typechecks, and the build writes the same file
 — which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
 
-## 3x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
+## 4x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
 
 Three wasted turns diagnosing an env-leakage question, all of them spent on the
 test runner rather than the question:
@@ -627,6 +425,20 @@ line there is no way to spread `coverageConfigDefaults.exclude`, so a
 for a gate that grades coverage, test files counting as source is exactly the
 kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
 whole coverage block in `vitest.config.ts`, where the defaults can be spread.
+
+Fourth run, and this one is destructive. **`-u` takes the next positional argument
+as its value.** `vitest run -u a.test.ts b.test.ts` runs `b` only, and
+`vitest run -u a.test.ts` runs the **entire suite** in update mode — every failing
+snapshot assertion in 1400 files rewritten to whatever the code does now. It read
+as "the filter matched nothing" for two turns before the runaway run was killed
+(nothing had been written yet; check `git status` after any `-u` run regardless).
+Put `-u` **after** the file list, always: `vitest run a.test.ts -u`.
+
+Same family, shell side: **a filter list that expands to nothing is no filter.**
+`bun x vitest run $(grep -rl someName …)` with zero matches runs the entire
+suite — twice today, once with `--coverage` (ten minutes, killed). Guard the
+expansion (`[ -s list ] || exit`) or `mapfile` the list and check its length
+before the call. The `$param` route files need the array form anyway.
 
 ## 3x — Coverage had to be re-installed for every measurement
 
@@ -705,6 +517,79 @@ coverage report was taken from a narrow run instead, so nothing was lost but
 the minute spent working out whether the red line was mine. It was not: the
 same test is red on `origin/main`. Checking the fixture in would have made
 that answer free.
+
+## 3x — Mounting a real route in a test: three traps, none of which say so
+
+`routes/__tests__/document-lang.test.tsx` puts a memory router around the real
+`__root` to read the `lang` and `dir` a document ends up with. It cost four
+rounds, one per trap, and none of the failures named its cause.
+
+- **Everything redirects to `/onboarding`.** The root's `beforeLoad` sends any
+  non-exempt path there unless `settings.settings.setupState` parses as a
+  _complete v2_ state, and complete is strict: `version: 2`, `steps.core`,
+  `steps.workspace`, and a `startingPoint` whose `outcome`, `resourceType`,
+  `source`, `resolution` and `completedAt` all satisfy `normalizeSetupStateV2`.
+  A near miss returns `null`, which reads as a fresh install. The symptom is a
+  match list of just `["__root__"]`; nothing mentions setup state.
+- **A route that never matched still renders a document.** The not-found page
+  renders inside the root document, so `<html lang>` is set anyway — to `en`.
+  Half the assertions in a lang test expect `en`, so the suite goes green having
+  mounted nothing. It did. Assert the route id is in `router.state.matches`
+  before reading anything off the document.
+- **React 19 hoists the document.** A route's own `<html>`/`<head>`/`<body>` land
+  on the real `document.documentElement`, not inside the container `render()`
+  returns, so `container.querySelector('html')` finds nothing. They also outlive
+  `cleanup()`, so clear the attributes before each render or a test reads back
+  the previous one's.
+
+A pathless layout route built by hand — `createRoute({ getParentRoute, id:
+'_portal' })` with a child under it — never matched at all, and that one is
+still unexplained; the way around it was to use a path-shaped localized route
+(`/auth/recovery`) instead. A documented "mount a route in a test" helper would
+have retired all four.
+
+**Second occurrence, and it produced the missing recipe.** A test for
+`/auth/auth-complete` needed the same mounting, and the two obvious ways in both
+fail:
+
+- `RootRoute.addChildren([AuthCompleteRoute])` throws `Duplicate routes found
+with id: __root__`. A file route imported from `routes/*.tsx` already carries
+  its parent, so adding it under the root registers the root twice. The message
+  names the root, not the child that caused it.
+- `import { routeTree } from '@/routeTree.gen'` works — until it does not.
+  The file is **generated and gitignored** (`apps/web/.gitignore:12`), written
+  only by `typecheck` and the build, so the suite passes alone on a machine that
+  has built and fails with `Failed to resolve import` inside a wider run or on a
+  fresh checkout. It also costs about forty seconds of import, because it pulls
+  every route in the application.
+
+What works is rebuilding the one route from the file route's own options, which
+keeps `Route.useLoaderData()` resolving (it matches by route id, so the path has
+to stay the same) and drops the suite from 44 seconds to 7:
+
+```tsx
+routeTree: RootRoute.addChildren([
+  createRoute({
+    getParentRoute: () => RootRoute,
+    path: '/auth/auth-complete',
+    validateSearch: AuthCompleteRoute.options.validateSearch,
+    loader: AuthCompleteRoute.options.loader,
+    component: AuthCompleteRoute.options.component,
+  }),
+]),
+```
+
+Both traps and this recipe belong in the helper the first occurrence asked for.
+Every remaining batch of the language work mounts routes, so the helper is now
+the cheaper thing to build.
+
+Third hit, on the widget route (`routes/widget/index.tsx`, 1100 lines) for the
+`open()` deep-link tests. Two things made it cheap where the memory-router
+recipe above is expensive: mocking `createFileRoute` itself (so `Route.useSearch`
+and `Route.useLoaderData` return what the test says, with no router at all), and
+knowing that the widget SDK guards `event.source !== window.parent`, so a test
+has to dispatch `new MessageEvent('message', { data, source: window })` — a bare
+`postMessage` never reaches the handler and reads as "the effect did not run".
 
 ## 2x — A mutation survivor is reported by line, and a line can hold several mutants
 
@@ -820,71 +705,6 @@ turned that into `12 executed, 0 never executed`. The tell held: a file the run
 definitely executed was listed under "out of scope, although they look like
 source". Read that line before reading the holes.
 
-## 2x — Mounting a real route in a test: three traps, none of which say so
-
-`routes/__tests__/document-lang.test.tsx` puts a memory router around the real
-`__root` to read the `lang` and `dir` a document ends up with. It cost four
-rounds, one per trap, and none of the failures named its cause.
-
-- **Everything redirects to `/onboarding`.** The root's `beforeLoad` sends any
-  non-exempt path there unless `settings.settings.setupState` parses as a
-  _complete v2_ state, and complete is strict: `version: 2`, `steps.core`,
-  `steps.workspace`, and a `startingPoint` whose `outcome`, `resourceType`,
-  `source`, `resolution` and `completedAt` all satisfy `normalizeSetupStateV2`.
-  A near miss returns `null`, which reads as a fresh install. The symptom is a
-  match list of just `["__root__"]`; nothing mentions setup state.
-- **A route that never matched still renders a document.** The not-found page
-  renders inside the root document, so `<html lang>` is set anyway — to `en`.
-  Half the assertions in a lang test expect `en`, so the suite goes green having
-  mounted nothing. It did. Assert the route id is in `router.state.matches`
-  before reading anything off the document.
-- **React 19 hoists the document.** A route's own `<html>`/`<head>`/`<body>` land
-  on the real `document.documentElement`, not inside the container `render()`
-  returns, so `container.querySelector('html')` finds nothing. They also outlive
-  `cleanup()`, so clear the attributes before each render or a test reads back
-  the previous one's.
-
-A pathless layout route built by hand — `createRoute({ getParentRoute, id:
-'_portal' })` with a child under it — never matched at all, and that one is
-still unexplained; the way around it was to use a path-shaped localized route
-(`/auth/recovery`) instead. A documented "mount a route in a test" helper would
-have retired all four.
-
-**Second occurrence, and it produced the missing recipe.** A test for
-`/auth/auth-complete` needed the same mounting, and the two obvious ways in both
-fail:
-
-- `RootRoute.addChildren([AuthCompleteRoute])` throws `Duplicate routes found
-with id: __root__`. A file route imported from `routes/*.tsx` already carries
-  its parent, so adding it under the root registers the root twice. The message
-  names the root, not the child that caused it.
-- `import { routeTree } from '@/routeTree.gen'` works — until it does not.
-  The file is **generated and gitignored** (`apps/web/.gitignore:12`), written
-  only by `typecheck` and the build, so the suite passes alone on a machine that
-  has built and fails with `Failed to resolve import` inside a wider run or on a
-  fresh checkout. It also costs about forty seconds of import, because it pulls
-  every route in the application.
-
-What works is rebuilding the one route from the file route's own options, which
-keeps `Route.useLoaderData()` resolving (it matches by route id, so the path has
-to stay the same) and drops the suite from 44 seconds to 7:
-
-```tsx
-routeTree: RootRoute.addChildren([
-  createRoute({
-    getParentRoute: () => RootRoute,
-    path: '/auth/auth-complete',
-    validateSearch: AuthCompleteRoute.options.validateSearch,
-    loader: AuthCompleteRoute.options.loader,
-    component: AuthCompleteRoute.options.component,
-  }),
-]),
-```
-
-Both traps and this recipe belong in the helper the first occurrence asked for.
-Every remaining batch of the language work mounts routes, so the helper is now
-the cheaper thing to build.
-
 ## 2x — The coverage and mutation gates read HEAD, not the working tree
 
 Both gates ask git for the diff between the merge base and `HEAD`
@@ -910,6 +730,226 @@ Hit again on a one-line serializer fix: the run over an unstaged change printed
 `Judged 0 file(s), 0 line(s) — 0 executed` and still ended in `PASS: every line
 this change added was executed by a test`. Zero lines judged is the clearest
 possible sign that the gate saw no change, and it is printed as a pass.
+
+## 2x — A red test means no coverage report at all, which reads as a broken setup
+
+vitest's `coverage.reportOnFailure` defaults to false. So a single flaky
+`beforeEach` timeout in a 439-file run left `coverage/local/` empty, and the
+diff gate said `no coverage report was found under coverage` -- the same
+message a wrong `reportsDirectory` would produce. One full 250-second rerun
+went into finding that out. Locally, pass `--coverage.reportOnFailure=true`
+whenever the run is there to measure coverage; CI never sees this because its
+coverage job only runs after the unit shards are green.
+
+Second hit, from a subagent that had deliberately left a property red to report a
+production bug and then could not measure the rest of its suite:
+`--coverage.reportOnFailure=true` makes vitest write the report anyway. Only
+for a probe, never for the gate — the gate reading a report over a red suite is
+exactly the quiet failure the entry above describes.
+
+## 1x — A line that is only an arrow function passed as a JSX prop reads as uncovered until the handler actually fires
+
+Filling a diff-coverage hole for `onEdit={() => onEdit(row)}`-shaped lines
+(`claims-table.tsx`, `use-sso-test-sign-in.tsx`) it looked safe to assume that
+simply rendering the component past the point where such a prop is created
+already counts as covering the line — the closure exists, so the statement
+"ran". Reasoning about it that way is wrong, and the wrongness is invisible
+from the terminal summary (`Statements 92%` reads the same either way).
+
+v8/istanbul records the statement for a line like this as the arrow's _body_,
+not its creation, so the count on that line is how many times the callback was
+**invoked** (the control clicked), not how many times the enclosing JSX was
+rendered. The only way to see this directly is to dump the report itself:
+
+```
+node -e "const r=require('./coverage/client/coverage-final.json'); \
+  for (const f of Object.values(r)) if (f.path.endsWith('claims-table.tsx')) { \
+    for (const [id, loc] of Object.entries(f.statementMap)) \
+      if (loc.start.line===90) console.log(id, f.s[id]) }"
+```
+
+`count=0` on the prop line next to `count=23` on the surrounding block is the
+proof; nothing about reading the source settles it either way. Generalises to
+every interactive component in this repo: a coverage hole on a line whose only
+content is a prop-value arrow function means "write a test that clicks the
+control", never "render something that passes near it".
+
+## 1x — A test file named after a TanStack Router `$param` file collides with shell parameter expansion
+
+Route files in this repo are named with a literal `$` for a dynamic segment
+(`settings.security.sso_.$providerId.tsx`). Naming the co-located test file the
+same way — `settings.security.sso_.$providerId.test.tsx` — and then passing it
+unquoted to `bun x vitest run <path>` lets the shell (fish and bash both) treat
+`$providerId` as a variable reference, which expands to empty since no such
+variable is set. The path vitest receives has a chunk silently deleted, matches
+zero files, and — per the entry further down on `vitest run <paths>` ignoring a path that matches nothing — vitest says nothing
+and the run reports green with one file fewer than intended.
+
+Caught before it ever ran once, by naming the new file
+`settings.security.sso_.providerId.test.tsx` (`$` dropped) instead. The safer
+general fix is to always single-quote a path containing `$` (`'…$providerId…'`),
+but renaming is one character simpler and does not depend on remembering to
+quote correctly every time the file is touched again.
+
+## 1x — An upstream suite named `*-integration.test.ts` never runs here, and passes by absence
+
+The root vitest config excludes `**/*-integration.test.ts`, for the API suite
+that needs a live server. Upstream does not have that exclusion, so when a
+back-merge brought `hooks-after-integration.test.ts` -- six tests on the
+ordering of the sign-in after-hooks, running entirely on mocks -- vitest
+collected nothing, said nothing, and the diff-coverage gate reported forty
+lines of `hooksAfter` as never executed. Running the file by name printed
+`No test files found` with the exclude list, which is the only place the cause
+is visible.
+
+Renaming the file (`-composition`) was the whole fix, with a header line
+saying why. Every back-merge should grep the incoming test files against the
+root `exclude` list before reading a coverage hole as a missing test.
+
+## 1x — Upstream and fork migrations collide on `idx` and on `when`, and the migrator hides it
+
+Both sides number their migrations by appending, so after a week apart upstream
+and this fork each had a `0273`, a `0274` and a `0275` with different contents.
+The file names do not clash (the tag is part of the name), the journal does:
+three `idx` values are taken twice, and worse, upstream's first new entry
+carried **the same `when`** as ours (`1785700000031`), because both were written
+by hand off the same predecessor.
+
+The migrator (`fleet/migrator.ts`) applies an entry only when its `when` is
+above the newest applied one, and its gap detection asks whether the `when` is
+already recorded -- which ours was. So on an instance already at our 0275, an
+upstream migration merged as-is would be skipped in silence, and the first sign
+would be a runtime error on a missing column. No test on either side sees this:
+a fresh database applies everything in journal order and is fine.
+
+What worked: cherry-pick, resolve the journal to **ours**, then append the
+upstream entry renumbered to the next free tag with `when` = ours + 1, `git mv`
+the SQL file to the new number, extend the `migrator-gate` span, regenerate
+`CONTRACT.md`, and say so in the pick's commit body. Check `when` against
+`packages/db/drizzle/meta/_journal.json` **before** the pick rather than after
+the drift check, which passes either way because it too starts from an empty
+database. Every future back-merge that carries a migration will hit this.
+
+## 1x — A Stryker survivor list is stale the moment you write a test against it
+
+The gate prints its survivors and writes `.mutation-tmp/report.json`. Both are
+a photograph of the tree at the time the run started, and the whole point of
+reading them is to write tests -- so by the time the list is being worked
+through, it describes a tree that no longer exists. Two hours went into
+analysing a list where a third of the entries were already dead, including one
+that had been killed by a test written in the same session.
+
+Worse, the report and the truth can disagree for the same tree. A mutant
+reported as `Survived` at one line turned out to be killed by an existing test
+when the line was mutated by hand -- so a survivor list is not evidence that a
+mutant is unkillable, and an `equivalents` record written off the report alone
+can carry a reason that is simply false. That is the one thing the manifest's
+reason requirement exists to prevent, so it has to be checked rather than
+argued.
+
+The check is ten seconds per candidate and it belongs in a loop, because the
+value is in doing all of them:
+
+```python
+for label, expect, old, new in CASES:      # expect: 'killed' | 'equivalent'
+    assert pristine.count(old) == 1
+    src.write_text(pristine.replace(old, new))
+    r = subprocess.run(['bun', 'x', 'vitest', 'run', '<the pinning suite>'],
+                       capture_output=True, text=True)
+    got = 'killed' if ' failed' in r.stdout + r.stderr else 'equivalent'
+    print(('OK ' if got == expect else '!! ') + label)
+src.write_text(pristine)                   # restore, always
+```
+
+Copy the file to the scratchpad first. Predicting each outcome before running
+is what makes it useful: a `!!` line is either a wrong belief about the code or
+a test that does not do what its name says, and both are findings. Fifteen
+predictions were checked this way in one pass and one of them was wrong -- the
+one that would otherwise have become a false `equivalents` entry.
+
+## 1x — A widened AST rule looks right against its fixtures and wrong against the source
+
+The i18n gate's display rule was widened to read `{'Signed in as ' + name}`, by
+descending into a `BinaryExpression` the way it already descended into a
+conditional and a logical chain. 138 unit tests passed, including a new one for
+exactly that shape, and the docstring argued that the operator need not be
+consulted.
+
+Then `bun scripts/i18n-check.ts` reported two findings in the editor:
+`{toolbarPosition === 'top' && …}`. A comparison is a `BinaryExpression` too,
+and its operands are the name of a setting rather than words on a page. The
+unit fixtures had no comparison in a display position; the real file had two.
+
+So the acceptance test for a change to the rule is the gate's own run over the
+claimed files, not the unit suite. It takes seconds, it reads a few thousand
+lines of real source instead of a hand-written component, and it is the only
+thing that says whether a widened rule is now reporting noise -- which is how a
+gate gets switched off.
+
+## 1x — TipTap's `setOptions` does not reconfigure a plugin it already built
+
+`useEditor` calls `editor.setOptions({ extensions })` whenever the array's
+reference changes, and the repo's own comment above the `useMemo` says so. What
+it does not say is that the plugins built from those extensions stay as they
+were: `setOptions` replaces the options object and calls
+`view.updateState(this.state)`, and never rebuilds the extension manager.
+
+So an extension's _text_ is fixed at editor-creation time. Measured while
+translating the editor: on a language change the toolbar moved to French and
+the placeholder stayed German, because the placeholder lives inside a
+ProseMirror plugin. The slash-command titles are in the same place, and worse,
+because they are what the menu is _searched_ by -- a reader who switched to
+German would type `/tabelle` against an English list and find nothing.
+
+Adding the language to the `useMemo` dependency array does not fix it and reads
+exactly like it should. The fix is to remount, with a `key` on the memoised
+component, which costs the caret and nothing else. Anything else that has to
+follow a language change into an extension will hit this.
+
+A render test with a _single_ language cannot see any of it, and neither can two
+separate renders -- each builds its extensions once and agrees. Only an
+in-place switch inside one mounted tree reaches it.
+
+## 1x — A position-based i18n rule cannot see a literal bound to a name
+
+The gate reads a string in a display position: between tags, in one of the few
+readable attributes, in a display field of an object, as the default of a
+display prop, and either branch of a conditional in any of those. That covers
+80 of the 91 strings in this batch's six files.
+
+The remaining eleven all have one shape -- a literal assigned to a name, one hop
+from where it is shown: `?? 'Team'` into a variable that later becomes a title,
+`return 'Text'` from a helper the trigger renders, a `Record<string, string>` of
+group headings whose keys are domain words rather than readable names. No
+position rule reaches them, because at the literal there is no display position
+to read.
+
+What found them was sweeping every sentence-like literal in the claimed files
+against the gate's own report and reading the leftovers by hand: 57 leftovers in
+the editor, of which 53 were class names, key names and log prefixes and four
+were real. That sweep is a throwaway script in a scratchpad and should be part
+of the gate -- as a report rather than a failure, since it over-lists by design.
+Until it is, every batch has to redo it, and the plan's third rule class (the
+catalogue-module rule, for `errors.ts` and friends) is still unbuilt.
+
+## 1x — An `i18n-allow` note is anchored on the line it opens on
+
+Found in this gate's own use, one line after writing the first real one: a
+reason worth writing does not fit on a line, and a multi-line note above a
+string excused a line still inside the note. So a short note with no reason
+worked and a proper one read as a broken excuse -- the wrong way round.
+
+Fixed here by anchoring on the line the note _finishes_ on. Worth remembering as
+a shape rather than as a bug: a rule about "the line above" needs to say which
+line of a multi-line thing it means, and the reasonable-looking choice is the
+wrong one.
+
+## 1x — A JSX comment is not valid between attributes
+
+`{/* ... */}` in an attribute list is a JSX spread with an empty expression and
+does not compile. A plain `/* ... */` between attributes does. Costs one
+typecheck round trip every time, and it comes up whenever an attribute needs a
+note -- which for this work is every `i18n-allow`.
 
 ## 1x — A migration passes every local gate and fails CI on schema drift
 
@@ -1629,3 +1669,35 @@ actually calls, not whether the lines show up green somewhere.
 The repair is always in the named suite, never in the suite list: widening the
 list to include the consumers would make the entry true by weakening it to "some
 combination of eight suites holds this", which is not a claim anyone can act on.
+
+## 1x — Parallel coverage runs share `coverage/.tmp` and delete each other's
+
+Four subagents measured their own suites with `--coverage` at the same time and
+two of them died with `Something removed the coverage directory .../coverage/.tmp`
+— v8's provider writes intermediate files under the report directory and cleans
+it up when it finishes, so the first run to finish takes the others' scratch with
+it. Every concurrent run needs its own `--coverage.reportsDirectory`, and the
+partial directories have to be removed before the gate runs, because the gate
+merges every `coverage-final.json` it finds under `coverage/`.
+
+## 1x — `Image` never loads under the test DOM, so a natural-size read hangs
+
+`resizableImageInsertAttrs` awaits `new Image()` firing `onload` or `onerror` on
+an object URL. Neither DOM used here implements image decoding, so the promise
+never settles and every insert path that awaits it — toolbar upload, slash
+command, paste, drop — hangs until the test times out, which reads as a broken
+mock elsewhere. Three suites now carry the same stub: a class whose `src`
+setter schedules `onload` with a chosen `naturalWidth`/`naturalHeight` (or
+`onerror`), assigned to `globalThis.Image`, plus `URL.createObjectURL` /
+`revokeObjectURL` stubs so the revoke can be asserted on both paths. Worth
+lifting into `apps/web/src/test/` the next time a fourth copy appears.
+
+## 1x — A suite whose file-wide `vi.mock` replaces a hook cannot be extended to test that hook
+
+`create-ticket-dialog.test.ts` mocks `useConversationComposerAttachments` and
+`useImageUpload` at module scope, so a stubbed `addFiles` is all any test in that
+file can observe — it cannot show a pasted image landing in the real tray. The
+attachment-tray tests therefore live in a sibling file where the hooks run for
+real and `fetch` is the seam. The general shape: a hoisted `vi.mock` is a
+property of the whole file, and "extend the existing suite" stops being the
+right move as soon as the behaviour under test is the thing the suite mocked.

@@ -61,6 +61,7 @@ import {
 import { computePosition, flip, shift, offset } from '@floating-ui/dom'
 import { FormattedMessage, useIntl, type IntlShape, type MessageDescriptor } from 'react-intl'
 import { cn } from '@/lib/shared/utils'
+import { resizableImageInsertAttrs } from '@/lib/client/resizable-image-insert-attrs'
 // The read-only JSON→HTML serializer now lives in a browser-free shared module
 // so server-side consumers (e.g. outbound conversation email) can import it
 // without pulling in React/tiptap-react. Re-exported below for existing callers.
@@ -206,8 +207,32 @@ export function buildExtensions(
         class: 'text-primary underline',
       },
     }),
-    // Always register so the schema can parse image nodes in existing content
-    ResizableImage.configure({
+    // Always register so the schema can parse image nodes in existing content.
+    // Width/height default to null (not the extension's 500×500, and not 0): a
+    // stored post/changelog image that omitted dims must keep its natural box.
+    // New inserts still get a measured box from `resizableImageInsertAttrs`.
+    ResizableImage.extend({
+      addAttributes() {
+        const parent = this.parent?.() ?? {}
+        const keepRatio = parent['data-keep-ratio']
+        return {
+          ...parent,
+          width: { ...parent.width, default: null },
+          height: { ...parent.height, default: null },
+          'data-keep-ratio': {
+            ...keepRatio,
+            renderHTML(attributes: { width?: number | null; 'data-keep-ratio'?: boolean }) {
+              if (!attributes['data-keep-ratio']) return {}
+              const width = Number(attributes.width)
+              if (Number.isFinite(width) && width > 0) {
+                return { style: `max-width: ${width}px`, 'data-keep-ratio': 'true' }
+              }
+              return { 'data-keep-ratio': 'true' }
+            },
+          },
+        }
+      },
+    }).configure({
       HTMLAttributes: {
         class: 'max-w-full h-auto rounded-lg',
       },
@@ -354,6 +379,19 @@ function createSubmitOnEnter(onSubmit: () => void) {
 // every plugin generically rather than importing each PluginKey because
 // MentionExtension constructs an anonymous key per instance and isn't reachable
 // from here. Non-object states are skipped — those are unrelated plugins.
+/**
+ * Stop Enter (and Shift+Enter) bubbling out of the editor so a parent <form>
+ * cannot treat it as implicit submit. Cmd/Ctrl+Enter is left alone — comment
+ * composers listen for that chord in capture on the wrapper. Returns false so
+ * TipTap keymaps still insert the break / split the block / send (onSubmit).
+ */
+export function stopEnterFromReachingParentForm(event: KeyboardEvent): boolean {
+  if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
+    event.stopPropagation()
+  }
+  return false
+}
+
 export function hasActiveSuggestion(editor: Pick<Editor, 'state'>): boolean {
   for (const plugin of editor.state.plugins) {
     const state = plugin.getState(editor.state) as { active?: unknown } | null | undefined
@@ -687,8 +725,7 @@ export function getSlashMenuItems(
           if (!file) return
           try {
             const src = await onImageUpload(file)
-            // Use setResizableImage for the resizable image extension
-            editor.commands.setResizableImage({ src, 'data-keep-ratio': true })
+            editor.commands.setResizableImage(await resizableImageInsertAttrs(src, file))
           } catch (error) {
             console.error('Failed to upload image:', error)
             const { toast } = await import('sonner')
@@ -1412,6 +1449,10 @@ function RichTextEditorBase({
         features.images && onImageUpload ? handleImageDrop(intl, onImageUpload) : undefined,
       handlePaste:
         features.images && onImageUpload ? handleImagePaste(intl, onImageUpload) : undefined,
+      handleDOMEvents: {
+        keydown: (_view: import('@tiptap/pm/view').EditorView, event: KeyboardEvent) =>
+          stopEnterFromReachingParentForm(event),
+      },
     }),
 
     [features.images, onImageUpload, borderless, minHeight, intl, intl.locale]
@@ -1820,10 +1861,9 @@ export function handleImageDrop(
 
     images.forEach((image) => {
       onImageUpload(image)
-        .then((src) => {
-          // Use resizableImage node type for resizable images
+        .then(async (src) => {
           const nodeType = schema.nodes.resizableImage || schema.nodes.image
-          const node = nodeType?.create({ src, 'data-keep-ratio': true })
+          const node = nodeType?.create(await resizableImageInsertAttrs(src, image))
           if (node && coordinates) {
             const transaction = view.state.tr.insert(coordinates.pos, node)
             view.dispatch(transaction)
@@ -1861,11 +1901,10 @@ function handleImagePaste(
       if (!file) return
 
       onImageUpload(file)
-        .then((src) => {
+        .then(async (src) => {
           const { schema } = view.state
-          // Use resizableImage node type for resizable images
           const nodeType = schema.nodes.resizableImage || schema.nodes.image
-          const node = nodeType?.create({ src, 'data-keep-ratio': true })
+          const node = nodeType?.create(await resizableImageInsertAttrs(src, file))
           if (node) {
             const transaction = view.state.tr.replaceSelectionWith(node)
             view.dispatch(transaction)
@@ -2508,8 +2547,7 @@ function MenuBar({
 
       try {
         const src = await onImageUpload(file)
-        // Use setResizableImage for resizable images
-        editor.commands.setResizableImage({ src, 'data-keep-ratio': true })
+        editor.commands.setResizableImage(await resizableImageInsertAttrs(src, file))
       } catch (error) {
         console.error('Failed to upload image:', error)
         const { toast } = await import('sonner')

@@ -5,6 +5,11 @@
  * - getWorkspaceSettings() returns cached result on hit
  * - getWorkspaceSettings() queries DB and populates cache on miss
  * - All write functions invalidate the cache
+ *
+ * ## I — Widget install (upstream #538)
+ * - I1 The signing secret is minted on first admin fetch and returned unchanged
+ *   afterwards; a mint that leaves no secret behind is an error, and a database
+ *   failure is reported as such, not as a missing secret.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -144,7 +149,8 @@ const {
   saveHeaderLogoKey,
   deleteHeaderLogoKey,
 } = await import('../settings.media')
-const { updateWidgetConfig, regenerateWidgetSecret } = await import('../settings.widget')
+const { updateWidgetConfig, regenerateWidgetSecret, ensureWidgetSecret } =
+  await import('../settings.widget')
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -401,6 +407,65 @@ describe('settings write functions invalidate cache', () => {
   it('regenerateWidgetSecret invalidates cache', async () => {
     await regenerateWidgetSecret()
     expect(mockCacheDel).toHaveBeenCalledWith('settings:workspace', 'auth:registered-providers')
+  })
+})
+
+describe('ensureWidgetSecret', () => {
+  it('returns an existing secret without writing or invalidating', async () => {
+    mockFindFirst.mockResolvedValue(makeSettingsRow({ widgetSecret: 'wgt_existing' }))
+    await expect(ensureWidgetSecret()).resolves.toBe('wgt_existing')
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockCacheDel).not.toHaveBeenCalled()
+  })
+
+  it('mints when missing and invalidates cache', async () => {
+    mockFindFirst.mockResolvedValue(makeSettingsRow({ widgetSecret: null }))
+    let stored: string | undefined
+    mockSet.mockImplementation((payload: { widgetSecret?: string }) => {
+      stored = payload.widgetSecret
+      return { where: mockWhere }
+    })
+    mockReturning.mockImplementation(() => Promise.resolve([{ widgetSecret: stored }]))
+
+    const secret = await ensureWidgetSecret()
+    expect(secret).toMatch(/^wgt_[a-f0-9]{64}$/)
+    expect(secret).toBe(stored)
+    expect(mockCacheDel).toHaveBeenCalledWith('settings:workspace', 'auth:registered-providers')
+  })
+
+  it('returns the winner when the insert loses the race', async () => {
+    const existing = `wgt_${'b'.repeat(64)}`
+    mockFindFirst
+      .mockResolvedValueOnce(makeSettingsRow({ widgetSecret: null }))
+      .mockResolvedValueOnce(makeSettingsRow({ widgetSecret: existing }))
+    mockReturning.mockResolvedValue([])
+
+    await expect(ensureWidgetSecret()).resolves.toBe(existing)
+    expect(mockCacheDel).not.toHaveBeenCalled()
+  })
+
+  it('throws when the re-read after a failed mint still has no secret (I1)', async () => {
+    // Neither the initial read, the mint, nor the re-read find a secret: there is
+    // no winner to fall back to, so this is an error rather than a missing value.
+    mockFindFirst
+      .mockResolvedValueOnce(makeSettingsRow({ widgetSecret: null }))
+      .mockResolvedValueOnce(makeSettingsRow({ widgetSecret: null }))
+    mockReturning.mockResolvedValue([])
+
+    await expect(ensureWidgetSecret()).rejects.toThrow(
+      'Failed to ensure widget secret: widget secret missing after ensure'
+    )
+    expect(mockCacheDel).not.toHaveBeenCalled()
+  })
+
+  it('reports a database failure during mint as such, not as a missing secret (I1)', async () => {
+    mockFindFirst.mockResolvedValue(makeSettingsRow({ widgetSecret: null }))
+    mockReturning.mockImplementation(() => Promise.reject(new Error('connection lost')))
+
+    await expect(ensureWidgetSecret()).rejects.toThrow(
+      'Failed to ensure widget secret: connection lost'
+    )
+    expect(mockCacheDel).not.toHaveBeenCalled()
   })
 })
 

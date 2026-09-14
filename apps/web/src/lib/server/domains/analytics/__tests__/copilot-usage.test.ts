@@ -10,6 +10,18 @@
  * inside the db-test-fixture rollback transaction. Mirrors quinn-tools.test.ts
  * and guidance-stats.test.ts's real-DB house pattern.
  */
+/**
+ * ## A — Article ids (upstream a720add94)
+ * - A1 An article id is emitted as `article_`; a `kb_article_` id is accepted wherever an article id is read (MCP tools, copilot report, Zod schemas) and rewritten to `article_`, so the retired prefix is never persisted.
+ * - A2 A prefix alias resolves to its canonical prefix, a canonical prefix to itself, an unknown prefix to nothing.
+ * - A3 A citation whose id is not a valid article id counts as no article rather than failing the report.
+ * - A4 The MCP update and delete article tools accept either prefix and act on the same article; delete reports the canonical id.
+ *
+ * This module additionally pins A3 (see the "invalid citation ids" tests
+ * inside the `topCitedSources` describe block below) — a garbage citation id
+ * must not throw out of `getCopilotUsageMetrics`, and must not crowd out a
+ * genuine citation reported alongside it.
+ */
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import { createId } from '@quackback/ids'
 import type { ConversationId, KbArticleId, KbCategoryId, PrincipalId } from '@quackback/ids'
@@ -487,6 +499,55 @@ describe.skipIf(!fixture.available)('getCopilotUsageMetrics (real DB)', () => {
   })
 
   describe('topCitedSources', () => {
+    it('ranks an article cited under both prefixes above a single-prefix rival', async () => {
+      const popular = await seedArticle('Split across prefixes')
+      const rival = await seedArticle('Single prefix rival')
+      const legacy = `kb_article_${popular.slice('article_'.length)}`
+      await seedUsageLog('assistant', {
+        surface: 'copilot',
+        citedSources: [{ type: 'article', id: popular }],
+      })
+      await seedUsageLog('assistant', {
+        surface: 'copilot',
+        citedSources: [{ type: 'article', id: legacy }],
+      })
+      await seedUsageLog('assistant', {
+        surface: 'copilot',
+        citedSources: [{ type: 'article', id: rival }],
+      })
+
+      const metrics = await getCopilotUsageMetrics(FROM, TO)
+      expect(metrics.topCitedSources[0]).toMatchObject({
+        id: popular,
+        title: 'Split across prefixes',
+        questions: 2,
+      })
+      expect(metrics.topCitedSources[1]).toMatchObject({
+        id: rival,
+        questions: 1,
+      })
+    })
+
+    it('joins historical kb_article_ citation ids to the live article_ row', async () => {
+      const article = await seedArticle('Legacy citation')
+      const legacy = `kb_article_${article.slice('article_'.length)}`
+      await seedUsageLog('assistant', {
+        surface: 'copilot',
+        citedSources: [{ type: 'article', id: legacy }],
+      })
+
+      const metrics = await getCopilotUsageMetrics(FROM, TO)
+      expect(metrics.topCitedSources).toEqual([
+        {
+          id: article,
+          title: 'Legacy citation',
+          url: `/admin/help-center/articles/${article}`,
+          questions: 1,
+          insertRate: null,
+        },
+      ])
+    })
+
     it('ranks cited articles by question volume, most first, joined to their title', async () => {
       const popular = await seedArticle('Resetting your password')
       const rare = await seedArticle('Exporting a report')
@@ -574,6 +635,48 @@ describe.skipIf(!fixture.available)('getCopilotUsageMetrics (real DB)', () => {
 
       const metrics = await getCopilotUsageMetrics(FROM, TO)
       expect(metrics.topCitedSources).toEqual([])
+    })
+
+    it('drops a citation whose id is not a valid article id, rather than failing the report (A3)', async () => {
+      // Not a kb_article_ or article_ TypeID and not a UUID, so the SQL's
+      // regexp_replace leaves it untouched and ensureTypeId throws on it —
+      // exactly the id shape canonicalArticleId's catch branch exists for.
+      await seedUsageLog('assistant', {
+        surface: 'copilot',
+        citedSources: [{ type: 'article', id: 'totally-bogus-not-a-typeid' }],
+      })
+
+      const metrics = await getCopilotUsageMetrics(FROM, TO)
+
+      expect(metrics.topCitedSources).toEqual([])
+      // The rest of the report still comes back — an invalid citation id
+      // must not throw and take the whole metrics call down with it.
+      expect(metrics.totalQuestions).toBe(1)
+    })
+
+    it('reports a genuine citation and drops only the invalid one cited alongside it (A3)', async () => {
+      // Unguarded assertion across both branches of canonicalArticleId in
+      // the same call: the malformed id must not suppress the valid one.
+      const article = await seedArticle('Real article next to a bad id')
+      await seedUsageLog('assistant', {
+        surface: 'copilot',
+        citedSources: [
+          { type: 'article', id: 'totally-bogus-not-a-typeid' },
+          { type: 'article', id: article },
+        ],
+      })
+
+      const metrics = await getCopilotUsageMetrics(FROM, TO)
+
+      expect(metrics.topCitedSources).toEqual([
+        {
+          id: article,
+          title: 'Real article next to a bad id',
+          url: `/admin/help-center/articles/${article}`,
+          questions: 1,
+          insertRate: null,
+        },
+      ])
     })
   })
 
