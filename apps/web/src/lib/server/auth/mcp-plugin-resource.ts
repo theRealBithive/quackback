@@ -5,13 +5,13 @@
  * that way and `createAuth()` throws on every request.
  *
  * Collapse `*.localhost` to `localhost` for the plugin's validated `resource`
- * only. PRM and our token verifier keep the public `BASE_URL`.
+ * only. PRM and our token verifier keep the public `BASE_URL`. Every other
+ * host — the three loopback spellings the plugin already accepts included —
+ * passes through unchanged, so nothing here names them.
  */
 export function betterAuthMcpResource(resource: string): string {
   const url = new URL(resource)
   if (url.protocol === 'https:') return resource
-  if (url.hostname === 'localhost' || url.hostname === '[::1]') return resource
-  if (/^127(?:\.\d+){3}$/.test(url.hostname)) return resource
   if (url.hostname.endsWith('.localhost')) {
     url.hostname = 'localhost'
     return url.href

@@ -27,17 +27,19 @@ const FORBIDDEN_NATIVE_REDIRECT_SCHEMES = new Set([
 const REVERSE_DOMAIN_PRIVATE_USE_SCHEME =
   /^[a-z](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i
 
+/**
+ * RFC 8252 private-use redirect: `com.example.app:/oauth/callback`, a
+ * reverse-domain scheme followed by a single-slash path and nothing else. A
+ * URL that carries an authority — every http(s) URL among them — serialises
+ * as `scheme://…`, so the path check alone rules it out; there is no separate
+ * protocol or host test to keep in step with it.
+ */
 function isReverseDomainPrivateUseRedirectUri(uri: URL): boolean {
   const scheme = uri.protocol.slice(0, -1)
   const schemeSpecificPart = uri.href.slice(uri.protocol.length)
-  return (
-    uri.protocol !== 'http:' &&
-    uri.protocol !== 'https:' &&
-    uri.host.length === 0 &&
-    schemeSpecificPart.startsWith('/') &&
-    !schemeSpecificPart.startsWith('//') &&
-    REVERSE_DOMAIN_PRIVATE_USE_SCHEME.test(scheme)
-  )
+  const hasSingleSlashPath =
+    schemeSpecificPart.startsWith('/') && !schemeSpecificPart.startsWith('//')
+  return hasSingleSlashPath && REVERSE_DOMAIN_PRIVATE_USE_SCHEME.test(scheme)
 }
 
 function parseRedirectUris(value: unknown): string[] | null {
@@ -80,9 +82,8 @@ export function mcpDcrRedirectUrisToRestore(body: Record<string, unknown>): stri
   const original = parseRedirectUris(body.redirect_uris)
   if (!original) return null
   const forBa = redirectUrisForBetterAuth17Native(original)
-  if (original.length === forBa.length && original.every((uri, i) => uri === forBa[i])) {
-    return null
-  }
+  // forBa is a map over original, so the two lists are the same length.
+  if (original.every((uri, i) => uri === forBa[i])) return null
   return original
 }
 
