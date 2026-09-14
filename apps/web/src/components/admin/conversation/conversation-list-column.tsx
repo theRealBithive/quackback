@@ -1,5 +1,8 @@
-import { memo, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useRouteContext } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
+import { conversationInboxQueries } from '@/lib/client/queries/conversation-inbox'
+import { inboxQueries } from '@/lib/client/queries/inbox'
 import type {
   ConversationDTO,
   ConversationPriority,
@@ -7,7 +10,11 @@ import type {
 } from '@/lib/shared/conversation/types'
 import { listChannelDescriptors } from '@/lib/shared/channels'
 import { CONVERSATION_SPAM_FILED_BY_LABELS } from '@/lib/shared/conversation/types'
-import type { InboxItemDTO, InboxTriageFacet } from '@/lib/shared/inbox/items'
+import {
+  inboxItemRefFromId,
+  type InboxItemDTO,
+  type InboxTriageFacet,
+} from '@/lib/shared/inbox/items'
 import { ChevronDownIcon, PencilSquareIcon, BarsArrowDownIcon } from '@heroicons/react/24/solid'
 import { TicketIcon, BuildingOffice2Icon, RectangleStackIcon } from '@heroicons/react/24/outline'
 import {
@@ -44,6 +51,9 @@ import { ActivationActionButton } from '@/components/admin/activation-action-but
 import { FormattedMessage, useIntl } from 'react-intl'
 
 const TRIAGE_FACETS: readonly InboxTriageFacet[] = ['open', 'waiting', 'closed']
+
+/** Ignore scroll-by hovers; only warm a thread the pointer actually rests on. */
+const PREFETCH_DELAY_MS = 120
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
@@ -217,6 +227,30 @@ export function ConversationListColumn({
   const { userRole } = useRouteContext({ from: '__root__' })
   const activationAction = useActivationAction('conversation_empty')
   const [composeOpen, setComposeOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const prefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelPrefetch = useCallback(() => {
+    if (prefetchTimer.current) {
+      clearTimeout(prefetchTimer.current)
+      prefetchTimer.current = null
+    }
+  }, [])
+  useEffect(() => cancelPrefetch, [cancelPrefetch])
+  const prefetchItem = useCallback(
+    (id: string) => {
+      cancelPrefetch()
+      prefetchTimer.current = setTimeout(() => {
+        const ref = inboxItemRefFromId(id)
+        if (ref?.kind === 'conversation') {
+          void queryClient.prefetchQuery(conversationInboxQueries.thread(ref.id))
+        } else if (ref?.kind === 'ticket') {
+          void queryClient.prefetchQuery(inboxQueries.ticketThread(ref.id))
+          void queryClient.prefetchQuery(inboxQueries.ticketDetail(ref.id))
+        }
+      }, PREFETCH_DELAY_MS)
+    },
+    [cancelPrefetch, queryClient]
+  )
   // Whether the list is a search, which decides both the implicit sort and
   // whether the term-scored sort is offered at all.
   const searching = searchInput.trim().length > 0
@@ -514,6 +548,8 @@ export function ConversationListColumn({
                 item={item}
                 selected={selectedId === id}
                 onSelect={onSelect}
+                onPrefetch={prefetchItem}
+                onPrefetchCancel={cancelPrefetch}
               />
             ) : (
               <TicketRow
@@ -522,6 +558,8 @@ export function ConversationListColumn({
                 item={item}
                 selected={selectedId === id}
                 onSelect={onSelect}
+                onPrefetch={prefetchItem}
+                onPrefetchCancel={cancelPrefetch}
               />
             )
           })
@@ -619,11 +657,15 @@ export const ConversationRow = memo(function ConversationRow({
   id,
   selected,
   onSelect,
+  onPrefetch,
+  onPrefetchCancel,
 }: {
   item: Extract<InboxItemDTO, { kind: 'conversation' }>
   id: string
   selected: boolean
   onSelect: (id: string) => void
+  onPrefetch?: (id: string) => void
+  onPrefetchCancel?: () => void
 }) {
   const c = item.conversation
   return (
@@ -641,6 +683,10 @@ export const ConversationRow = memo(function ConversationRow({
       <button
         type="button"
         onClick={() => onSelect(id)}
+        onMouseEnter={onPrefetch ? () => onPrefetch(id) : undefined}
+        onMouseLeave={onPrefetchCancel}
+        onFocus={onPrefetch ? () => onPrefetch(id) : undefined}
+        onBlur={onPrefetchCancel}
         className="flex min-w-0 flex-1 items-center gap-2.5 py-3 pl-1.5 pr-3 text-left"
       >
         <Avatar
@@ -716,11 +762,15 @@ const TicketRow = memo(function TicketRow({
   id,
   selected,
   onSelect,
+  onPrefetch,
+  onPrefetchCancel,
 }: {
   item: Extract<InboxItemDTO, { kind: 'ticket' }>
   id: string
   selected: boolean
   onSelect: (id: string) => void
+  onPrefetch?: (id: string) => void
+  onPrefetchCancel?: () => void
 }) {
   const t = item.ticket
   return (
@@ -730,6 +780,10 @@ const TicketRow = memo(function TicketRow({
       <button
         type="button"
         onClick={() => onSelect(id)}
+        onMouseEnter={onPrefetch ? () => onPrefetch(id) : undefined}
+        onMouseLeave={onPrefetchCancel}
+        onFocus={onPrefetch ? () => onPrefetch(id) : undefined}
+        onBlur={onPrefetchCancel}
         className="flex min-w-0 flex-1 items-center gap-2.5 py-3 pl-1.5 pr-3 text-left"
       >
         <TicketTypeGlyph type={t.type} />
