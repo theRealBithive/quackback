@@ -96,18 +96,19 @@ export function mcpDcrRedirectUrisToRestore(body: Record<string, unknown>): stri
  * builds that omit `application_type` (Better Auth 1.7 defaults omitted → web).
  */
 export function mcpDcrRegistrationBody(body: Record<string, unknown>): Record<string, unknown> {
+  const withScopes = { ...body, scope: MCP_AS_SCOPES.join(' ') }
   const redirectUris = parseRedirectUris(body.redirect_uris)
-  const rewritten = redirectUris ? redirectUrisForBetterAuth17Native(redirectUris) : null
-  const usedNativeRedirectRewrite = Boolean(
-    redirectUris && rewritten && redirectUris.some((uri, i) => uri !== rewritten[i])
-  )
+  // A redirect_uris value we cannot read goes on as it arrived, for Better
+  // Auth to refuse with its own message.
+  if (!redirectUris) return withScopes
+  const rewritten = redirectUrisForBetterAuth17Native(redirectUris)
+  const usedNativeRedirectRewrite = rewritten.some((uri, i) => uri !== redirectUris[i])
   return {
-    ...body,
-    scope: MCP_AS_SCOPES.join(' '),
+    ...withScopes,
     // Only force native when we had to swap a host-bearing private-use
     // scheme for the 1.7.4 placeholder. HTTPS web clients keep `web`.
     ...(usedNativeRedirectRewrite ? { application_type: 'native' } : {}),
-    ...(rewritten ? { redirect_uris: rewritten } : {}),
+    redirect_uris: rewritten,
   }
 }
 
