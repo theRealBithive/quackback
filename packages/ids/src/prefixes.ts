@@ -250,7 +250,7 @@ export function isValidPrefix(prefix: string): prefix is IdPrefix {
  * True when `actual` is `expected` or a retired alias of it.
  */
 export function prefixMatches(actual: string, expected: IdPrefix): boolean {
-  return actual === expected || ID_PREFIX_ALIASES[actual] === expected
+  return actual === expected || aliasTarget(actual) === expected
 }
 
 /**
@@ -258,5 +258,18 @@ export function prefixMatches(actual: string, expected: IdPrefix): boolean {
  */
 export function resolvePrefix(prefix: string): IdPrefix | undefined {
   if (isValidPrefix(prefix)) return prefix
+  return aliasTarget(prefix)
+}
+
+/**
+ * The canonical prefix a retired alias stands for, or nothing.
+ *
+ * The alias table is a plain object, so a bare `ID_PREFIX_ALIASES[prefix]`
+ * also answers for inherited names: `resolvePrefix('__proto__')` returned
+ * `Object.prototype` and `resolvePrefix('valueOf')` a function. The prefix
+ * comes off the wire, so only the table's own keys may count.
+ */
+function aliasTarget(prefix: string): IdPrefix | undefined {
+  if (!Object.hasOwn(ID_PREFIX_ALIASES, prefix)) return undefined
   return ID_PREFIX_ALIASES[prefix]
 }
