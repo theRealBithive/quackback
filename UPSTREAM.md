@@ -115,8 +115,8 @@ the deploy tag where there is one.
 
 ## Fork fixes worth offering upstream
 
-Found by the contract tests written for the picks; both are one-line fixes in
-upstream code and carry a test that fails without them.
+Found by the contract tests and the mutation gate run over the picks; each
+carries a test that fails without it, or a survivor list that names the line.
 
 - `resolvePrefix` (`packages/ids/src/prefixes.ts`) answered `__proto__` with
   `Object.prototype` and `valueOf` with a function: the alias table is a plain
@@ -124,3 +124,10 @@ upstream code and carry a test that fails without them.
 - `ConfirmDialog` closed on a confirm action that threw synchronously, because
   the catch did not `preventDefault()` the click Radix uses to dismiss; an
   async rejection already left it open. Fork #31.
+- Three inert pieces in the Better Auth 1.7 MCP helpers, found because no
+  input could kill their mutants: `isReverseDomainPrivateUseRedirectUri`
+  tested protocol and host before a path check that already excluded them,
+  `betterAuthMcpResource` returned the resource for loopback hosts one line
+  before returning it for everything, and `mcpDcrRegistrationBody` guarded
+  `redirectUris && rewritten` where the second is null exactly when the first
+  is. Removed here (fork #32); upstream still carries them.
