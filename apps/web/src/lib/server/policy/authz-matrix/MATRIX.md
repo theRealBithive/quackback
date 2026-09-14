@@ -100,7 +100,7 @@ Profiles: **Owner** = admin class + an admin-owned full API key (scoped keys hol
 
 ## 2. Surfaces and their enforced authorization
 
-### Server functions (`requireAuth`) — 679 surfaces
+### Server functions (`requireAuth`) — 680 surfaces
 
 | Surface | Enforces |
 | --- | --- |
@@ -585,6 +585,7 @@ Profiles: **Owner** = admin class + an admin-owned full API key (scoped keys hol
 | `lib/server/functions/settings.ts`::saveWidgetHeroImageKeyFn | settings.manage |
 | `lib/server/functions/settings.ts`::deleteWidgetHeroImageFn | settings.manage |
 | `lib/server/functions/settings.ts`::regenerateWidgetSecretFn | settings.manage |
+| `lib/server/functions/settings.ts`::mintWidgetInstallCodeFn | settings.manage |
 | `lib/server/functions/settings.ts`::fetchOfficeHoursFn | office_hours.manage |
 | `lib/server/functions/settings.ts`::fetchConversationRoutingFn | settings.manage |
 | `lib/server/functions/settings.ts`::updateConversationRoutingFn | settings.manage |
@@ -935,7 +936,7 @@ Profiles: **Owner** = admin class + an admin-owned full API key (scoped keys hol
 
 ## 3. MCP tools
 
-38 tools. "Team" = requires an admin/member role in addition to the scope.
+39 tools. "Team" = requires an admin/member role in addition to the scope.
 
 | Tool | Scope(s) | Team |
 | --- | --- | :---: |
@@ -977,6 +978,7 @@ Profiles: **Owner** = admin class + an admin-owned full API key (scoped keys hol
 | update_changelog | write:changelog | ✓ |
 | update_comment | write:feedback | · |
 | vote_post | write:feedback | · |
+| widget_install_status | read:feedback | ✓ |
 
 ### MCP scope holdings by class
 
@@ -990,7 +992,7 @@ Key scopes are enforced: an API key holds exactly its stored scopes (owner permi
 
 ## 4. Entry points without a requireAuth/key gate
 
-191 of 982 entry points hold no `requireAuth` / `withApiKeyAuth` / `requireTeamAuth` gate.
+193 of 985 entry points hold no `requireAuth` / `withApiKeyAuth` / `requireTeamAuth` gate.
 Each is expected to be intentionally public, a pre-auth flow, a signature-verified webhook, or a handler that delegates auth (e.g. the MCP route).
 **Adding a row here is an access-control change** — confirm the new entry point is meant to be reachable without a gate.
 
@@ -1102,6 +1104,7 @@ Each is expected to be intentionally public, a pre-auth flow, a signature-verifi
 | `lib/server/functions/workspace-utils.ts`::requireWorkspaceRole | server-fn |
 | `routes/_portal.tsx`::setPortalFrameHeaders | server-fn |
 | `routes/[.]well-known.oauth-authorization-server.ts`::GET | route |
+| `routes/[.]well-known.oauth-protected-resource.api.mcp.ts`::GET | route |
 | `routes/[.]well-known.oauth-protected-resource.ts`::GET | route |
 | `routes/[.]well-known.openid-configuration.ts`::GET | route |
 | `routes/api/admin/assistant/copilot.ts`::POST | route |
@@ -1167,6 +1170,7 @@ Each is expected to be intentionally public, a pre-auth flow, a signature-verifi
 | `routes/api/widget/config[.]json.ts`::GET | route |
 | `routes/api/widget/device.ts`::POST | route |
 | `routes/api/widget/identify.ts`::POST | route |
+| `routes/api/widget/install-context.ts`::POST | route |
 | `routes/api/widget/kb-ask.ts`::GET | route |
 | `routes/api/widget/kb-ask.ts`::POST | route |
 | `routes/api/widget/kb-search.ts`::GET | route |

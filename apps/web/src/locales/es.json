@@ -1343,6 +1343,7 @@
   "auth.blocked.account_not_linked": "Ya existe una cuenta con este correo. Inicia sesión con tu método original (por ejemplo, un enlace enviado por correo) para confirmarla y tu inicio de sesión con SSO quedará vinculado.",
   "auth.blocked.auth_method_blocked": "Ese método de inicio de sesión no está permitido para tu cuenta.",
   "auth.blocked.email_doesn_t_match": "El proveedor de identidad devolvió un correo distinto al de tu cuenta. Inicia sesión con una cuenta del IdP que use la misma dirección de correo.",
+  "auth.blocked.email_does_not_match": "El proveedor de identidad devolvió un correo distinto al de tu cuenta. Inicia sesión con una cuenta del IdP que use la misma dirección de correo.",
   "auth.blocked.email_is_missing": "Tu proveedor de identidad no compartió ninguna dirección de correo. Pide a tu administración que habilite el ámbito de correo para esta aplicación.",
   "auth.blocked.email_not_found": "Tu proveedor de identidad no compartió ninguna dirección de correo. Pide a tu administración que habilite el ámbito de correo para esta aplicación.",
   "auth.blocked.failed_to_create_user": "No pudimos crear una cuenta para ese enlace. Puede haber caducado, o este espacio de trabajo no acepta cuentas nuevas. Pide una invitación a una administración y usa el enlace que te envíen.",

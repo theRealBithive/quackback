@@ -1343,6 +1343,7 @@
   "auth.blocked.account_not_linked": "使用該電子郵件的帳戶已存在。請用您最初的登入方式（例如郵件中的登入連結）登入以確認，隨後您的 SSO 登入將被關聯。",
   "auth.blocked.auth_method_blocked": "您的帳戶不允許使用該登入方式。",
   "auth.blocked.email_doesn_t_match": "身分提供者回傳的電子郵件與您的帳戶不一致。請使用相同電子郵件地址的 IdP 帳戶登入。",
+  "auth.blocked.email_does_not_match": "身分提供者回傳的電子郵件與您的帳戶不一致。請使用相同電子郵件地址的 IdP 帳戶登入。",
   "auth.blocked.email_is_missing": "您的身分提供者未提供電子郵件地址。請讓管理員為該應用程式啟用 email 範圍。",
   "auth.blocked.email_not_found": "您的身分提供者未提供電子郵件地址。請讓管理員為該應用程式啟用 email 範圍。",
   "auth.blocked.failed_to_create_user": "我們無法為該連結建立帳戶。它可能已過期，或此工作區不接受新帳戶。請讓管理員邀請您，然後使用寄給您的連結。",

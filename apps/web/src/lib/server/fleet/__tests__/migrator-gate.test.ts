@@ -353,6 +353,7 @@ describe('replayGateVerdict', () => {
       '0276_identity_provider_logo_key',
       '0277_post_tags_is_public',
       '0278_two_factor_lockout',
+      '0279_better_auth_17',
     ])
     const verdict = replayGateVerdict(before, verdictsFor(replaySetFor(before)), false)
     expect(verdict.ok).toBe(false)

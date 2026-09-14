@@ -290,6 +290,9 @@ describe('the real corpus', () => {
     // not measure. So it is checked there instead, in `the guarded backfill,
     // both directions`, against a real replay: a link that already carries a
     // scope keeps it even after the integration's config has moved on.
+    //
+    // 0279 wraps oauth_client backfills, the oauth_client_resource FK rewrite,
+    // and the Microsoft oid rewrite so each second run writes zero rows.
     const vouching = files.filter(
       (f) => assessReplaySafety(f, readFileSync(join(MIGRATIONS_DIR, f), 'utf8')).vouched.length > 0
     )
@@ -301,6 +304,7 @@ describe('the real corpus', () => {
       '0261_connectors.sql',
       '0269_messenger_ai_default_on.sql',
       '0274_external_link_scope.sql',
+      '0279_better_auth_17.sql',
     ])
   })
 

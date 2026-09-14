@@ -38,6 +38,11 @@ import {
   type SignInRateLimiter,
 } from './signin-rate-limit'
 import { checkAnonMintRateLimit } from './widget-rate-limit'
+import {
+  isOidcCallbackPath,
+  LEGACY_OIDC_CALLBACK_PATH,
+  oidcCallbackProviderId,
+} from './oidc-callback-path'
 import { formatSignInDevice, forgetDevice, isDeviceUnseen } from './signin-device-tracker'
 import {
   deviceCookieAttributes,
@@ -459,10 +464,8 @@ export async function handleSsoCallbackAfter(
    *  Used to resolve the callback provider for the H8 promotion gate. */
   providers: readonly ProviderWithDomains[]
 ): Promise<void> {
-  if (ctx.path !== '/oauth2/callback/:providerId') return
-  const providerId = ctx.params?.providerId
-  if (typeof providerId !== 'string' || !isRegisteredOidcProvider(providerId, registeredOidcIds))
-    return
+  const providerId = oidcCallbackProviderId(ctx)
+  if (!providerId || !isRegisteredOidcProvider(providerId, registeredOidcIds)) return
   const userId = ctx.context?.newSession?.user?.id
   if (typeof userId !== 'string' || userId.length === 0) return
   const email = ctx.context?.newSession?.user?.email
@@ -611,10 +614,8 @@ export async function handleAutoProvisionAfter(
   /** Shared per-callback claim reader. Omitted, falls back to `readSsoClaims`. */
   readClaims?: () => Promise<ClaimRead>
 ): Promise<void> {
-  if (ctx.path !== '/oauth2/callback/:providerId') return
-  const providerId = ctx.params?.providerId
-  if (typeof providerId !== 'string' || !isRegisteredOidcProvider(providerId, registeredOidcIds))
-    return
+  const providerId = oidcCallbackProviderId(ctx)
+  if (!providerId || !isRegisteredOidcProvider(providerId, registeredOidcIds)) return
 
   const userId = ctx.context?.newSession?.user?.id
   const email = ctx.context?.newSession?.user?.email
@@ -801,10 +802,8 @@ export async function handleAvatarBackfillAfter(
   registeredOidcIds: Set<string>,
   providers: IdpRows
 ): Promise<void> {
-  if (ctx.path !== '/oauth2/callback/:providerId') return
-  const providerId = ctx.params?.providerId
-  if (typeof providerId !== 'string' || !isRegisteredOidcProvider(providerId, registeredOidcIds))
-    return
+  const providerId = oidcCallbackProviderId(ctx)
+  if (!providerId || !isRegisteredOidcProvider(providerId, registeredOidcIds)) return
   const userId = ctx.context?.newSession?.user?.id
   if (typeof userId !== 'string' || userId.length === 0) return
   type UserId = `user_${string}`
@@ -1094,18 +1093,16 @@ export async function handleTwoFactorLifecycleAudit(ctx: {
  * are logged. Passwords, tokens, and credential material are never
  * recorded.
  *
- * Covers two paths:
+ * Covers:
  *  - `/sign-in/email` (password) — newSession absent on wrong password.
  *  - `/magic-link/verify` / `/sign-in/email-otp` — newSession absent
  *    on invalid or expired token.
+ *  - OIDC / social callbacks — labeled `sso` only for a registered
+ *    customer IdP (or the legacy OIDC-only template). GitHub / Google
+ *    / Microsoft on the shared `/callback/:id` path are `oauth`.
  */
 const CREDENTIAL_FAILURE_PATHS = new Set<string>(['/sign-in/email'])
 const MAGIC_LINK_FAILURE_PATHS = new Set<string>(['/magic-link/verify', '/sign-in/email-otp'])
-/** The genericOAuth callback, as a Better-Auth path TEMPLATE — the concrete
- *  provider id lives in `ctx.params.providerId`, matching `inferProvider`.
- *  A failure here redirects with `?error=<code>` rather than returning a body,
- *  so the reason is read off the Location header. */
-const OIDC_CALLBACK_PATH = '/oauth2/callback/:providerId'
 
 /**
  * Pull the IdP-reported failure code out of the callback's redirect and
@@ -1124,25 +1121,29 @@ function oidcFailureReason(returned: unknown): string | null {
   }
 }
 
-export async function handleSignInFailureAudit(ctx: {
-  path?: string
-  params?: Record<string, unknown>
-  body?: Record<string, unknown>
-  context?: {
-    newSession?: {
-      user?: { id?: string; email?: string }
-      session?: { token?: string }
-    } | null
-    /** The Response the route produced, when the hook chain exposes it. */
-    returned?: unknown
-  }
-}): Promise<void> {
+export async function handleSignInFailureAudit(
+  ctx: {
+    path?: string
+    params?: Record<string, unknown>
+    body?: Record<string, unknown>
+    context?: {
+      newSession?: {
+        user?: { id?: string; email?: string }
+        session?: { token?: string }
+      } | null
+      /** The Response the route produced, when the hook chain exposes it. */
+      returned?: unknown
+    }
+  },
+  /** OIDC provider ids registered right now (from getRegisteredOidcProviderIds). */
+  registeredOidcIds: Set<string> = new Set()
+): Promise<void> {
   // Only fire on sign-in paths where a failure produces no newSession.
   const path = ctx.path ?? ''
   const isCredentialPath = CREDENTIAL_FAILURE_PATHS.has(path)
   const isMagicLinkPath = MAGIC_LINK_FAILURE_PATHS.has(path)
-  const isOidcCallback = path === OIDC_CALLBACK_PATH
-  if (!isCredentialPath && !isMagicLinkPath && !isOidcCallback) return
+  const isCallback = isOidcCallbackPath(path)
+  if (!isCredentialPath && !isMagicLinkPath && !isCallback) return
 
   // If a session was actually created, the success audit handles it.
   const sessionCreated =
@@ -1151,16 +1152,26 @@ export async function handleSignInFailureAudit(ctx: {
 
   // Each path shape contributes only its actor + reason; the emit tail below is
   // shared so a change to it (a retry, a new field, the log level) lands once.
-  let actor: { email: string | null; type: 'user'; authMethod: 'sso' | 'magic_link' | 'password' }
+  let actor: {
+    email: string | null
+    type: 'user'
+    authMethod: 'sso' | 'oauth' | 'magic_link' | 'password'
+  }
   let metadata: Record<string, unknown>
 
-  if (isOidcCallback) {
+  if (isCallback) {
     // No email is recorded. The callback body carries no typed credential, and
     // any address in play came from the IdP response rather than a user attempt.
-    actor = { email: null, type: 'user', authMethod: 'sso' }
+    const providerId = oidcCallbackProviderId(ctx)
+    const isSso =
+      path === LEGACY_OIDC_CALLBACK_PATH ||
+      (providerId !== null && isRegisteredOidcProvider(providerId, registeredOidcIds))
+    actor = { email: null, type: 'user', authMethod: isSso ? 'sso' : 'oauth' }
     metadata = {
-      reason: oidcFailureReason(ctx.context?.returned) ?? 'OIDC_SIGNIN_FAILED',
-      providerId: typeof ctx.params?.providerId === 'string' ? ctx.params.providerId : null,
+      reason:
+        oidcFailureReason(ctx.context?.returned) ??
+        (isSso ? 'OIDC_SIGNIN_FAILED' : 'OAUTH_SIGNIN_FAILED'),
+      providerId,
     }
   } else {
     // Never log passwords, tokens, or other credential material — only the
@@ -1513,11 +1524,9 @@ export const hooksAfter = createAuthMiddleware(async (ctx) => {
   // each calling `takeResolvedClaims`.
   let claimsPromise: Promise<ClaimRead> | undefined
   const callbackUserId = ctx.context?.newSession?.user?.id
-  const callbackProviderId = ctx.params?.providerId
+  const callbackProviderId = oidcCallbackProviderId(ctx)
   const readClaims =
-    ctx.path === '/oauth2/callback/:providerId' &&
-    typeof callbackUserId === 'string' &&
-    typeof callbackProviderId === 'string'
+    callbackProviderId !== null && typeof callbackUserId === 'string'
       ? () => {
           if (!claimsPromise) {
             claimsPromise = readSsoClaimsWithProvenance(
@@ -1570,7 +1579,10 @@ export const hooksAfter = createAuthMiddleware(async (ctx) => {
   // both can fire on the same request only for the verify-totp
   // enrollment path (which itself does not constitute a sign-in).
   await handleTwoFactorLifecycleAudit(ctx as Parameters<typeof handleTwoFactorLifecycleAudit>[0])
-  await handleSignInFailureAudit(ctx as Parameters<typeof handleSignInFailureAudit>[0])
+  await handleSignInFailureAudit(
+    ctx as Parameters<typeof handleSignInFailureAudit>[0],
+    registeredOidcIds
+  )
   await handleSignInSuccessAudit(ctx as Parameters<typeof handleSignInSuccessAudit>[0])
   // Geo-IP country from CDN headers; written best-effort, never blocks.
   await handleCountryCapture(ctx as Parameters<typeof handleCountryCapture>[0])

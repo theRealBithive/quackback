@@ -58,6 +58,17 @@ export interface GenericOAuthConfig {
   clientId: string
   clientSecret: string
   disableSignUp?: boolean
+  /**
+   * Keep sign-out local to Quackback.
+   *
+   * Better Auth 1.7 RP-initiated logout ([docs](https://better-auth.com/docs/plugins/generic-oauth#rp-initiated-logout),
+   * #9368) redirects `signOut()` to whichever linked OIDC provider exposes
+   * `end_session_endpoint`, picking the most recently updated account. GitHub
+   * has no logout URL, so a GitHub session still federates out of Microsoft
+   * when that account is linked. Discovery fills `end_session_endpoint` for
+   * Entra automatically. We always disable it.
+   */
+  disableProviderLogout: true
   discoveryUrl?: string
   pkce?: boolean
   authorizationUrl?: string
@@ -88,10 +99,11 @@ export interface GenericOAuthConfig {
     | 'select_account'
     | 'select_account consent'
     | 'login consent'
-  // Emit `login_hint` to pre-select the typed email in the IdP picker.
-  authorizationUrlParams?: (ctx: {
-    body?: { additionalData?: { loginHint?: string } }
-  }) => Record<string, string>
+  /**
+   * 1.7 keys OIDC accounts on profile `sub` by default. We keep the
+   * identity-resolution `id` so claim-mapped subjects stay stable.
+   */
+  accountSubject?: (ctx: { profile: Record<string, unknown> }) => string
 }
 
 /**
@@ -147,13 +159,6 @@ export interface BuildGenericOAuthConfigsArgs {
   placeholderEmailFor?: (registrationId: string, accountId: string) => Promise<string>
   /** Attached to every config so `user.locale` populates from sign-in. */
   mapProfileToUser?: (profile: unknown) => Record<string, unknown>
-  /**
-   * Builds the `login_hint` authorizationUrlParams. Carried to EVERY
-   * provider (any provider may be domain-routed), not just the legacy sso one.
-   */
-  buildLoginHintParams?: (ctx: {
-    body?: { additionalData?: { loginHint?: string } }
-  }) => Record<string, string>
 }
 
 /**
@@ -173,7 +178,6 @@ export async function buildGenericOAuthConfigs({
   onIdentityFailure,
   placeholderEmailFor,
   mapProfileToUser,
-  buildLoginHintParams,
 }: BuildGenericOAuthConfigsArgs): Promise<GenericOAuthConfig[]> {
   // Defense-in-depth: a workspace downgraded off the OIDC tier keeps its
   // provider rows in the DB. Skip registration so no login button renders
@@ -331,6 +335,7 @@ export async function buildGenericOAuthConfigs({
       // reject without it; RFC 7636 §5 makes the params backwards-compatible
       // (IdPs without PKCE support simply ignore them).
       pkce: true,
+      disableProviderLogout: true,
       ...(prompt ? { prompt } : {}),
       authentication: request.tokenAuth,
       // Better-Auth's JIT block. When false, the OAuth callback aborts in
@@ -338,7 +343,7 @@ export async function buildGenericOAuthConfigs({
       // users still link via accountLinking.trustedProviders.
       disableSignUp: provider.autoCreateUsers === false,
       ...(mapProfileToUser ? { mapProfileToUser } : {}),
-      ...(buildLoginHintParams ? { authorizationUrlParams: buildLoginHintParams } : {}),
+      accountSubject: ({ profile }) => String(profile.id ?? profile.sub ?? ''),
     })
   }
 

@@ -1343,6 +1343,7 @@
   "auth.blocked.account_not_linked": "Es existiert bereits ein Konto mit dieser E-Mail-Adresse. Melden Sie sich mit Ihrer ursprünglichen Methode an (zum Beispiel einem zugesandten Anmeldelink), um es zu bestätigen; Ihre SSO-Anmeldung wird dann verknüpft.",
   "auth.blocked.auth_method_blocked": "Diese Anmeldemethode ist für Ihr Konto nicht zugelassen.",
   "auth.blocked.email_doesn_t_match": "Der Identitätsanbieter hat eine andere E-Mail-Adresse zurückgegeben als die Ihres Kontos. Melden Sie sich mit einem IdP-Konto an, das dieselbe E-Mail-Adresse verwendet.",
+  "auth.blocked.email_does_not_match": "Der Identitätsanbieter hat eine andere E-Mail-Adresse zurückgegeben als die Ihres Kontos. Melden Sie sich mit einem IdP-Konto an, das dieselbe E-Mail-Adresse verwendet.",
   "auth.blocked.email_is_missing": "Ihr Identitätsanbieter hat keine E-Mail-Adresse übermittelt. Bitten Sie Ihre Administration, den E-Mail-Scope für diese App zu aktivieren.",
   "auth.blocked.email_not_found": "Ihr Identitätsanbieter hat keine E-Mail-Adresse übermittelt. Bitten Sie Ihre Administration, den E-Mail-Scope für diese App zu aktivieren.",
   "auth.blocked.failed_to_create_user": "Wir konnten für diesen Link kein Konto anlegen. Er ist möglicherweise abgelaufen, oder dieser Workspace nimmt keine neuen Konten auf. Bitten Sie eine Administration um eine Einladung und nutzen Sie dann den zugesandten Link.",
