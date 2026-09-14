@@ -5,10 +5,16 @@
  * The dialog defaults new tags to Portal, mirrors the saved flag when
  * editing, and sends `isPublic` on save. Internal tags are marked in the
  * list so the state is visible without opening the dialog.
+ *
+ * ## T — Tags (upstream #527)
+ * - T1 Typing a description updates the field; Cancel closes the dialog
+ *   without saving; picking a colour from the list row changes that tag's
+ *   colour.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import type { PostTag } from '@/lib/shared/db-types'
+import { PRESET_COLORS } from '@/components/shared/color-picker'
 
 const mockCreate = vi.fn()
 const mockUpdate = vi.fn()
@@ -154,5 +160,53 @@ describe('<TagList> — create dialog layout', () => {
     fireEvent.click(screen.getByRole('button', { name: /add new tag/i }))
     fireEvent.click(screen.getByRole('button', { name: /^color$/i }))
     expect(screen.getByPlaceholderText('#000000')).toBeTruthy()
+  })
+
+  it('updates the description field as the admin types (T1)', () => {
+    render(<TagList initialTags={[]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /add new tag/i }))
+    const description = screen.getByPlaceholderText('When to use this tag')
+    fireEvent.change(description, { target: { value: 'For urgent bugs' } })
+
+    expect(description).toHaveValue('For urgent bugs')
+  })
+
+  it('closes the dialog without saving when Cancel is clicked (T1)', () => {
+    render(<TagList initialTags={[]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /add new tag/i }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Design' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByLabelText('Name')).toBeNull()
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+})
+
+describe('<TagList> — list row color popover', () => {
+  it("lets an admin pick a colour from the list row popover, changing that tag's colour (T1)", async () => {
+    render(<TagList initialTags={[PUBLIC_TAG]} />)
+
+    // The trigger for the list row's popover is the tag's own colored chip.
+    fireEvent.click(screen.getByRole('button', { name: 'Bug' }))
+
+    // ColorPickerGrid swatches carry this exact class prefix; every <Button>
+    // from the design system also carries `rounded-full` (its default pill
+    // shape), so matching on `rounded-full` alone would over-select the
+    // row's own edit/delete/add-tag buttons too.
+    const swatches = screen
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('h-6 w-6 rounded-full'))
+    expect(swatches.length).toBe(PRESET_COLORS.length)
+
+    const nextColor = PRESET_COLORS[1]
+    fireEvent.click(swatches[1])
+
+    await waitFor(() => {
+      expect(mockUpdate).toHaveBeenCalledWith({
+        data: { id: PUBLIC_TAG.id, color: nextColor },
+      })
+    })
   })
 })

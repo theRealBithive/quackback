@@ -1,5 +1,18 @@
+/**
+ * ## A — Article ids (upstream a720add94)
+ * - A1 An article id is emitted as `article_`; a `kb_article_` id is accepted wherever an article id is read (MCP tools, copilot report, Zod schemas) and rewritten to `article_`, so the retired prefix is never persisted.
+ * - A2 A prefix alias resolves to its canonical prefix, a canonical prefix to itself, an unknown prefix to nothing.
+ * - A3 A citation whose id is not a valid article id counts as no article rather than failing the report.
+ * - A4 The MCP update and delete article tools accept either prefix and act on the same article; delete reports the canonical id.
+ *
+ * This module pins A1 only, for `flexibleToTypeIdSchema`'s retired-alias
+ * rewrite branch. `typeIdSchema`'s own alias rewrite is already covered by
+ * the "rewrites the retired kb_article_ alias" test above.
+ */
 import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
+import fc from 'fast-check'
+import { TypeID } from 'typeid-js'
 import {
   typeIdSchema,
   flexibleIdSchema,
@@ -107,6 +120,40 @@ describe('Zod TypeID Schemas', () => {
       const boardId = generateId('board')
 
       expect(() => schema.parse(boardId)).toThrow()
+    })
+
+    it('rewrites a retired kb_article_ id to the canonical article_ prefix (A1)', () => {
+      const schema = flexibleToTypeIdSchema('article')
+      const canonical = generateId('article')
+      const legacy = `kb_article_${canonical.slice('article_'.length)}`
+
+      const result = schema.parse(legacy)
+
+      expect(result).toBe(canonical)
+      expect(result.startsWith('article_')).toBe(true)
+      expect(result.startsWith('kb_article_')).toBe(false)
+    })
+
+    it('property: for any UUID, the retired and canonical spellings parse to the same canonical article id (A1)', () => {
+      // Generator: valid UUIDv7 strings built the same way the production
+      // TypeID library builds them (via TypeID.fromUUID), for both the
+      // canonical 'article' prefix and the retired 'kb_article' prefix — the
+      // two structured inputs the contract makes a promise about, not random
+      // bytes.
+      fc.assert(
+        fc.property(fc.uuid(), (uuid) => {
+          const schema = flexibleToTypeIdSchema('article')
+          const canonicalSpelling = TypeID.fromUUID('article', uuid).toString()
+          const legacySpelling = TypeID.fromUUID('kb_article', uuid).toString()
+
+          const fromCanonical = schema.parse(canonicalSpelling)
+          const fromLegacy = schema.parse(legacySpelling)
+
+          expect(fromCanonical).toBe(canonicalSpelling)
+          expect(fromLegacy).toBe(canonicalSpelling)
+          expect(fromLegacy).not.toContain('kb_article_')
+        })
+      )
     })
   })
 

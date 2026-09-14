@@ -1,8 +1,16 @@
 // @vitest-environment happy-dom
+/**
+ * ## I — Widget install (upstream #538)
+ * - I2 Copying the snippet or the secret reports success; without a usable
+ *   clipboard it reports failure with a manual hint; the button is disabled
+ *   while copying.
+ * - I3 Toggling site visibility toasts the new state; a failed toggle toasts
+ *   an error.
+ */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
-const { onboarding, updateWidgetConfig, toast } = vi.hoisted(() => ({
+const { onboarding, updateWidgetConfig, toast, copyWithFallback } = vi.hoisted(() => ({
   onboarding: {
     useCase: 'product_feedback',
     hasWidgetInstalled: false,
@@ -16,6 +24,7 @@ const { onboarding, updateWidgetConfig, toast } = vi.hoisted(() => ({
     isPending: false,
   },
   toast: { success: vi.fn(), error: vi.fn() },
+  copyWithFallback: vi.fn(),
 }))
 
 vi.mock('@tanstack/react-router', async () => {
@@ -60,7 +69,7 @@ vi.mock('@/lib/client/mutations/settings', () => ({
 }))
 
 vi.mock('@/components/admin/activation-action-button', () => ({
-  copyWithFallback: vi.fn(),
+  copyWithFallback,
 }))
 
 vi.mock('sonner', () => ({
@@ -75,6 +84,7 @@ describe('WidgetInstallPage', () => {
     updateWidgetConfig.mutateAsync.mockResolvedValue({ enabled: true })
     toast.success.mockReset()
     toast.error.mockReset()
+    copyWithFallback.mockReset()
   })
 
   it('defaults to a launcher-only snippet and keeps identify off', async () => {
@@ -127,5 +137,57 @@ describe('WidgetInstallPage', () => {
 
     expect(screen.getByText(/Turn on Show on your website above/)).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Widget settings' })).toBeNull()
+  })
+
+  it('toasts when Show on your website saves successfully (I3)', async () => {
+    updateWidgetConfig.mutateAsync.mockResolvedValue({ enabled: true })
+    const { WidgetInstallPage } = await import('../settings.widget.install')
+    render(<WidgetInstallPage />)
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Show on your website' }))
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Widget is visible on your site')
+    })
+    expect(screen.getByRole('switch', { name: 'Show on your website' })).toBeChecked()
+  })
+
+  it('disables Copy snippet while copying, then toasts success (I2)', async () => {
+    let resolveCopy: () => void = () => {}
+    copyWithFallback.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveCopy = resolve
+      })
+    )
+    const { WidgetInstallPage } = await import('../settings.widget.install')
+    render(<WidgetInstallPage />)
+
+    const copyButton = screen.getByRole('button', { name: /Copy snippet|Copying/ })
+    fireEvent.click(copyButton)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Copying…' })).toBeDisabled()
+    })
+    expect(copyWithFallback).toHaveBeenCalledTimes(1)
+
+    resolveCopy()
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Copied')
+    })
+    expect(screen.getByRole('button', { name: 'Copy snippet' })).not.toBeDisabled()
+  })
+
+  it('toasts a manual-copy hint when the clipboard is unusable (I2)', async () => {
+    copyWithFallback.mockRejectedValue(new Error('clipboard denied'))
+    const { WidgetInstallPage } = await import('../settings.widget.install')
+    render(<WidgetInstallPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy snippet' }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Copy failed. Select the text and copy it manually.')
+    })
+    expect(screen.getByRole('button', { name: 'Copy snippet' })).not.toBeDisabled()
   })
 })

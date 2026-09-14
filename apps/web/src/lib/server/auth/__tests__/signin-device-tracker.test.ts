@@ -8,8 +8,15 @@
  * statement per claim, and the workspace discriminator on every row — are proved
  * against a real database in `kv/__tests__/pg-kv-semantics.db.test.ts` and
  * `kv/__tests__/workspace-separation.db.test.ts`.
+ *
+ * ## S — Sign-in devices (upstream #525/#529)
+ * - S1 A user agent that cannot be parsed yields the unknown device key and
+ *   reads as "Unknown device"; a key with only a browser or only an OS reads
+ *   as that part alone.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import fc from 'fast-check'
+import Bowser from 'bowser'
 
 const mockClaimCounted = vi.fn()
 const mockMemberTouch = vi.fn()
@@ -58,6 +65,61 @@ describe('formatSignInDevice', () => {
     expect(formatSignInDevice('')).toBe('Unknown device')
     expect(formatSignInDevice('   ')).toBe('Unknown device')
     expect(formatSignInDevice('???')).toBe('Unknown device')
+  })
+
+  it('reads a non-empty, unparseable-by-Bowser user agent as "Unknown device" (S1)', () => {
+    // Bowser.getParser only throws on an empty/undefined UA today, so this
+    // string alone would not exercise the catch — the tracker's own defence
+    // against a parser failure is the thing under test here, so the parser
+    // is made to fail directly.
+    const spy = vi.spyOn(Bowser, 'getParser').mockImplementationOnce(() => {
+      throw new Error('parser blew up')
+    })
+    try {
+      expect(formatSignInDevice('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe('Unknown device')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('reads a bot user agent Bowser gives only a browser name for as that browser alone (S1)', () => {
+    expect(formatSignInDevice('Googlebot/2.1 (+http://www.google.com/bot.html)')).toBe('Googlebot')
+  })
+
+  // Drives the browser/os → description formatting directly, independent of
+  // which real user agents Bowser happens to recognize: the parser is
+  // stubbed to hand back the generated pair. `|` is excluded from the
+  // generated names because it is the tracker's own key separator (see
+  // `signInDeviceKey`), not part of the description contract; that
+  // restriction is the specification, not a narrowing after a failing run.
+  // A pair where both parts are empty is excluded too — that is the
+  // `UNKNOWN_DEVICE_KEY` sentinel case, already covered above.
+  it('formats any generated browser/OS pair as "<browser> on <os>", or the lone part when one is empty (S1)', () => {
+    const namePart = fc.string({ minLength: 1 }).filter((s) => !s.includes('|'))
+    const namePartOrEmpty = fc.oneof(fc.constant(''), namePart)
+
+    fc.assert(
+      fc.property(namePartOrEmpty, namePartOrEmpty, (browser, os) => {
+        fc.pre(browser !== '' || os !== '')
+
+        const spy = vi.spyOn(Bowser, 'getParser').mockReturnValueOnce({
+          getBrowserName: () => browser,
+          getOSName: () => os,
+          getPlatformType: () => 'desktop',
+        } as unknown as ReturnType<typeof Bowser.getParser>)
+
+        try {
+          const description = formatSignInDevice('irrelevant-but-non-empty-ua')
+          if (browser && os) {
+            expect(description).toBe(`${browser} on ${os}`)
+          } else {
+            expect(description).toBe(browser || os)
+          }
+        } finally {
+          spy.mockRestore()
+        }
+      })
+    )
   })
 })
 

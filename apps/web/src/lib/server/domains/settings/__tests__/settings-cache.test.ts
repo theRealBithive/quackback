@@ -5,6 +5,11 @@
  * - getWorkspaceSettings() returns cached result on hit
  * - getWorkspaceSettings() queries DB and populates cache on miss
  * - All write functions invalidate the cache
+ *
+ * ## I — Widget install (upstream #538)
+ * - I1 The signing secret is minted on first admin fetch and returned unchanged
+ *   afterwards; a mint that leaves no secret behind is an error, and a database
+ *   failure is reported as such, not as a missing secret.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -436,6 +441,30 @@ describe('ensureWidgetSecret', () => {
     mockReturning.mockResolvedValue([])
 
     await expect(ensureWidgetSecret()).resolves.toBe(existing)
+    expect(mockCacheDel).not.toHaveBeenCalled()
+  })
+
+  it('throws when the re-read after a failed mint still has no secret (I1)', async () => {
+    // Neither the initial read, the mint, nor the re-read find a secret: there is
+    // no winner to fall back to, so this is an error rather than a missing value.
+    mockFindFirst
+      .mockResolvedValueOnce(makeSettingsRow({ widgetSecret: null }))
+      .mockResolvedValueOnce(makeSettingsRow({ widgetSecret: null }))
+    mockReturning.mockResolvedValue([])
+
+    await expect(ensureWidgetSecret()).rejects.toThrow(
+      'Failed to ensure widget secret: widget secret missing after ensure'
+    )
+    expect(mockCacheDel).not.toHaveBeenCalled()
+  })
+
+  it('reports a database failure during mint as such, not as a missing secret (I1)', async () => {
+    mockFindFirst.mockResolvedValue(makeSettingsRow({ widgetSecret: null }))
+    mockReturning.mockImplementation(() => Promise.reject(new Error('connection lost')))
+
+    await expect(ensureWidgetSecret()).rejects.toThrow(
+      'Failed to ensure widget secret: connection lost'
+    )
     expect(mockCacheDel).not.toHaveBeenCalled()
   })
 })

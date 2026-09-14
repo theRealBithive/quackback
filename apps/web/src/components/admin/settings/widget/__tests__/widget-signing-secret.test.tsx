@@ -1,4 +1,10 @@
 // @vitest-environment happy-dom
+/**
+ * ## I — Widget install (upstream #538)
+ * - I2 Copying the snippet or the secret reports success; without a usable
+ *   clipboard it reports failure with a manual hint; the button is disabled
+ *   while copying.
+ */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { maskSigningSecret } from '../widget-signing-secret'
@@ -60,6 +66,19 @@ describe('WidgetSigningSecret', () => {
     await waitFor(() => {
       expect(copyWithFallback).toHaveBeenCalledWith('wgt_abc123secret')
     })
+  })
+
+  it('toasts a manual-copy hint when the clipboard is unusable (I2)', async () => {
+    copyWithFallback.mockRejectedValue(new Error('clipboard denied'))
+    const { WidgetSigningSecret } = await import('../widget-signing-secret')
+    render(<WidgetSigningSecret secret="wgt_abc123secret" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Copy failed. Select the text and copy it manually.')
+    })
+    expect(screen.getByRole('button', { name: 'Copy' })).not.toBeDisabled()
   })
 
   it('regenerates after confirm', async () => {
