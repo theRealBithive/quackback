@@ -115,7 +115,7 @@ names out of the selection into their own small run, and point each run at its o
 under `coverage/`, so the split costs nothing and a flake in one part no longer
 throws away the other's report.
 
-## 5x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
+## 6x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
 An entry declares a whole file, and the gate fails on any survivor in it. A change that
 adds three lines to an upstream file therefore has to pin **every** branch that file
@@ -212,6 +212,20 @@ was the mutate-run-restore loop from the Stryker entry, five hand-written
 mutants against the new DB suite, five killed, twelve seconds each. That loop is
 now the standing substitute for scoping an entry to a diff range, and it is a
 minute of throwaway scripting per change that the gate could do by itself.
+
+Sixth occurrence, the other way round: not an upstream file the change touched
+in three lines, but two React components the change brought in whole
+(`widget-preview.tsx`, `copy-agent-prompt-button.tsx`), with suites written
+against the confirmed contract and every diff line executed. Declaring them
+cost one gate run and returned 71 survivors. About a third were Tailwind class
+strings, the two English button labels and a decorative page skeleton — not
+equivalent, just presentation no test should assert — and the rest were real
+(launcher propagation on prop change, the timer cleanup, the unmount path). The
+real ones cannot be graded without also swearing to the presentational ones, so
+both files came back out of the manifest and the kills sit in the suites
+unmeasured. Rule of thumb for a component: if a third of its mutable lines are
+`className` literals, do not declare it; grade the hook or helper the logic can
+be lifted into instead.
 
 ## 5x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
@@ -1535,6 +1549,51 @@ write" branch is never entered. Replace the global instead:
 throw or record as the case needs, and `vi.unstubAllGlobals()` in `afterEach`.
 The launcher suite under `apps/web/src/lib/shared/widget/__tests__/` has the
 fake with its three modes (working, write refused, blocked).
+
+## 1x — What a module did while it was imported can be recorded by neither a spy nor a plain `const`
+
+Two mutators keep pointing at calls that run once, at module scope, before any
+test does anything: `logger.child({ component: … })` and
+`createFileRoute('/api/…')`. Killing those means asserting what the call was
+handed, and both obvious ways of recording it fail, in opposite directions.
+
+A `vi.fn()` inside the `vi.mock` factory records the call correctly and then
+`vi.clearAllMocks()` in `beforeEach` erases it — the import happened before the
+first `beforeEach`, so every test sees zero calls. The suite stays green and the
+mutant survives, which is the direction that does not announce itself.
+
+Recording into a plain module-level array instead fails loudly:
+`ReferenceError: Cannot access 'fileRoutePaths' before initialization`. vitest
+hoists the `vi.mock` factories _and_ the import of the module under test above
+the file's own `const` declarations, so anything a factory touches while that
+import runs has to come out of `vi.hoisted(() => ({ … }))`. The
+`const spy = vi.fn()` pattern these suites already use only survives because its
+factory defers the call (`(...a) => spy(...a)`) and the arrow body runs later —
+which is exactly why it does not generalise to a call the import itself makes.
+
+So: `vi.hoisted` for the container, a plain array rather than a spy, and clear it
+by hand (`logLines.length = 0`) for the per-test lines. Both shapes are in
+`routes/api/widget/__tests__/install-context.test.ts`.
+
+## 1x — A guard whose body is the fall-through shows up as a dozen unkillable mutants
+
+`betterAuthMcpResource` had two early returns for loopback hosts (`localhost`,
+`[::1]`, `127/8`) that returned exactly what the function's last line returns,
+so they could only matter for a host that also ends in `.localhost` — none
+does. Stryker offered twelve mutants on those two lines and ten of them could
+not be killed by any input; the same shape sat in the private-use redirect
+check, where three of six conjuncts were implied by the fourth. The agent
+asked to "kill the survivors" spent its budget proving the equivalences one
+by one, which was correct and beside the point: the finding is dead code, not
+missing tests. Recording ten `equivalents` for it would have been the wrong
+fix twice over — a record is addressed by line text, mutator and replacement,
+so a line that holds both killable and equivalent mutants with the same
+replacement (`true` for every `&&` prefix) cannot be excused without also
+excusing the killable ones. Delete the dead guard, keep its intent in the
+docblock, and the mutants go with it. Read the survivor list for this shape
+first: a run of `ConditionalExpression → true` on one line with a long `&&`
+chain, or `Regex` mutants on a guard that returns the same value as the line
+after it.
 
 # Resolved
 

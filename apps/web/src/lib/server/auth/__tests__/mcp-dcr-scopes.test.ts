@@ -147,6 +147,64 @@ describe('mcpDcrRegistrationBody', () => {
     ])
     expect(mcpDcrRedirectUrisToRestore(original)).toEqual(original.redirect_uris)
   })
+
+  it('swaps in a loopback callback, the only non-HTTPS shape 1.7.4 accepts (M4)', () => {
+    // The placeholder is what the client's real callback is registered as, so
+    // it has to be a URI Better Auth 1.7.4 takes on its own terms: loopback
+    // host, plain HTTP, and nothing this module would want to rewrite again.
+    const placeholder = new URL(BA_DCR_PLACEHOLDER_REDIRECT_URI)
+    expect(placeholder.protocol).toBe('http:')
+    expect(placeholder.hostname).toBe('127.0.0.1')
+    expect(placeholder.pathname).toBe('/__ba_dcr_placeholder')
+    expect(needsBetterAuth17RedirectRewrite(BA_DCR_PLACEHOLDER_REDIRECT_URI)).toBe(false)
+    expect(mcpDcrRegistrationBody({ redirect_uris: [CURSOR_REDIRECT] }).redirect_uris).toEqual([
+      BA_DCR_PLACEHOLDER_REDIRECT_URI,
+    ])
+  })
+
+  it('sends a redirect_uris list that is not all strings on as it arrived (M4)', () => {
+    // A registration body is a client's JSON. A list holding something that is
+    // not a redirect URI is not a list to rewrite entries of — it goes to
+    // Better Auth exactly as sent, which is what refuses it.
+    const original = { redirect_uris: [CURSOR_REDIRECT, 42] }
+    const body = mcpDcrRegistrationBody(original)
+    expect(body.redirect_uris).toEqual([CURSOR_REDIRECT, 42])
+    expect(body.application_type).toBeUndefined()
+    expect(mcpDcrRedirectUrisToRestore(original)).toBeNull()
+  })
+
+  it('sends an empty redirect_uris string on as it arrived (M4)', () => {
+    // An empty string names no callback, so there is nothing to wrap in a
+    // one-entry list and nothing to restore afterwards.
+    const original = { redirect_uris: '' }
+    expect(mcpDcrRegistrationBody(original).redirect_uris).toBe('')
+    expect(mcpDcrRedirectUrisToRestore(original)).toBeNull()
+  })
+
+  it('sends a redirect_uris value that is neither list nor string on as it arrived (M4)', () => {
+    const original = { redirect_uris: 42 }
+    expect(mcpDcrRegistrationBody(original).redirect_uris).toBe(42)
+    expect(mcpDcrRedirectUrisToRestore(original)).toBeNull()
+  })
+
+  it('declares the client native when only one of its callbacks was swapped (M4)', () => {
+    // Cursor registers a private-use callback next to an HTTPS one. One swap
+    // is enough to make the registration a native one.
+    const body = mcpDcrRegistrationBody({
+      redirect_uris: [CURSOR_REDIRECT, 'https://www.cursor.com/agents/mcp/oauth/callback'],
+    })
+    expect(body.application_type).toBe('native')
+  })
+
+  it('leaves application_type unset when no callback had to be swapped (M4)', () => {
+    // Nothing was rewritten, so nothing here knows the client is native and
+    // Better Auth's own default decides — forcing `native` would change how a
+    // plain web client is registered.
+    const body = mcpDcrRegistrationBody({
+      redirect_uris: ['https://app.example.com/cb'],
+    })
+    expect(body.application_type).toBeUndefined()
+  })
 })
 
 describe('needsBetterAuth17RedirectRewrite', () => {
@@ -172,6 +230,139 @@ describe('needsBetterAuth17RedirectRewrite', () => {
     // both stay as sent so Better Auth refuses the registration itself.
     expect(needsBetterAuth17RedirectRewrite('cursor://anysphere.cursor-mcp/cb#frag')).toBe(false)
     expect(needsBetterAuth17RedirectRewrite('cursor://user:pw@anysphere.cursor-mcp/cb')).toBe(false)
+  })
+
+  it('does not rewrite a redirect carrying only a username (M4)', () => {
+    // A callback with a user part is not the callback the client will be sent
+    // to; swapping a placeholder in would register it as a working client.
+    expect(needsBetterAuth17RedirectRewrite('cursor://user@anysphere.cursor-mcp/cb')).toBe(false)
+  })
+
+  it('does not rewrite a redirect carrying only a password (M4)', () => {
+    expect(needsBetterAuth17RedirectRewrite('cursor://:pw@anysphere.cursor-mcp/cb')).toBe(false)
+  })
+
+  it('leaves every reserved scheme for Better Auth to refuse (M4)', () => {
+    // These are the schemes a redirect must never carry. Rewriting one to a
+    // loopback placeholder would register a client whose callback the
+    // authorization server had already decided to reject.
+    expect(needsBetterAuth17RedirectRewrite('file:///tmp/callback')).toBe(false)
+    expect(needsBetterAuth17RedirectRewrite('ftp://files.example.com/cb')).toBe(false)
+    expect(needsBetterAuth17RedirectRewrite('mailto:ops@acme.example')).toBe(false)
+    expect(needsBetterAuth17RedirectRewrite('javascript:alert(1)')).toBe(false)
+    expect(needsBetterAuth17RedirectRewrite('data:text/plain,cb')).toBe(false)
+    expect(needsBetterAuth17RedirectRewrite('vbscript:msgbox(1)')).toBe(false)
+  })
+
+  it('rewrites a reverse-domain redirect that carries a host (M4)', () => {
+    // RFC 8252 private-use URIs have no authority. One with a host is the
+    // shape Better Auth 1.7.4 refuses, so it is the shape to swap out.
+    expect(needsBetterAuth17RedirectRewrite('com.example.app://host.example/cb')).toBe(true)
+  })
+
+  it('rewrites a reverse-domain redirect whose path is not absolute (M4)', () => {
+    expect(needsBetterAuth17RedirectRewrite('com.example.app:oauth/callback')).toBe(true)
+  })
+
+  it('rewrites a reverse-domain redirect with an empty authority (M4)', () => {
+    // `scheme:///cb` is an authority, just an empty one — not the
+    // authority-free form, and not what 1.7.4 accepts either.
+    expect(needsBetterAuth17RedirectRewrite('com.example.app:///oauth/callback')).toBe(true)
+  })
+
+  it('rewrites a private-use redirect whose scheme is a single label (M4)', () => {
+    // A scheme with no dot is not a domain name anyone can own, so it is not
+    // the private-use form Better Auth stores unchanged.
+    expect(needsBetterAuth17RedirectRewrite('myapp:/oauth/callback')).toBe(true)
+  })
+
+  it('keeps a reverse-domain redirect whatever the length of its labels (M4)', () => {
+    // Single-character and two-character labels are ordinary domain labels.
+    // Treating one as malformed would swap a placeholder into a registration
+    // that was already valid, and the client would never get its callback back.
+    expect(needsBetterAuth17RedirectRewrite('x.example.app:/oauth/callback')).toBe(false)
+    expect(needsBetterAuth17RedirectRewrite('ab.example:/oauth/callback')).toBe(false)
+    expect(needsBetterAuth17RedirectRewrite('com.x:/oauth/callback')).toBe(false)
+    expect(needsBetterAuth17RedirectRewrite('a.b:/oauth/callback')).toBe(false)
+  })
+
+  it('rewrites a scheme that merely contains or borders on a reverse domain (M4)', () => {
+    // The whole scheme has to be the domain name. A label that ends or starts
+    // with a hyphen, or a scheme with a `+` in it, is not a name in DNS.
+    expect(needsBetterAuth17RedirectRewrite('a+b.example:/oauth/callback')).toBe(true)
+    expect(needsBetterAuth17RedirectRewrite('com.example+x:/oauth/callback')).toBe(true)
+    expect(needsBetterAuth17RedirectRewrite('com.example-:/oauth/callback')).toBe(true)
+    expect(needsBetterAuth17RedirectRewrite('com.-example:/oauth/callback')).toBe(true)
+  })
+
+  it('rewrites exactly the redirects that are not RFC 8252 private-use URIs (M4)', () => {
+    // A private-use redirect is a reverse-domain scheme, no authority, and a
+    // path with one leading slash. Every candidate below is either that shape
+    // or that shape with exactly one property broken, and the assertion is
+    // unguarded across both: the answer is the flaw and nothing else.
+    type RedirectFlaw =
+      | 'none'
+      | 'host'
+      | 'relative-path'
+      | 'empty-authority'
+      | 'single-label'
+      | 'trailing-hyphen'
+      | 'leading-hyphen'
+      | 'plus-in-scheme'
+
+    const middleChars = fc.constantFrom('a', 'm', 'z', '0', '7', '-')
+    const endChar = fc.constantFrom('a', 'q', '9')
+    const domainLabel = (startChar: fc.Arbitrary<string>) =>
+      fc
+        .tuple(
+          startChar,
+          fc.array(middleChars, { maxLength: 4 }),
+          fc.option(endChar, { nil: null })
+        )
+        .map(([start, middle, end]) => (end === null ? start : start + middle.join('') + end))
+
+    const flaws: RedirectFlaw[] = [
+      'none',
+      'host',
+      'relative-path',
+      'empty-authority',
+      'single-label',
+      'trailing-hyphen',
+      'leading-hyphen',
+      'plus-in-scheme',
+    ]
+
+    fc.assert(
+      fc.property(
+        domainLabel(fc.constantFrom('a', 'c', 'q', 'z')),
+        fc.array(domainLabel(fc.constantFrom('a', 'c', 'q', 'z', '0', '5', '9')), {
+          minLength: 1,
+          maxLength: 3,
+        }),
+        fc.array(fc.constantFrom('oauth', 'callback', 'cb'), { minLength: 1, maxLength: 3 }),
+        fc.constantFrom(...flaws),
+        (firstLabel, restLabels, segments, flaw) => {
+          const scheme = [firstLabel, ...restLabels].join('.')
+          const path = `/${segments.join('/')}`
+          const candidates: Record<RedirectFlaw, { uri: string; rewritten: boolean }> = {
+            none: { uri: `${scheme}:${path}`, rewritten: false },
+            host: { uri: `${scheme}://host.example${path}`, rewritten: true },
+            'relative-path': { uri: `${scheme}:${path.slice(1)}`, rewritten: true },
+            'empty-authority': { uri: `${scheme}://${path}`, rewritten: true },
+            'single-label': { uri: `${firstLabel}:${path}`, rewritten: true },
+            'trailing-hyphen': { uri: `${scheme}-:${path}`, rewritten: true },
+            'leading-hyphen': { uri: `${scheme}.-app:${path}`, rewritten: true },
+            'plus-in-scheme': {
+              uri: `${firstLabel}+${restLabels.join('.')}:${path}`,
+              rewritten: true,
+            },
+          }
+
+          const candidate = candidates[flaw]
+          expect(needsBetterAuth17RedirectRewrite(candidate.uri)).toBe(candidate.rewritten)
+        }
+      )
+    )
   })
 })
 
@@ -272,5 +463,22 @@ describe('restoreMcpDcrRegisteredRedirectUris', () => {
     // The body length changed, so a copied content-length would truncate it.
     expect(restored.headers.get('content-length')).not.toBe('999')
     expect(restored.headers.get('x-request-id')).toBe('req_1')
+  })
+
+  it('answers a registration whose client_id is not a string as a server error (M4)', async () => {
+    // The client_id addresses the row the real callbacks are written onto.
+    // Anything that is not a string is no client this instance can name, and
+    // using it as one would update whatever row it happened to coerce to.
+    const restored = await restoreMcpDcrRegisteredRedirectUris(
+      Response.json({ client_id: 12345, client_secret: 'shh' }, { status: 201 }),
+      [CURSOR_REDIRECT]
+    )
+
+    expect(restored.status).toBe(500)
+    expect(await restored.json()).toEqual({
+      error: 'server_error',
+      error_description: 'Registered client was missing client_id',
+    })
+    expect(updateCalls).toHaveLength(0)
   })
 })

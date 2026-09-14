@@ -68,6 +68,27 @@ describe('ACCESS_DOMAINS', () => {
   })
 })
 
+describe('CLIENT_REQUESTED_SCOPE_PARAM', () => {
+  it('is the qb_requested_scope authorize parameter (M6)', () => {
+    // The name is part of the wire contract: authorize stamps it and the
+    // consent page reads it back off its own URL. Renaming it silently would
+    // leave consent prefilling from `scope=` again.
+    expect(CLIENT_REQUESTED_SCOPE_PARAM).toBe('qb_requested_scope')
+  })
+})
+
+describe('parseScopeList', () => {
+  it('reads a scope string with padding and repeated separators (M5)', () => {
+    // OAuth scope strings arrive space- or plus-separated and a client may pad
+    // them. Empty tokens are not scopes; letting one through would put a blank
+    // toggle on the consent screen and a blank entry in the grant.
+    expect(parseScopeList('  read:feedback  +write:feedback ')).toEqual([
+      'read:feedback',
+      'write:feedback',
+    ])
+  })
+})
+
 describe('defaultSelectedScopes', () => {
   it('prefills the MCP first-connect reads and leaves writes off', () => {
     const selected = defaultSelectedScopes([...MCP_FIRST_CONNECT_SCOPES])
@@ -258,6 +279,19 @@ describe('clientRequestedFromConsentSearch', () => {
       'read:feedback',
       'write:feedback',
     ])
+  })
+
+  it('does not read a catalogue-sized scope with an unknown member as the catalogue (M5)', () => {
+    // Only the catalogue itself is the expanded authorize scope. A request of
+    // the same size that swaps one scope for something else is a real client
+    // request, and consent must prefill what the client asked for.
+    const swapped = [...MCP_AS_SCOPES.slice(0, -1), 'read:invoices'].join(' ')
+    expect(clientRequestedFromConsentSearch({ scope: swapped })).toEqual(parseScopeList(swapped))
+  })
+
+  it('does not read the catalogue plus an extra scope as the catalogue (M5)', () => {
+    const superset = [...MCP_AS_SCOPES, 'read:invoices'].join(' ')
+    expect(clientRequestedFromConsentSearch({ scope: superset })).toEqual(parseScopeList(superset))
   })
 
   it('reads a consent URL with no scope at all as no client request (M5)', () => {

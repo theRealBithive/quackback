@@ -229,16 +229,6 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'apps/web/src/routes/api/widget/install-context.ts',
         suites: ['apps/web/src/routes/api/widget/__tests__/install-context.test.ts'],
       },
-      {
-        file: 'apps/web/src/components/admin/settings/widget/copy-agent-prompt-button.tsx',
-        suites: [
-          'apps/web/src/components/admin/settings/widget/__tests__/copy-agent-prompt-button.test.tsx',
-        ],
-      },
-      {
-        file: 'apps/web/src/components/admin/settings/widget/widget-preview.tsx',
-        suites: ['apps/web/src/components/admin/settings/widget/__tests__/widget-preview.test.tsx'],
-      },
     ])
   })
 
@@ -509,6 +499,78 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: "window.history.replaceState({}, '', url.toString())",
         replacement: '"Stryker was here!"',
         why: "The second argument of history.replaceState is the entry's title, which the HTML specification tells browsers to ignore and no browser reads. The URL is the third argument and is asserted; nothing observable — not the location, not the history length, not the document title — changes with the second.",
+      },
+      {
+        file: 'apps/web/src/routes/api/widget/install-context.ts',
+        mutator: 'OptionalChaining',
+        line: "if (forwarded) return forwarded.split(',')[0]?.trim() === 'https'",
+        replacement: "forwarded.split(',')[0].trim",
+        why: expect.stringContaining(
+          'The guard above makes the header a non-empty string, and String'
+        ),
+      },
+      {
+        file: 'apps/web/src/routes/api/widget/install-context.ts',
+        mutator: 'ObjectLiteral',
+        line: "const log = logger.child({ component: 'widget-install-context' })",
+        replacement: '{}',
+        why: expect.stringContaining(
+          'The component name is metadata on a log line and reaches no branch, no'
+        ),
+      },
+      {
+        file: 'apps/web/src/routes/api/widget/install-context.ts',
+        mutator: 'StringLiteral',
+        line: "const log = logger.child({ component: 'widget-install-context' })",
+        replacement: '""',
+        why: expect.stringContaining(
+          'Same line, same reason: the component name is log metadata, not behavi'
+        ),
+      },
+      {
+        file: 'apps/web/src/lib/server/domains/settings/widget-install-pairing.ts',
+        mutator: 'StringLiteral',
+        line: "return createHash('sha256').update(code.trim(), 'utf8').digest('hex')",
+        replacement: '""',
+        why: expect.stringContaining(
+          'Node reads a falsy input encoding as its default, utf8, so the digest '
+        ),
+      },
+      {
+        file: 'apps/web/src/lib/server/domains/settings/widget-install-pairing.ts',
+        mutator: 'ObjectLiteral',
+        line: "const log = logger.child({ component: 'widget-install-pairing' })",
+        replacement: '{}',
+        why: expect.stringContaining(
+          'The component name is metadata on a log line and reaches no branch, no'
+        ),
+      },
+      {
+        file: 'apps/web/src/lib/server/domains/settings/widget-install-pairing.ts',
+        mutator: 'StringLiteral',
+        line: "const log = logger.child({ component: 'widget-install-pairing' })",
+        replacement: '""',
+        why: expect.stringContaining(
+          'Same line, same reason: the component name is log metadata, not behavi'
+        ),
+      },
+      {
+        file: 'apps/web/src/lib/shared/mcp-consent-scopes.ts',
+        mutator: 'Regex',
+        line: 'return raw.split(/[+\\s]+/).filter(Boolean)',
+        replacement: '/[+\\s]/',
+        why: expect.stringContaining(
+          'Splitting on a single separator instead of a run of them dif'
+        ),
+      },
+      {
+        file: 'apps/web/src/lib/shared/mcp-consent-scopes.ts',
+        mutator: 'StringLiteral',
+        line: "if (isFullAsCatalogue(params.scope ?? '')) return [...MCP_FIRST_CONNECT_SCOPES]",
+        replacement: '"Stryker was here!"',
+        why: expect.stringContaining(
+          'The fallback is only read when the scope parameter is absent'
+        ),
       },
     ])
   })

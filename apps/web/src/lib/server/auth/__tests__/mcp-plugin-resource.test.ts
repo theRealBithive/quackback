@@ -53,6 +53,23 @@ describe('betterAuthMcpResource', () => {
     )
   })
 
+  it('collapses a *.localhost name that opens with a loopback address (M2)', () => {
+    // `127.0.0.1.localhost` is a `*.localhost` name, not a loopback address:
+    // the address is only its prefix. Reading it as one would leave the plugin
+    // with a host it refuses, and `createAuth()` throws on every request.
+    expect(betterAuthMcpResource('http://127.0.0.1.localhost:3000/api/mcp')).toBe(
+      'http://localhost:3000/api/mcp'
+    )
+  })
+
+  it('collapses a *.localhost name whose first label is 127 (M2)', () => {
+    // Same trap from the other side: a name that starts with `127.` but whose
+    // remaining labels are not numbers is a domain name, not an address.
+    expect(betterAuthMcpResource('http://127.a.b.localhost:3000/api/mcp')).toBe(
+      'http://localhost:3000/api/mcp'
+    )
+  })
+
   it('passes a plain-HTTP identifier on a real host through unchanged (M2)', () => {
     // Behind a TLS-terminating proxy the pinned origin can be plain http on a
     // public hostname. Nothing about that host is loopback, so nothing is

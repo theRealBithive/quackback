@@ -54,6 +54,16 @@ describe('MCP protected resource metadata', () => {
     expect(doc.scopes_supported).not.toContain('openid')
   })
 
+  it('names this instance as the authorization server and header-only tokens (M1)', () => {
+    // RFC 9728: the client reads `authorization_servers` to find where to
+    // register and authorize. An empty list leaves it with nowhere to go, and
+    // a `bearer_methods_supported` that does not say `header` invites the
+    // client to put the access token in a query string.
+    const doc = mcpProtectedResourceMetadata('https://feedback.example.com')
+    expect(doc.authorization_servers).toEqual(['https://feedback.example.com'])
+    expect(doc.bearer_methods_supported).toEqual(['header'])
+  })
+
   it('serves the document as cacheable JSON that varies by host (M1)', async () => {
     const response = mcpProtectedResourceResponse('https://feedback.example.com')
 

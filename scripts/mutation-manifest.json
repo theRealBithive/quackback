@@ -201,16 +201,6 @@
     {
       "file": "apps/web/src/routes/api/widget/install-context.ts",
       "suites": ["apps/web/src/routes/api/widget/__tests__/install-context.test.ts"]
-    },
-    {
-      "file": "apps/web/src/components/admin/settings/widget/copy-agent-prompt-button.tsx",
-      "suites": [
-        "apps/web/src/components/admin/settings/widget/__tests__/copy-agent-prompt-button.test.tsx"
-      ]
-    },
-    {
-      "file": "apps/web/src/components/admin/settings/widget/widget-preview.tsx",
-      "suites": ["apps/web/src/components/admin/settings/widget/__tests__/widget-preview.test.tsx"]
     }
   ],
   "equivalents": [
@@ -465,6 +455,62 @@
       "line": "window.history.replaceState({}, '', url.toString())",
       "replacement": "\"Stryker was here!\"",
       "why": "The second argument of history.replaceState is the entry's title, which the HTML specification tells browsers to ignore and no browser reads. The URL is the third argument and is asserted; nothing observable — not the location, not the history length, not the document title — changes with the second."
+    },
+    {
+      "file": "apps/web/src/routes/api/widget/install-context.ts",
+      "mutator": "OptionalChaining",
+      "line": "if (forwarded) return forwarded.split(',')[0]?.trim() === 'https'",
+      "replacement": "forwarded.split(',')[0].trim",
+      "why": "The guard above makes the header a non-empty string, and String.prototype.split returns at least one element for any input, so index 0 is always a string (an empty one for a leading comma) and the optional call never short-circuits. The `?.` satisfies the indexed-access type; no request reaches the undefined it guards against."
+    },
+    {
+      "file": "apps/web/src/routes/api/widget/install-context.ts",
+      "mutator": "ObjectLiteral",
+      "line": "const log = logger.child({ component: 'widget-install-context' })",
+      "replacement": "{}",
+      "why": "The component name is metadata on a log line and reaches no branch, no return value and no response. The line the route writes when a pairing is redeemed is asserted in install-context.test.ts; the child's name is the one field a test could only read back from the logger it just configured."
+    },
+    {
+      "file": "apps/web/src/routes/api/widget/install-context.ts",
+      "mutator": "StringLiteral",
+      "line": "const log = logger.child({ component: 'widget-install-context' })",
+      "replacement": "\"\"",
+      "why": "Same line, same reason: the component name is log metadata, not behaviour."
+    },
+    {
+      "file": "apps/web/src/lib/server/domains/settings/widget-install-pairing.ts",
+      "mutator": "StringLiteral",
+      "line": "return createHash('sha256').update(code.trim(), 'utf8').digest('hex')",
+      "replacement": "\"\"",
+      "why": "Node reads a falsy input encoding as its default, utf8, so the digest of the same string is byte-for-byte the same: createHash('sha256').update('abc', '') and update('abc', 'utf8') both give ba7816bf...15ad (checked on Node 22 and on bun). No code can observe which spelling of the default was used."
+    },
+    {
+      "file": "apps/web/src/lib/server/domains/settings/widget-install-pairing.ts",
+      "mutator": "ObjectLiteral",
+      "line": "const log = logger.child({ component: 'widget-install-pairing' })",
+      "replacement": "{}",
+      "why": "The component name is metadata on a log line and reaches no branch, no return value and no query. The error line the status read writes, with its cause, is asserted in widget-install-pairing.test.ts; the child's name is the one field a test could only read back from the logger it just configured."
+    },
+    {
+      "file": "apps/web/src/lib/server/domains/settings/widget-install-pairing.ts",
+      "mutator": "StringLiteral",
+      "line": "const log = logger.child({ component: 'widget-install-pairing' })",
+      "replacement": "\"\"",
+      "why": "Same line, same reason: the component name is log metadata, not behaviour."
+    },
+    {
+      "file": "apps/web/src/lib/shared/mcp-consent-scopes.ts",
+      "mutator": "Regex",
+      "line": "return raw.split(/[+\\s]+/).filter(Boolean)",
+      "replacement": "/[+\\s]/",
+      "why": "Splitting on a single separator instead of a run of them differs only in the empty strings it emits between adjacent separators and around a leading or trailing one, and the filter on the same line removes every empty string. For any input the two produce the same token list."
+    },
+    {
+      "file": "apps/web/src/lib/shared/mcp-consent-scopes.ts",
+      "mutator": "StringLiteral",
+      "line": "if (isFullAsCatalogue(params.scope ?? '')) return [...MCP_FIRST_CONNECT_SCOPES]",
+      "replacement": "\"Stryker was here!\"",
+      "why": "The fallback is only read when the scope parameter is absent. isFullAsCatalogue is true for exactly one token set, the eleven authorization-server scopes, and neither the empty string nor a three-word sentence is that set, so both fall through to parsing the absent parameter as no scopes at all."
     }
   ]
 }
