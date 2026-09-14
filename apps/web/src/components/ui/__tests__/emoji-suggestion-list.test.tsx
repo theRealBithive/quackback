@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest'
 import { createRef } from 'react'
-import { render, screen, act } from '@testing-library/react'
+import { screen, act } from '@testing-library/react'
+import { renderWithIntl } from '@/test/render-with-intl'
 import { EmojiSuggestionList } from '../rich-text-editor'
 import type { EmojiItem } from '@/lib/shared/content-emoji'
 
@@ -40,7 +41,7 @@ describe('EmojiSuggestionList', () => {
   it('Tab selects the highlighted row (Slack-style)', () => {
     const command = vi.fn()
     const ref = createRef<ListHandle>()
-    render(<EmojiSuggestionList ref={ref} items={items} command={command} />)
+    renderWithIntl(<EmojiSuggestionList ref={ref} items={items} command={command} />)
     expect(fireKey(ref, 'Tab')).toBe(true)
     expect(command).toHaveBeenCalledWith(items[0])
   })
@@ -48,7 +49,7 @@ describe('EmojiSuggestionList', () => {
   it('Home/End jump to first/last row', () => {
     const command = vi.fn()
     const ref = createRef<ListHandle>()
-    render(<EmojiSuggestionList ref={ref} items={items} command={command} />)
+    renderWithIntl(<EmojiSuggestionList ref={ref} items={items} command={command} />)
     expect(fireKey(ref, 'End')).toBe(true)
     expect(fireKey(ref, 'Enter')).toBe(true)
     expect(command).toHaveBeenCalledWith(items[2])
@@ -59,13 +60,13 @@ describe('EmojiSuggestionList', () => {
   })
 
   it('renders shortcodes so the highlighted suggestion is visible', () => {
-    const { container } = render(<EmojiSuggestionList items={items} command={() => {}} />)
+    const { container } = renderWithIntl(<EmojiSuggestionList items={items} command={() => {}} />)
     expect(container.querySelector('[data-emoji-shortcode="fingers_crossed"]')).not.toBeNull()
     expect(container.querySelector('[data-emoji-shortcode="tada"]')).not.toBeNull()
   })
 
   it('highlights the typed query in the Slack name (:crossed_fingers:)', () => {
-    const { container } = render(
+    const { container } = renderWithIntl(
       <EmojiSuggestionList items={items} command={() => {}} query="fingers" />
     )
     expect(container.querySelector('[data-emoji-shortcode="crossed_fingers"]')).not.toBeNull()
@@ -75,7 +76,7 @@ describe('EmojiSuggestionList', () => {
   })
 
   it('labels Recent then Popular when recentCount is set (bare `:` )', () => {
-    render(<EmojiSuggestionList items={items} command={() => {}} recentCount={1} />)
+    renderWithIntl(<EmojiSuggestionList items={items} command={() => {}} recentCount={1} />)
     expect(screen.getByText('Recent')).toBeInTheDocument()
     expect(screen.getByText('Popular')).toBeInTheDocument()
   })

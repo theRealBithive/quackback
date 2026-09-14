@@ -183,7 +183,7 @@ describe('MentionPicker', () => {
   it('Shift+Tab also confirms the highlighted row', () => {
     const command = vi.fn()
     const ref = createRef<MentionPickerHandle>()
-    render(<MentionPicker ref={ref} items={items} command={command} />)
+    renderWithIntl(<MentionPicker ref={ref} items={items} command={command} />)
     expect(fireKey(ref, 'Tab')).toBe(true)
     expect(command).toHaveBeenCalledWith({ id: 'principal_jane', label: 'Jane Doe' })
   })
@@ -196,7 +196,7 @@ describe('MentionPicker', () => {
   })
 
   it('highlights the typed query in display names', () => {
-    render(<MentionPicker items={items} command={() => {}} query="ja" />)
+    renderWithIntl(<MentionPicker items={items} command={() => {}} query="ja" />)
     const marks = screen.getAllByText('Ja')
     expect(marks.length).toBeGreaterThanOrEqual(1)
     expect(marks[0]).toHaveAttribute('data-query-match')

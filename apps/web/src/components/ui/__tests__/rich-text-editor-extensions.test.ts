@@ -175,7 +175,7 @@ describe('buildExtensions', () => {
 
   it('persists attrs.emoji on an emoji node so read-only HTML can skip the dataset', () => {
     const editor = new Editor({
-      extensions: buildExtensions({ slashMenu: false, mentions: false }, { placeholder: '' }),
+      extensions: build({ slashMenu: false, mentions: false }, { placeholder: '' }),
       content: {
         type: 'doc',
         content: [

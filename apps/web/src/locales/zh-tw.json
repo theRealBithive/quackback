@@ -546,6 +546,8 @@
   "ui.combobox.search": "搜尋…",
   "ui.combobox.empty": "找不到結果。",
   "ui.editor.placeholder": "寫點什麼...",
+  "ui.editor.emoji.recent": "最近使用",
+  "ui.editor.emoji.popular": "常用",
   "ui.editor.slash.text.title": "正文",
   "ui.editor.slash.text.description": "普通段落文字",
   "ui.editor.slash.heading1.title": "標題 1",

@@ -1145,6 +1145,7 @@ function emojiSuggestionProps(props: SuggestionProps<EmojiItem>): EmojiSuggestio
 
 export const EmojiSuggestionList = forwardRef<EmojiSuggestionListRef, EmojiSuggestionListProps>(
   ({ items, command, recentCount = 0, query = '' }, ref) => {
+    const intl = useIntl()
     const [selectedIndex, setSelectedIndex] = useState(0)
     const containerRef = useRef<HTMLDivElement>(null)
     const selectedRef = useRef(0)
@@ -1209,10 +1210,17 @@ export const EmojiSuggestionList = forwardRef<EmojiSuggestionListRef, EmojiSugge
             return (
               <div key={item.name}>
                 {recentCount > 0 && index === 0 && (
-                  <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Recent</div>
+                  <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                    {intl.formatMessage({ id: 'ui.editor.emoji.recent', defaultMessage: 'Recent' })}
+                  </div>
                 )}
                 {recentCount > 0 && index === recentCount && (
-                  <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Popular</div>
+                  <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                    {intl.formatMessage({
+                      id: 'ui.editor.emoji.popular',
+                      defaultMessage: 'Popular',
+                    })}
+                  </div>
                 )}
                 <button
                   type="button"

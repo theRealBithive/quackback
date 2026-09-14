@@ -546,6 +546,8 @@
   "ui.combobox.search": "بحث…",
   "ui.combobox.empty": "لم يتم العثور على نتائج.",
   "ui.editor.placeholder": "...اكتب شيئًا",
+  "ui.editor.emoji.recent": "الأخيرة",
+  "ui.editor.emoji.popular": "الشائعة",
   "ui.editor.slash.text.title": "نص",
   "ui.editor.slash.text.description": "نص فقرة عادي",
   "ui.editor.slash.heading1.title": "1 عنوان",
