@@ -245,7 +245,7 @@ function renderHeaderInGerman({ isLoggedIn }: { isLoggedIn: boolean }) {
 describe('PortalHeader — Sign up button behavior', () => {
   beforeEach(() => {
     mockOpenAuthPopover.mockClear()
-    mockOauth2.mockClear()
+    mockSocial.mockClear()
     mockHasAny.mockReturnValue(true)
     mockHasDistinctSignup.mockReturnValue(true)
   })
@@ -255,7 +255,7 @@ describe('PortalHeader — Sign up button behavior', () => {
     mockResolveSole.mockReturnValue('oidc_entra')
     renderHeaderInGerman({ isLoggedIn: false })
     fireEvent.click(screen.getByRole('button', { name: 'Registrieren' }))
-    expect(mockOauth2).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'oidc_entra' }))
+    expect(mockSocial).toHaveBeenCalledWith(expect.objectContaining({ provider: 'oidc_entra' }))
     expect(mockOpenAuthPopover).not.toHaveBeenCalled()
   })
 
@@ -264,7 +264,7 @@ describe('PortalHeader — Sign up button behavior', () => {
     renderHeaderInGerman({ isLoggedIn: false })
     fireEvent.click(screen.getByRole('button', { name: 'Registrieren' }))
     expect(mockOpenAuthPopover).toHaveBeenCalledWith(expect.objectContaining({ mode: 'signup' }))
-    expect(mockOauth2).not.toHaveBeenCalled()
+    expect(mockSocial).not.toHaveBeenCalled()
   })
 })
 
