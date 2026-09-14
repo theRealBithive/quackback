@@ -181,6 +181,64 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/lib/server/domains/posts/__tests__/post-public.test.ts',
         ],
       },
+      {
+        file: 'apps/web/src/lib/server/auth/mcp-dcr-scopes.ts',
+        suites: [
+          'apps/web/src/lib/server/auth/__tests__/mcp-dcr-scopes.test.ts',
+          'apps/web/src/routes/api/auth/__tests__/dcr-redirect-restore.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/auth/mcp-plugin-resource.ts',
+        suites: ['apps/web/src/lib/server/auth/__tests__/mcp-plugin-resource.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/shared/mcp-consent-scopes.ts',
+        suites: [
+          'apps/web/src/lib/shared/__tests__/mcp-consent-scopes.test.ts',
+          'apps/web/src/routes/oauth/__tests__/consent-scope-view.test.ts',
+          'apps/web/src/routes/oauth/__tests__/consent-page.test.tsx',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/mcp/protected-resource-metadata.ts',
+        suites: ['apps/web/src/lib/server/mcp/__tests__/oauth-challenge.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/client/start-provider-link.ts',
+        suites: [
+          'apps/web/src/lib/client/__tests__/start-provider-link.test.ts',
+          'apps/web/src/components/auth/__tests__/portal-auth-form-inline.link-conflict.test.tsx',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/auth/ensure-mcp-oauth-resource.ts',
+        suites: [
+          'apps/web/src/lib/server/auth/__tests__/ensure-mcp-oauth-resource.test.ts',
+          'apps/web/src/lib/server/auth/__tests__/oauth-client-resource-cascade.db.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/domains/settings/widget-install-pairing.ts',
+        suites: [
+          'apps/web/src/lib/server/domains/settings/__tests__/widget-install-pairing.test.ts',
+          'apps/web/src/lib/server/domains/settings/__tests__/widget-install-pairing.db.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/routes/api/widget/install-context.ts',
+        suites: ['apps/web/src/routes/api/widget/__tests__/install-context.test.ts'],
+      },
+      {
+        file: 'apps/web/src/components/admin/settings/widget/copy-agent-prompt-button.tsx',
+        suites: [
+          'apps/web/src/components/admin/settings/widget/__tests__/copy-agent-prompt-button.test.tsx',
+        ],
+      },
+      {
+        file: 'apps/web/src/components/admin/settings/widget/widget-preview.tsx',
+        suites: ['apps/web/src/components/admin/settings/widget/__tests__/widget-preview.test.tsx'],
+      },
     ])
   })
 
