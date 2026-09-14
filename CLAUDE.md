@@ -3,6 +3,9 @@
 Fork-local conventions. Upstream has no `CLAUDE.md`, so this file never conflicts
 on a sync. Concrete gotchas that cost real time are collected in
 [SELF-IMPROVE.md](SELF-IMPROVE.md); this file is how to work given they exist.
+Where the fork stands against upstream, commit by commit, is
+[UPSTREAM.md](UPSTREAM.md): a pick updates its row in the same pull request,
+and a decision to skip is recorded there with its reason.
 
 ## Everything that lands in the repo is written in English
 
