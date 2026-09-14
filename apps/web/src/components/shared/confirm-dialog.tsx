@@ -92,6 +92,11 @@ export function ConfirmDialog({
               try {
                 result = onConfirm()
               } catch {
+                // Radix closes the dialog on a click it was allowed to
+                // handle. A confirm that failed is the same to the person
+                // clicking as one still running: the dialog stays, like it
+                // does for a rejected async confirm below.
+                event.preventDefault()
                 return
               }
               if (result && typeof result.then === 'function') {
