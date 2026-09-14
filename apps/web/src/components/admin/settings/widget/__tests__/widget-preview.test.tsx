@@ -11,13 +11,26 @@
  *   - An optional greeting bubble sits above the closed launcher.
  *   - The widget's own close button messages its host (quackback:close);
  *     the preview honours it like the SDK would, but only from its own origin.
+ *
+ * ## P — Widget install pairing (upstream 98b18e3ee)
+ * - P5 The admin preview mounts the real launcher: it takes the site's light and
+ *   dark colours from the widget config, applies them once the config loads and
+ *   again when the theme switches, mirrors the unread count the iframe reports,
+ *   and keeps the default look when the config cannot be fetched.
  */
-import { describe, it, expect, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { WidgetPreview } from '../widget-preview'
 
 function sendClose(origin: string) {
   fireEvent(window, new MessageEvent('message', { data: { type: 'quackback:close' }, origin }))
+}
+
+function sendUnread(origin: string, count: number | undefined) {
+  fireEvent(
+    window,
+    new MessageEvent('message', { data: { type: 'quackback:unread', count }, origin })
+  )
 }
 
 function launcher() {
@@ -136,5 +149,162 @@ describe('WidgetPreview', () => {
     fireEvent.click(launcher())
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
     expect(sessionStorage.getItem('quackback:launcher-greeting-dismissed')).toBeNull()
+  })
+})
+
+describe('WidgetPreview launcher theme, unread and defaults', () => {
+  // The SDK brand defaults the launcher paints before any config arrives.
+  const DEFAULT_BACKGROUND = '#000000'
+  const DEFAULT_FOREGROUND = '#facc15'
+
+  function stubConfigFetch(config: unknown) {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => config })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  beforeEach(() => {
+    try {
+      sessionStorage.clear()
+    } catch {
+      /* ignore */
+    }
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('paints the launcher in the site light colours once the config loads (P5)', async () => {
+    stubConfigFetch({
+      theme: {
+        lightPrimary: '#1d4ed8',
+        lightPrimaryForeground: '#f8fafc',
+        darkPrimary: '#0f172a',
+        darkPrimaryForeground: '#e2e8f0',
+      },
+    })
+
+    render(<WidgetPreview position="bottom-right" theme="light" />)
+
+    await waitFor(() => {
+      expect(launcher().style.backgroundColor).toBe('#1d4ed8')
+    })
+    expect(launcher().style.color).toBe('#f8fafc')
+  })
+
+  it('repaints in the dark colours when the theme switches (P5)', async () => {
+    stubConfigFetch({
+      theme: {
+        lightPrimary: '#1d4ed8',
+        lightPrimaryForeground: '#f8fafc',
+        darkPrimary: '#0f172a',
+        darkPrimaryForeground: '#e2e8f0',
+      },
+    })
+
+    const view = render(<WidgetPreview position="bottom-right" theme="light" />)
+    await waitFor(() => {
+      expect(launcher().style.backgroundColor).toBe('#1d4ed8')
+    })
+
+    // Same mounted launcher, new theme: the cached config is re-applied.
+    await act(async () => {
+      view.rerender(<WidgetPreview position="bottom-right" theme="dark" />)
+    })
+
+    await waitFor(() => {
+      expect(launcher().style.backgroundColor).toBe('#0f172a')
+    })
+    expect(launcher().style.color).toBe('#e2e8f0')
+  })
+
+  it('uses the light colours in dark mode when the site defines no dark pair (P5)', async () => {
+    stubConfigFetch({
+      theme: { lightPrimary: '#1d4ed8', lightPrimaryForeground: '#f8fafc' },
+    })
+
+    render(<WidgetPreview position="bottom-right" theme="dark" />)
+
+    await waitFor(() => {
+      expect(launcher().style.backgroundColor).toBe('#1d4ed8')
+    })
+    expect(launcher().style.color).toBe('#f8fafc')
+  })
+
+  it('keeps the default look when the config carries no theme (P5)', async () => {
+    const fetchMock = stubConfigFetch({ enabled: true })
+
+    render(<WidgetPreview position="bottom-right" />)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/widget/config.json')
+    })
+    await act(async () => {})
+    expect(launcher().style.backgroundColor).toBe(DEFAULT_BACKGROUND)
+    expect(launcher().style.color).toBe(DEFAULT_FOREGROUND)
+  })
+
+  it('keeps the default look when the config request fails (P5)', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('offline'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<WidgetPreview position="bottom-right" />)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled()
+    })
+    await act(async () => {})
+    expect(launcher().style.backgroundColor).toBe(DEFAULT_BACKGROUND)
+    expect(launcher().style.color).toBe(DEFAULT_FOREGROUND)
+  })
+
+  it('keeps the default look when the config responds with an error status (P5)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ theme: { lightPrimary: '#1d4ed8' } }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<WidgetPreview position="bottom-right" />)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled()
+    })
+    await act(async () => {})
+    expect(launcher().style.backgroundColor).toBe(DEFAULT_BACKGROUND)
+  })
+
+  it('mirrors the unread count the widget iframe reports (P5)', () => {
+    render(<WidgetPreview position="bottom-right" />)
+
+    // The badge only shows while the panel is closed, as it does on a real site.
+    fireEvent.click(launcher())
+    sendUnread(window.location.origin, 3)
+
+    const badge = launcher().lastElementChild as HTMLElement
+    expect(badge.textContent).toBe('3')
+    expect(badge.style.display).toBe('flex')
+  })
+
+  it('clears the badge when the iframe reports no count (P5)', () => {
+    render(<WidgetPreview position="bottom-right" />)
+
+    fireEvent.click(launcher())
+    sendUnread(window.location.origin, 2)
+    sendUnread(window.location.origin, undefined)
+
+    const badge = launcher().lastElementChild as HTMLElement
+    expect(badge.textContent).toBe('0')
+    expect(badge.style.display).toBe('none')
+  })
+
+  it('ignores an unread report from a foreign origin (P5)', () => {
+    render(<WidgetPreview position="bottom-right" />)
+
+    fireEvent.click(launcher())
+    sendUnread('https://evil.example', 7)
+
+    expect((launcher().lastElementChild as HTMLElement).style.display).toBe('none')
   })
 })

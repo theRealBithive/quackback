@@ -1514,6 +1514,28 @@ or compare the `Test Files` count with the number of paths given. A gate-side
 fix would be for the diff-coverage and mutation checks to print the suites they
 actually ran, since both already know the list.
 
+## 1x — happy-dom keeps a colour as the text you wrote, and `vi.spyOn(Storage.prototype, …)` never fires
+
+Two traps in one afternoon of launcher and widget-preview tests, both in the
+test DOM rather than in the code under test.
+
+**A colour written as `#1e3a8a` reads back as `#1e3a8a`.** A browser
+normalises `element.style.backgroundColor` to `rgb(30, 58, 138)`; happy-dom
+stores the literal string. A test asserting the `rgb(...)` form fails against a
+component that is correct, and the message reads like the colour was never
+applied. Assert the value in the shape the component writes — here the hex from
+the widget config — and if the same suite may one day run in a real browser,
+compare after normalising both sides yourself.
+
+**`vi.spyOn(Storage.prototype, 'setItem')` does not intercept happy-dom's
+`sessionStorage`.** Its storage is not backed by `Storage.prototype`, so the spy
+installs cleanly, the code writes through, and the test's "storage refuses the
+write" branch is never entered. Replace the global instead:
+`vi.stubGlobal('sessionStorage', fakeStorage)` with an object whose methods
+throw or record as the case needs, and `vi.unstubAllGlobals()` in `afterEach`.
+The launcher suite under `apps/web/src/lib/shared/widget/__tests__/` has the
+fake with its three modes (working, write refused, blocked).
+
 # Resolved
 
 ## 1x — A Stryker run leaves two things behind that nothing else guards

@@ -6,6 +6,11 @@
  *   while copying.
  * - I3 Toggling site visibility toasts the new state; a failed toggle toasts
  *   an error.
+ *
+ * ## P — Widget install pairing (upstream 98b18e3ee)
+ * - P1 The install prompt an admin copies carries a short-lived pairing code and
+ *   never the signing secret; the code is minted on copy by an admin with
+ *   settings.manage, and a mint failure toasts and copies nothing.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -244,5 +249,23 @@ describe('WidgetInstallPage', () => {
       expect(toast.error).toHaveBeenCalledWith('Copy failed. Select the text and copy it manually.')
     })
     expect(screen.getByRole('button', { name: 'Copy snippet' })).not.toBeDisabled()
+  })
+
+  it('toasts and copies nothing when the pairing code cannot be minted (P1)', async () => {
+    mintInstallCode.mutateAsync.mockRejectedValue(new Error('Access denied'))
+    const { WidgetInstallPage } = await import('../settings.widget.install')
+    render(<WidgetInstallPage />)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Copy install prompt for your coding agent' })
+    )
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Could not copy the install prompt. Try again.')
+    })
+    expect(copyWithFallback).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole('button', { name: 'Copy install prompt for your coding agent' })
+    ).toBeInTheDocument()
   })
 })

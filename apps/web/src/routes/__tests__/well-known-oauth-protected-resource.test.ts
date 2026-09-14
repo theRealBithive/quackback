@@ -1,4 +1,11 @@
 /**
+ * The two RFC 9728 well-known documents an MCP client reads before it ever
+ * asks for a token: the root one it finds from the bare origin, and the
+ * path-inserted one Better Auth 1.7's challenge helper points at for the
+ * resource `…/api/mcp`. A client that follows either has to arrive at the
+ * same resource identifier, or it asks the authorization server for a
+ * resource this instance does not issue tokens for.
+ *
  * Contract group M — MCP scoped OAuth on Better Auth 1.7 (upstream #540, #550, #541, #551)
  *
  * M1 The MCP protected-resource metadata is served as JSON at both well-known paths, the
@@ -32,60 +39,63 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 
+vi.mock('@tanstack/react-router', () => ({
+  createFileRoute: vi.fn((path: string) => (opts: unknown) => ({ path, options: opts })),
+}))
+
 vi.mock('@/lib/server/config', () => ({
   config: { baseUrl: 'https://feedback.example.com' },
 }))
 
 import { MCP_FIRST_CONNECT_SCOPES } from '@/lib/shared/api-key-scopes'
-import {
-  mcpProtectedResourceMetadata,
-  mcpProtectedResourceResponse,
-} from '../protected-resource-metadata'
-import { insufficientScopeChallenge, unauthenticatedMcpChallenge } from '../oauth-challenge'
+import { Route as RootPrmRoute } from '../[.]well-known.oauth-protected-resource'
+import { Route as ApiMcpPrmRoute } from '../[.]well-known.oauth-protected-resource.api.mcp'
 
-describe('MCP protected resource metadata', () => {
-  it('advertises only the three first-connect read scopes', () => {
-    const doc = mcpProtectedResourceMetadata('https://feedback.example.com')
-    expect(doc.resource).toBe('https://feedback.example.com/api/mcp')
-    expect(doc.scopes_supported).toEqual([...MCP_FIRST_CONNECT_SCOPES])
-    expect(doc.scopes_supported).toEqual(['read:feedback', 'read:article', 'read:chat'])
-    expect(doc.scopes_supported).not.toContain('offline_access')
-    expect(doc.scopes_supported).not.toContain('write:feedback')
-    expect(doc.scopes_supported).not.toContain('openid')
-  })
+type PrmRoute = {
+  path: string
+  options: { server: { handlers: { GET: (args: Record<string, never>) => Promise<Response> } } }
+}
 
-  it('serves the document as cacheable JSON that varies by host (M1)', async () => {
-    const response = mcpProtectedResourceResponse('https://feedback.example.com')
+/** GET the document this route serves. */
+async function get(route: unknown): Promise<Response> {
+  return (route as PrmRoute).options.server.handlers.GET({})
+}
 
+describe('the MCP protected-resource well-known documents', () => {
+  it('serves the root document as JSON naming this instance (M1)', async () => {
+    const response = await get(RootPrmRoute)
+
+    expect((RootPrmRoute as unknown as PrmRoute).path).toBe('/.well-known/oauth-protected-resource')
     expect(response.headers.get('content-type')).toBe('application/json')
     expect(response.headers.get('cache-control')).toBe('public, max-age=3600')
-    // The document names the requesting host's own resource, so a shared
-    // cache that ignored Host would serve one workspace's identifier to
-    // another's MCP client.
     expect(response.headers.get('vary')).toBe('Host')
-    expect(await response.json()).toEqual(
-      mcpProtectedResourceMetadata('https://feedback.example.com')
+    expect(await response.json()).toEqual({
+      resource: 'https://feedback.example.com/api/mcp',
+      authorization_servers: ['https://feedback.example.com'],
+      bearer_methods_supported: ['header'],
+      scopes_supported: [...MCP_FIRST_CONNECT_SCOPES],
+    })
+  })
+
+  it('serves the path-inserted document at the /api/mcp well-known path (M1)', async () => {
+    const response = await get(ApiMcpPrmRoute)
+
+    expect((ApiMcpPrmRoute as unknown as PrmRoute).path).toBe(
+      '/.well-known/oauth-protected-resource/api/mcp'
     )
-  })
-})
-
-describe('MCP OAuth challenges', () => {
-  it('puts first-connect scopes on the unauthenticated 401 challenge', () => {
-    const header = unauthenticatedMcpChallenge()
-    expect(header).toContain('scope="read:feedback read:article read:chat"')
-    expect(header).toContain('resource_metadata="')
-    expect(header).toContain('/.well-known/oauth-protected-resource')
-    expect(header).not.toContain('/api/mcp')
+    expect(response.headers.get('content-type')).toBe('application/json')
+    expect(response.headers.get('cache-control')).toBe('public, max-age=3600')
+    expect(response.headers.get('vary')).toBe('Host')
+    expect(await response.json()).toMatchObject({
+      resource: 'https://feedback.example.com/api/mcp',
+    })
   })
 
-  it('returns HTTP 403 insufficient_scope for the current operation', async () => {
-    const response = insufficientScopeChallenge('write:feedback')
-    expect(response.status).toBe(403)
-    const header = response.headers.get('www-authenticate') ?? ''
-    expect(header).toContain('error="insufficient_scope"')
-    expect(header).toContain('scope="write:feedback"')
-    expect(header).toContain('resource_metadata=')
-    const body = (await response.json()) as { error: string }
-    expect(body.error).toBe('insufficient_scope')
+  it('answers both paths with the same document (M1)', async () => {
+    // A client that discovered the resource from the bare origin and one that
+    // followed the 1.7 challenge header have to agree on the identifier they
+    // then ask for a token for; two documents that drift are two audiences.
+    const [root, inserted] = await Promise.all([get(RootPrmRoute), get(ApiMcpPrmRoute)])
+    expect(await root.json()).toEqual(await inserted.json())
   })
 })

@@ -1,9 +1,16 @@
+/**
+ * ## P — Widget install pairing (upstream 98b18e3ee)
+ * - P1 The install prompt an admin copies carries a short-lived pairing code and
+ *   never the signing secret; the code is minted on copy by an admin with
+ *   settings.manage, and a mint failure toasts and copies nothing.
+ */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const invalidateQueries = vi.fn()
 const setQueryData = vi.fn()
 const updateThemeFn = vi.fn(async () => ({ ok: true }))
 const updateCustomCssFn = vi.fn(async () => ({ ok: true }))
+const mintWidgetInstallCodeFn = vi.fn(async () => ({ code: 'qbi_mintedbyhook' }))
 
 vi.mock('@tanstack/react-query', async () => {
   const actual =
@@ -19,6 +26,7 @@ vi.mock('@/lib/server/functions/settings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/functions/settings')>()),
   updateThemeFn,
   updateCustomCssFn,
+  mintWidgetInstallCodeFn,
 }))
 
 describe('settings config mutations cache invalidation', () => {
@@ -127,5 +135,36 @@ describe('settings config mutations cache invalidation', () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['settings', 'branding'] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['settings', 'customCss'] })
     expect(result).toBeInstanceOf(Promise)
+  })
+})
+
+describe('useMintWidgetInstallCode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mintWidgetInstallCodeFn.mockResolvedValue({ code: 'qbi_mintedbyhook' })
+  })
+
+  it('mints through the server function and returns the pairing code (P1)', async () => {
+    const { useMintWidgetInstallCode } = await import('../settings')
+    const mutation = useMintWidgetInstallCode() as {
+      mutationFn?: () => Promise<{ code: string }>
+      onSuccess?: unknown
+    }
+
+    await expect(mutation.mutationFn?.()).resolves.toEqual({ code: 'qbi_mintedbyhook' })
+
+    expect(mintWidgetInstallCodeFn).toHaveBeenCalledTimes(1)
+    // Minting is a one-shot credential, not cached state: nothing is written
+    // to or invalidated in the query cache.
+    expect(setQueryData).not.toHaveBeenCalled()
+    expect(invalidateQueries).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a mint failure to the caller (P1)', async () => {
+    mintWidgetInstallCodeFn.mockRejectedValue(new Error('Access denied'))
+    const { useMintWidgetInstallCode } = await import('../settings')
+    const mutation = useMintWidgetInstallCode() as { mutationFn?: () => Promise<{ code: string }> }
+
+    await expect(mutation.mutationFn?.()).rejects.toThrow('Access denied')
   })
 })

@@ -1,6 +1,12 @@
+/**
+ * ## P — Widget install pairing (upstream 98b18e3ee)
+ * - P3 Reading the install status reports a database failure as such.
+ */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { InternalError } from '@/lib/shared/errors'
 
 const kvSet = vi.fn()
+const requireSettingsCached = vi.fn()
 const dbExecute = vi.fn()
 const ensureWidgetSecret = vi.fn()
 const updateWidgetConfig = vi.fn()
@@ -9,6 +15,12 @@ const getBaseUrl = vi.fn(() => 'https://feedback.example.com/')
 vi.mock('@/lib/server/kv/pg-kv', () => ({ kvSet: (...a: unknown[]) => kvSet(...a) }))
 vi.mock('@/lib/server/db', () => ({ db: { execute: (...a: unknown[]) => dbExecute(...a) } }))
 vi.mock('@/lib/server/config', () => ({ getBaseUrl: () => getBaseUrl() }))
+// Partial mock: only the settings read is faked, so wrapDbError — the thing
+// under test here — stays the real one.
+vi.mock('../settings.helpers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../settings.helpers')>()),
+  requireSettingsCached: (...a: unknown[]) => requireSettingsCached(...a),
+}))
 vi.mock('../settings.widget', () => ({
   ensureWidgetSecret: (...a: unknown[]) => ensureWidgetSecret(...a),
   updateWidgetConfig: (...a: unknown[]) => updateWidgetConfig(...a),
@@ -20,6 +32,7 @@ import {
   WIDGET_INSTALL_CODE_TTL_SECONDS,
   consumeWidgetInstallCode,
   generateWidgetInstallCode,
+  getWidgetInstallStatus,
   hashWidgetInstallCode,
   mintWidgetInstallCode,
   redeemWidgetInstallCode,
@@ -93,5 +106,25 @@ describe('redeemWidgetInstallCode', () => {
     await expect(redeemWidgetInstallCode('qbi_spent')).resolves.toBeNull()
     expect(ensureWidgetSecret).not.toHaveBeenCalled()
     expect(updateWidgetConfig).not.toHaveBeenCalled()
+  })
+})
+
+describe('getWidgetInstallStatus', () => {
+  it('reports a database failure as such instead of an empty status (P3)', async () => {
+    requireSettingsCached.mockRejectedValue(new Error('connection terminated unexpectedly'))
+
+    await expect(getWidgetInstallStatus()).rejects.toThrow(
+      'Failed to fetch widget install status: connection terminated unexpectedly'
+    )
+  })
+
+  it('raises the failure as a 500 DATABASE_ERROR carrying the original cause (P3)', async () => {
+    const cause = new Error('connection terminated unexpectedly')
+    requireSettingsCached.mockRejectedValue(cause)
+
+    const error = await getWidgetInstallStatus().catch((raised: unknown) => raised)
+
+    expect(error).toBeInstanceOf(InternalError)
+    expect(error).toMatchObject({ code: 'DATABASE_ERROR', statusCode: 500, cause })
   })
 })
