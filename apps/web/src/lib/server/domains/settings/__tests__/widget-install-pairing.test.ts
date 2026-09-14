@@ -4,10 +4,11 @@
  *   and never the signing secret; the code is minted on copy by an admin with
  *   settings.manage, and a mint failure toasts and copies nothing.
  * - P3 Reading the install status reports a database failure as such.
- *
- * The status tests below read P3 as the guarantee that what the status reports
- * is what the instance actually knows — a failure is reported as a failure, and
- * an install nobody has seen is not reported as an install.
+ * - P7 The install status reports what the site sent: connected only once a
+ *   ping was seen, enabled only when the stored config says so, the SDK
+ *   versions as stored, and an update request only for a connected site whose
+ *   SDK is behind. (Added 2026-09-14 after the mutation run showed the success
+ *   path unpinned; confirmed by the user.)
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
@@ -200,7 +201,7 @@ describe('getWidgetInstallStatus reports what the instance knows', () => {
   const firstSeen = new Date('2026-09-01T10:00:00.000Z')
   const lastSeen = new Date('2026-09-12T08:30:00.000Z')
 
-  it('reports a site that has pinged as connected, with the evidence it sent (P3)', async () => {
+  it('reports a site that has pinged as connected, with the evidence it sent (P7)', async () => {
     requireSettingsCached.mockResolvedValue(
       settingsWithInstallEvidence({
         widgetConfig: JSON.stringify({ enabled: true }),
@@ -222,7 +223,7 @@ describe('getWidgetInstallStatus reports what the instance knows', () => {
     })
   })
 
-  it('reports a site that has never pinged as not connected (P3)', async () => {
+  it('reports a site that has never pinged as not connected (P7)', async () => {
     requireSettingsCached.mockResolvedValue(
       settingsWithInstallEvidence({ widgetConfig: JSON.stringify({ enabled: true }) })
     )
@@ -238,7 +239,7 @@ describe('getWidgetInstallStatus reports what the instance knows', () => {
     })
   })
 
-  it('reports the widget as off when the stored config says so (P3)', async () => {
+  it('reports the widget as off when the stored config says so (P7)', async () => {
     requireSettingsCached.mockResolvedValue(
       settingsWithInstallEvidence({ widgetConfig: JSON.stringify({ enabled: false }) })
     )
@@ -246,7 +247,7 @@ describe('getWidgetInstallStatus reports what the instance knows', () => {
     await expect(getWidgetInstallStatus()).resolves.toMatchObject({ enabled: false })
   })
 
-  it('does not read a merely truthy stored flag as on (P3)', async () => {
+  it('does not read a merely truthy stored flag as on (P7)', async () => {
     requireSettingsCached.mockResolvedValue(
       settingsWithInstallEvidence({ widgetConfig: '{"enabled":"yes"}' })
     )
@@ -254,7 +255,7 @@ describe('getWidgetInstallStatus reports what the instance knows', () => {
     await expect(getWidgetInstallStatus()).resolves.toMatchObject({ enabled: false })
   })
 
-  it('asks a connected site running an older SDK to update (P3)', async () => {
+  it('asks a connected site running an older SDK to update (P7)', async () => {
     requireSettingsCached.mockResolvedValue(
       settingsWithInstallEvidence({
         widgetConfig: JSON.stringify({ enabled: true }),
@@ -272,7 +273,7 @@ describe('getWidgetInstallStatus reports what the instance knows', () => {
     })
   })
 
-  it('does not ask a site nobody has seen to update, however old its SDK (P3)', async () => {
+  it('does not ask a site nobody has seen to update, however old its SDK (P7)', async () => {
     requireSettingsCached.mockResolvedValue(
       settingsWithInstallEvidence({
         widgetConfig: JSON.stringify({ enabled: true }),
@@ -286,7 +287,7 @@ describe('getWidgetInstallStatus reports what the instance knows', () => {
     })
   })
 
-  it('never reports an update for a site it has no install evidence for (P3)', async () => {
+  it('never reports an update for a site it has no install evidence for (P7)', async () => {
     const seenAt = fc.option(
       fc.integer({ min: 0, max: 2_000_000_000_000 }).map((ms) => new Date(ms)),
       { nil: null }
