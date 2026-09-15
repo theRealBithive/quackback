@@ -28,6 +28,12 @@
  *  C4 When a send fails and the user has typed on, the new typing stays on
  *     top and the failed text is kept below it behind a separator, a toast
  *     says so, and the composer regains focus.
+ *  C5 A reply that could not be translated is refused rather than sent in the
+ *     wrong language: whether the translation was unavailable or the reply
+ *     carried an image or embed a translation cannot keep, the toast offers
+ *     "Send untranslated", and taking it empties the restored composer, sends
+ *     the same reply with translation skipped, and hands focus back to the
+ *     composer.
  */
 import { createRef } from 'react'
 import fc from 'fast-check'
@@ -1423,10 +1429,13 @@ describe('AgentConversationThread — composer send lifecycle', () => {
     )
   })
 
-  // The two "Send untranslated" fallbacks re-clear the composer the failure
-  // restored, resend, and put the caret back on the next frame. That is C2's
-  // guarantee applied to the retry — with the one difference that the re-clear
-  // remounts the editor rather than clearing it in place (see the report).
+  // C5's two blocked branches. Neither reply went out in the wrong language:
+  // each send was refused, and the toast is the only way to send that reply
+  // untranslated. Taking the offer re-clears the composer the failure
+  // restored, resends with translation skipped, and puts the caret back on the
+  // next frame. The re-clear remounts the editing surface rather than clearing
+  // it in place, which is what C5 asks for — an empty composer, not an
+  // in-place clear.
   for (const [label, message, description] of [
     [
       'an image the translation cannot carry',
@@ -1439,7 +1448,7 @@ describe('AgentConversationThread — composer send lifecycle', () => {
       'Send it in your own language instead, or try again.',
     ],
   ] as const) {
-    it(`"Send untranslated" after ${label} resends, re-clears and refocuses (C2)`, async () => {
+    it(`"Send untranslated" after ${label} resends, re-clears and refocuses (C5)`, async () => {
       const inFlight = deferred<unknown>()
       vi.mocked(sendAgentMessageFn).mockReturnValue(inFlight.promise as never)
       renderComposer()
@@ -1455,6 +1464,12 @@ describe('AgentConversationThread — composer send lifecycle', () => {
       // The blocked send restored the draft, so the offer has something to
       // resend and something to re-clear.
       await waitFor(() => expect(editorProbe.value).toEqual(TYPED_JSON))
+      // Refused rather than sent in the wrong language: exactly one attempt
+      // reached the server, and it was the one that asked for a translation.
+      expect(vi.mocked(sendAgentMessageFn)).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(sendAgentMessageFn).mock.calls[0]?.[0]).not.toMatchObject({
+        data: { skipTranslation: true },
+      })
       const [title, options] = toastError.mock.calls.at(-1) as [
         string,
         { description: string; action: { label: string; onClick: () => void } },
@@ -1473,6 +1488,7 @@ describe('AgentConversationThread — composer send lifecycle', () => {
       vi.mocked(sendAgentMessageFn).mockReturnValue(new Promise(() => {}) as never)
       await act(async () => options.action.onClick())
 
+      expect(vi.mocked(sendAgentMessageFn)).toHaveBeenCalledTimes(2)
       expect(vi.mocked(sendAgentMessageFn).mock.calls.at(-1)?.[0]).toMatchObject({
         data: { content: 'Hello', skipTranslation: true },
       })
@@ -1484,4 +1500,26 @@ describe('AgentConversationThread — composer send lifecycle', () => {
       expect(editorProbe.focusCalls.at(-1)).toBe('end')
     })
   }
+
+  it('offers nothing untranslated when the send failed for any other reason (C5)', async () => {
+    const inFlight = deferred<unknown>()
+    vi.mocked(sendAgentMessageFn).mockReturnValue(inFlight.promise as never)
+    renderComposer()
+    await settledReplyComposer()
+    typeIntoComposer(TYPED_JSON, 'Hello')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
+    await act(async () => {
+      inFlight.reject(new Error('the network went away'))
+      await inFlight.promise.catch(() => {})
+    })
+
+    await waitFor(() => expect(editorProbe.value).toEqual(TYPED_JSON))
+    // One argument and no second one, so there is no options object and
+    // therefore no action: taking the translation offer is the only route to
+    // an untranslated send, which is what makes C5 a refusal rather than a
+    // detour.
+    expect(toastError.mock.calls.at(-1)).toEqual(['Failed to send message'])
+    expect(vi.mocked(sendAgentMessageFn)).toHaveBeenCalledTimes(1)
+  })
 })

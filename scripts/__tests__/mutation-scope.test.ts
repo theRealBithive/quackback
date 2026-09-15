@@ -285,7 +285,10 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
       },
       {
         file: 'apps/web/src/lib/server/utils/next-position.ts',
-        suites: ['apps/web/src/lib/server/utils/__tests__/next-position.test.ts'],
+        suites: [
+          'apps/web/src/lib/server/utils/__tests__/next-position.test.ts',
+          'apps/web/src/lib/server/utils/__tests__/next-position.db.test.ts',
+        ],
       },
       {
         file: 'packages/ids/src/drizzle.ts',

@@ -65,11 +65,14 @@
  *    is no room; it never grows down over the composer (its height is capped, at
  *    least 96px, and it scrolls inside); it follows the caret while open and stops
  *    following when closed or re-attached elsewhere.
+ * G14 The editor handle's `clear` empties the document through the live editor, in
+ *    place: the same editor instance stays mounted and the host is not re-created.
+ *    Once the editor is gone the call is a no-op rather than a throw.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react'
-import type { JSONContent } from '@tiptap/core'
+import type { Editor, JSONContent } from '@tiptap/core'
 import { renderWithIntl } from '@/test/render-with-intl'
 import enMessages from '@/locales/en.json'
 import { COMMENT_EDITOR_FEATURES } from '@/components/public/comment-editor-features'
@@ -78,6 +81,7 @@ import {
   generateContentHTML,
   RichTextContent,
   RichTextEditor,
+  withLiveEditor,
   type RichTextEditorHandle,
 } from '../rich-text-editor'
 
@@ -354,9 +358,9 @@ describe('RichTextEditor — Enter inside a form', () => {
 /**
  * The imperative handle a host uses to empty or focus a mounted editor.
  *
- * These carry no contract number on purpose: batch C's group E names nothing
- * about the `RichTextEditorHandle` seam, so there is no guarantee to cite. The
- * gap is reported rather than papered over by stretching E10 or E13.
+ * `clear` is pinned by G14. `focus` is not — the confirmed list names nothing
+ * about it — so its test below carries no number and that gap is reported
+ * rather than papered over by stretching G14 across it.
  */
 describe('RichTextEditor — the imperative handle', () => {
   afterEach(cleanup)
@@ -365,7 +369,7 @@ describe('RichTextEditor — the imperative handle', () => {
 
   function mountWithHandle() {
     const editorRef = createRef<RichTextEditorHandle>()
-    renderWithIntl(
+    const rendered = renderWithIntl(
       <RichTextEditor
         value={{
           type: 'doc',
@@ -375,23 +379,66 @@ describe('RichTextEditor — the imperative handle', () => {
         editorRef={editorRef}
       />
     )
-    return editorRef
+    return { editorRef, rendered }
   }
 
-  it('clear() empties the document without unmounting the editing surface', () => {
-    const editorRef = mountWithHandle()
+  it('clear() empties the document through the editor already mounted (G14)', () => {
+    const { editorRef } = mountWithHandle()
     const surface = document.querySelector('.ProseMirror')
+    const host = surface?.parentElement
     expect(surfaceText()).toContain('draft text')
 
     act(() => editorRef.current!.clear())
 
     expect(surfaceText()).toBe('')
-    // The same node, so focus never left the composer.
+    // The same nodes, so the caret never left the composer — and only one
+    // surface, so nothing was mounted beside the editor it emptied.
     expect(document.querySelector('.ProseMirror')).toBe(surface)
+    expect(document.querySelector('.ProseMirror')?.parentElement).toBe(host)
+    expect(document.querySelectorAll('.ProseMirror')).toHaveLength(1)
+  })
+
+  it('clear() after the editor is gone does nothing rather than throwing (G14)', async () => {
+    const { editorRef, rendered } = mountWithHandle()
+    // Held the way a late caller holds it — an async upload that resolves
+    // after the composer closed still has the handle object, while React has
+    // already nulled the ref it was published through.
+    const handle = editorRef.current!
+
+    rendered.unmount()
+    // TipTap tears the editor down a tick after unmount rather than during it
+    // (that is how it survives StrictMode's double-mount), so a call made in
+    // the same tick would still meet a live editor and prove nothing.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(editorRef.current).toBeNull()
+    expect(() => handle.clear()).not.toThrow()
+    expect(document.querySelector('.ProseMirror')).toBeNull()
+  })
+
+  it('runs a command only against a live editor, never a missing or torn-down one (G14)', () => {
+    // The guard behind `clear`, on its own. The no-op above reaches its
+    // torn-down branch through the handle (measured: across the two clear
+    // tests the command runs once, not twice); the not-yet-created branch is
+    // only reachable here, and both are what keep a late call from throwing.
+    const run = vi.fn()
+
+    withLiveEditor(null, run)
+    withLiveEditor({ isDestroyed: true } as unknown as Editor, run)
+
+    expect(run).not.toHaveBeenCalled()
+
+    const live = { isDestroyed: false } as unknown as Editor
+    withLiveEditor(live, run)
+
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenCalledWith(live)
   })
 
   it('focus() puts the cursor in the editing surface', () => {
-    const editorRef = mountWithHandle()
+    const { editorRef } = mountWithHandle()
 
     act(() => editorRef.current!.focus('start'))
 

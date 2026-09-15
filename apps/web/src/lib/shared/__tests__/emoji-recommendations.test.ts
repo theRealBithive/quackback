@@ -249,6 +249,63 @@ describe('recommendEmojiItems — prefix vs substring ranking (G5)', () => {
   })
 })
 
+describe('recommendEmojiItems — what puts an entry in a rank class (G5)', () => {
+  const rank = (catalog: RankableEmoji[], query: string, recents: string[]) =>
+    recommendEmojiItems(query, {
+      recents,
+      popularShortcodes: [],
+      lookup: (code) => catalog.find((item) => item.shortcodes.includes(code)),
+      catalog,
+      max: 12,
+    }).map((item) => item.name)
+
+  it('being remembered outranks starting with the query (G5)', () => {
+    // Neither entry is an exact match, so the recency class is the only thing
+    // that can put the substring hit in front of the prefix hit. Without it
+    // the substring hit falls to the bottom class and the order flips.
+    const rememberedSubstringHit: RankableEmoji = {
+      name: 'red_apple',
+      emoji: '\u{1F34E}',
+      shortcodes: ['red_apple'],
+      tags: [],
+    }
+    const forgottenPrefixHit: RankableEmoji = {
+      name: 'apple_pie',
+      emoji: '\u{1F967}',
+      shortcodes: ['apple_pie'],
+      tags: [],
+    }
+
+    expect(rank([forgottenPrefixHit, rememberedSubstringHit], 'apple', ['\u{1F34E}'])).toEqual([
+      'red_apple',
+      'apple_pie',
+    ])
+  })
+
+  it('one shortcode that starts with the query is enough, even beside shortcodes that do not (G5)', () => {
+    // 'dessert' does not start with 'apple' and 'apple_pie' does. One hit
+    // makes the entry a prefix match; requiring all of them would drop it
+    // into the bottom class beside the substring-only hit.
+    const oneOfTwoShortcodesMatches: RankableEmoji = {
+      name: 'pie_of_apples',
+      emoji: '\u{1F967}',
+      shortcodes: ['dessert', 'apple_pie'],
+      tags: [],
+    }
+    const substringHitOnly: RankableEmoji = {
+      name: 'red_apple',
+      emoji: '\u{1F34E}',
+      shortcodes: ['red_apple'],
+      tags: [],
+    }
+
+    expect(rank([substringHitOnly, oneOfTwoShortcodesMatches], 'apple', [])).toEqual([
+      'pie_of_apples',
+      'red_apple',
+    ])
+  })
+})
+
 describe('readRecentEmojis — storage that refuses to answer', () => {
   afterEach(() => {
     // Put the working in-memory storage back for every later test in the file.
@@ -665,6 +722,14 @@ describe('recommendEmojiItems — recency inside one rank class', () => {
 
   it('and the same holds when the catalogue lists them the other way round (G5)', () => {
     expect(rank([okHand, ok], 'ok', ['🆗'])).toEqual(['ok', 'ok_hand'])
+  })
+
+  it('a remembered exact match wins even when it is not the most recently used glyph (G5)', () => {
+    // The remembered glyph sits at recency position 1, behind an emoji that
+    // does not match this query at all. Position 0 and position 1 have to
+    // count the same against an entry nobody remembers: what separates these
+    // two is "remembered or not", not "remembered first".
+    expect(rank([ok, okHand], 'ok', ['\u{1F525}', '\u{1F44C}'])).toEqual(['ok_hand', 'ok'])
   })
 
   it('two remembered matches keep their recency order, newest first (G5)', () => {
