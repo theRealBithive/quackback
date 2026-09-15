@@ -634,6 +634,62 @@ describe('the mutations excused as equivalent (B6)', () => {
           'The fallback is only read when the scope parameter is absent'
         ),
       },
+      {
+        file: 'apps/web/src/lib/server/domains/attribute-definitions/attribute-definition.service.ts',
+        mutator: 'ObjectLiteral',
+        line: 'const log = logger.child({ component: logComponent })',
+        replacement: '{}',
+        why: expect.stringContaining("The child logger's component name is log"),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'OptionalChaining',
+        line: 'raw = storage()?.getItem(EMOJI_RECENT_STORAGE_KEY) ?? null',
+        replacement: 'storage().getItem',
+        why: expect.stringContaining('storage() returns null only when window '),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'BlockStatement',
+        line: '} catch {',
+        replacement: '{}',
+        why: expect.stringContaining('Emptying the catch leaves raw at its ini'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (!raw) return []',
+        replacement: 'false',
+        why: expect.stringContaining('Skipping the null/empty guard sends null'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (!Array.isArray(parsed)) return []',
+        replacement: 'false',
+        why: expect.stringContaining('Without the array guard a parsed object,'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'OptionalChaining',
+        line: 'storage()?.setItem(EMOJI_RECENT_STORAGE_KEY, JSON.stringify(next))',
+        replacement: 'storage().setItem',
+        why: expect.stringContaining('When storage() is null the mutant throws'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'UnaryOperator',
+        line: 'const aRecent = a.emoji ? recents.indexOf(a.emoji) : -1',
+        replacement: '+1',
+        why: expect.stringContaining('The false arm of a.emoji ? … : -1 is unr'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'UnaryOperator',
+        line: 'const bRecent = b.emoji ? recents.indexOf(b.emoji) : -1',
+        replacement: '+1',
+        why: expect.stringContaining('Same unreachable false arm for b: both o'),
+      },
     ])
   })
 

@@ -51,6 +51,7 @@ import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest'
 import fc from 'fast-check'
 import { installInMemoryLocalStorage } from '@/test/local-storage'
 import {
+  EMOJI_RECENT_STORAGE_KEY,
   MAX_RECENT_EMOJIS,
   POPULAR_EMOJI_SHORTCODES,
   readRecentEmojis,
@@ -112,6 +113,32 @@ describe('recordRecentEmoji / readRecentEmojis', () => {
     window.localStorage.setItem('quackback:emoji-recent', '{not json')
     expect(readRecentEmojis()).toEqual([])
   })
+
+  it('caps the READ at MAX_RECENT_EMOJIS even when more are stored, keeping stored order (G3)', () => {
+    const storedGlyphs = ['🎉', '🤞', '🔥', '😄', '👍', '❤️', '🚀', '🌮', '🎊', '🙏']
+    window.localStorage.setItem(EMOJI_RECENT_STORAGE_KEY, JSON.stringify(storedGlyphs))
+
+    expect(readRecentEmojis()).toEqual(storedGlyphs.slice(0, MAX_RECENT_EMOJIS))
+  })
+
+  it('a blank glyph does not consume a remembered slot — storage is left untouched (G3)', () => {
+    const eightGlyphs = ['🎉', '🤞', '🔥', '😄', '👍', '❤️', '🚀', '🌮']
+    window.localStorage.setItem(EMOJI_RECENT_STORAGE_KEY, JSON.stringify(eightGlyphs))
+
+    recordRecentEmoji('   ')
+
+    const stored = JSON.parse(window.localStorage.getItem(EMOJI_RECENT_STORAGE_KEY)!)
+    expect(stored).toEqual(eightGlyphs)
+    expect(readRecentEmojis()).toEqual(eightGlyphs)
+  })
+
+  it('caps the WRITE at MAX_RECENT_EMOJIS in the stored JSON, not only on read-back (G3)', () => {
+    const nineDistinctGlyphs = ['🎉', '🤞', '🔥', '😄', '👍', '❤️', '🚀', '🌮', '🎊']
+    for (const glyph of nineDistinctGlyphs) recordRecentEmoji(glyph)
+
+    const stored = JSON.parse(window.localStorage.getItem(EMOJI_RECENT_STORAGE_KEY)!)
+    expect(stored).toHaveLength(MAX_RECENT_EMOJIS)
+  })
 })
 
 describe('recommendEmojiItems', () => {
@@ -153,6 +180,72 @@ describe('recommendEmojiItems', () => {
 
   it('includes crossed_fingers in the popular shortcode list (G4)', () => {
     expect(POPULAR_EMOJI_SHORTCODES).toContain('crossed_fingers')
+  })
+})
+
+describe('recommendEmojiItems — prefix vs substring ranking (G5)', () => {
+  /**
+   * Query 'art' against a name that STARTS with it, a name that only CONTAINS
+   * it (neither at the start nor the end), and a name that ENDS with it. None
+   * of the three is recent and none is an exact name/shortcode match, so the
+   * only thing separating them is the prefix rule itself.
+   */
+  it('ranks a name-prefix match before a mid-word or trailing substring match', () => {
+    const startsWithQuery: RankableEmoji = {
+      name: 'artichoke',
+      emoji: '🥬',
+      shortcodes: ['artichoke'],
+      tags: [],
+    }
+    const containsQueryInMiddle: RankableEmoji = {
+      name: 'heart_eyes',
+      emoji: '😍',
+      shortcodes: ['heart_eyes'],
+      tags: [],
+    }
+    const endsWithQuery: RankableEmoji = {
+      name: 'smart',
+      emoji: '🧠',
+      shortcodes: ['smart'],
+      tags: [],
+    }
+    const rankedCatalog = [containsQueryInMiddle, endsWithQuery, startsWithQuery]
+
+    const items = recommendEmojiItems('art', {
+      recents: [],
+      popularShortcodes: [],
+      lookup: (code) => rankedCatalog.find((item) => item.shortcodes.includes(code)),
+      catalog: rankedCatalog,
+      max: 12,
+    })
+
+    expect(items.map((item) => item.name)).toEqual(['artichoke', 'heart_eyes', 'smart'])
+  })
+
+  it('ranks a shortcode-prefix match the same as a name-prefix match, before a substring-only match', () => {
+    const shortcodeStartsWithQuery: RankableEmoji = {
+      name: 'painting',
+      emoji: '🎨',
+      shortcodes: ['artistic_scene'],
+      tags: [],
+    }
+    const containsQueryInMiddle: RankableEmoji = {
+      name: 'heart_eyes',
+      emoji: '😍',
+      shortcodes: ['heart_eyes'],
+      tags: [],
+    }
+    const rankedCatalog = [containsQueryInMiddle, shortcodeStartsWithQuery]
+
+    const items = recommendEmojiItems('art', {
+      recents: [],
+      popularShortcodes: [],
+      lookup: (code) => rankedCatalog.find((item) => item.shortcodes.includes(code)),
+      catalog: rankedCatalog,
+      max: 12,
+    })
+
+    expect(items.map((item) => item.name)).toEqual(['painting', 'heart_eyes'])
   })
 })
 
@@ -588,5 +681,110 @@ describe('recommendEmojiItems — recency inside one rank class', () => {
     const untagged: RankableEmoji = { name: 'fireworks', emoji: '🎆', shortcodes: ['fireworks'] }
     expect(rank([untagged], 'fire', [])).toEqual(['fireworks'])
     expect(rank([untagged], 'party', [])).toEqual([])
+  })
+
+  const apple1: RankableEmoji = {
+    name: 'apple_one',
+    emoji: '🍎',
+    shortcodes: ['apple_one'],
+    tags: [],
+  }
+  const apple2: RankableEmoji = {
+    name: 'apple_two',
+    emoji: '🍏',
+    shortcodes: ['apple_two'],
+    tags: [],
+  }
+  const apple3: RankableEmoji = {
+    name: 'apple_three',
+    emoji: '🍐',
+    shortcodes: ['apple_three'],
+    tags: [],
+  }
+
+  it('three remembered matches sort strictly by recency, with the catalogue in the opposite order (G5)', () => {
+    // Catalogue order is apple1, apple2, apple3; recency is the exact reverse
+    // of it, so a result that merely kept catalogue order would be wrong too.
+    expect(rank([apple1, apple2, apple3], 'apple', ['🍐', '🍏', '🍎'])).toEqual([
+      'apple_three',
+      'apple_two',
+      'apple_one',
+    ])
+  })
+
+  it('with nobody remembered, three same-rank matches keep the catalogue order either way round (G5)', () => {
+    expect(rank([apple1, apple2, apple3], 'apple', [])).toEqual([
+      'apple_one',
+      'apple_two',
+      'apple_three',
+    ])
+    expect(rank([apple3, apple2, apple1], 'apple', [])).toEqual([
+      'apple_three',
+      'apple_two',
+      'apple_one',
+    ])
+  })
+
+  /** Every ordering of a fixed 4-item list, smallest-first (Heap's algorithm). */
+  function permutationsOf<T>(items: readonly T[]): T[][] {
+    if (items.length <= 1) return [items.slice()]
+    const result: T[][] = []
+    for (let pivot = 0; pivot < items.length; pivot++) {
+      const rest = [...items.slice(0, pivot), ...items.slice(pivot + 1)]
+      for (const tail of permutationsOf(rest)) {
+        result.push([items[pivot]!, ...tail])
+      }
+    }
+    return result
+  }
+
+  it('for every catalogue ordering, recent items lead by recency and the rest keep their relative catalogue order (G5)', () => {
+    // Two recent items (a strict recency order between them, no tie) and two
+    // that are never recent (so only catalogue order can separate them).
+    // Trying every arrangement of the four means the pairwise comparator gets
+    // called with both items in both parameter positions across the run, so
+    // neither side of the recency check can go unexercised.
+    const recentNewer: RankableEmoji = {
+      name: 'apple_newer',
+      emoji: '🍎',
+      shortcodes: ['apple_newer'],
+      tags: [],
+    }
+    const recentOlder: RankableEmoji = {
+      name: 'apple_older',
+      emoji: '🍏',
+      shortcodes: ['apple_older'],
+      tags: [],
+    }
+    const neverRecentOne: RankableEmoji = {
+      name: 'apple_plain_one',
+      emoji: '🍐',
+      shortcodes: ['apple_plain_one'],
+      tags: [],
+    }
+    const neverRecentTwo: RankableEmoji = {
+      name: 'apple_plain_two',
+      emoji: '🍊',
+      shortcodes: ['apple_plain_two'],
+      tags: [],
+    }
+    const recents = ['🍎', '🍏']
+
+    for (const catalog of permutationsOf([
+      recentNewer,
+      recentOlder,
+      neverRecentOne,
+      neverRecentTwo,
+    ])) {
+      const plainNamesInCatalogOrder = catalog
+        .filter((item) => item === neverRecentOne || item === neverRecentTwo)
+        .map((item) => item.name)
+
+      expect(rank(catalog, 'apple', recents)).toEqual([
+        'apple_newer',
+        'apple_older',
+        ...plainNamesInCatalogOrder,
+      ])
+    }
   })
 })

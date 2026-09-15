@@ -19,7 +19,7 @@
  * a dynamic import inside each test, exactly so the broken catalogue never leaks
  * into a statically-imported module used by R2's assertions.
  */
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   PERMISSIONS,
   PERMISSION_CATALOGUE,
@@ -27,29 +27,40 @@ import {
   WORKSPACE_ADMIN_PERMISSIONS,
   SYSTEM_ROLE_PERMISSIONS,
 } from '../rbac-catalogue'
-import { renderPermissionsMirror } from '../permissions-mirror'
 
 describe('R2 — rendered mirror order and references', () => {
-  // Built in beforeAll, not at describe-body scope: calling production code
-  // while vitest collects tests (rather than while a test runs) is what makes a
-  // crash during collection score as "survived" instead of "erred" under Stryker
-  // (SELF-IMPROVE.md, "Stryker runs the whole suite first...").
-  let rendered = ''
-  beforeAll(() => {
-    rendered = renderPermissionsMirror()
-  })
+  // Every test below calls render() itself, from inside the `it`, rather than
+  // sharing a value computed once in a `beforeAll`. Calling production code
+  // while vitest collects tests (rather than while a test runs) is what makes
+  // a crash during collection score as "survived" instead of "erred" under
+  // Stryker (SELF-IMPROVE.md, "Stryker runs the whole suite first..."), and a
+  // shared `beforeAll` only moves the same risk from collection to setup: a
+  // `beforeAll` that throws reports as a hook failure with its tests
+  // "skipped", not "failed" — a shape that a mutation-scoring test runner can
+  // just as easily fail to credit as a kill. Calling render() from inside
+  // each `it` (dynamically importing `../permissions-mirror`, never as a
+  // static top-level `import`) guarantees a mutant that makes the module
+  // throw — e.g. permissions-mirror.ts:20's entries-mapper replaced by
+  // `() => undefined`, which makes `new Map(...)` reject every entry — fails
+  // that test directly, as a normal thrown error.
+  async function render(): Promise<string> {
+    const { renderPermissionsMirror } = await import('../permissions-mirror')
+    return renderPermissionsMirror()
+  }
 
   const nameByValue = new Map(Object.entries(PERMISSIONS).map(([name, value]) => [value, name]))
   const categoryByValue = new Map(PERMISSION_CATALOGUE.map((entry) => [entry.key, entry.category]))
 
-  it('(R2) lists PERMISSIONS entries in Object.entries(PERMISSIONS) order', () => {
+  it('(R2) lists PERMISSIONS entries in Object.entries(PERMISSIONS) order', async () => {
+    const rendered = await render()
     const names = Object.keys(PERMISSIONS)
     const positions = names.map((name) => rendered.indexOf(`  ${name}: '`))
     expect(positions.every((position) => position !== -1)).toBe(true)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
   })
 
-  it('(R2) each category comment appears exactly once, before its first key', () => {
+  it('(R2) each category comment appears exactly once, before its first key', async () => {
+    const rendered = await render()
     const orderedEntries = Object.entries(PERMISSIONS)
     for (const category of PERMISSION_CATEGORIES) {
       const commentLine = new RegExp(`^  // ${category}$`, 'm')
@@ -66,7 +77,8 @@ describe('R2 — rendered mirror order and references', () => {
     }
   })
 
-  it('(R2) WORKSPACE_ADMIN_PERMISSIONS references every value by PERMISSIONS.<NAME>, in order', () => {
+  it('(R2) WORKSPACE_ADMIN_PERMISSIONS references every value by PERMISSIONS.<NAME>, in order', async () => {
+    const rendered = await render()
     const declStart = rendered.indexOf('export const WORKSPACE_ADMIN_PERMISSIONS')
     // The declaration reads `...: readonly PermissionKey[] = [`, so the first
     // `]` after declStart closes the TYPE annotation, not the array literal.
@@ -85,7 +97,8 @@ describe('R2 — rendered mirror order and references', () => {
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
   })
 
-  it('(R2) SYSTEM_ROLE_PERMISSIONS.contributor references every value by PERMISSIONS.<NAME>, in order', () => {
+  it('(R2) SYSTEM_ROLE_PERMISSIONS.contributor references every value by PERMISSIONS.<NAME>, in order', async () => {
+    const rendered = await render()
     const blockStart = rendered.indexOf('contributor: [')
     const blockEnd = rendered.indexOf(']', blockStart)
     const block = rendered.slice(blockStart, blockEnd)

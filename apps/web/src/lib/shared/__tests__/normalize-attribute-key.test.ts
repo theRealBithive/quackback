@@ -24,4 +24,14 @@ describe('normalizeAttributeKey', () => {
       })
     )
   })
+
+  // (A2) A run of inner whitespace collapses to ONE underscore, not one
+  // underscore per whitespace character. The property above cannot see this:
+  // "plan__tier" (one underscore per space) satisfies "no whitespace",
+  // "lowercase", "trimmed" and "idempotent" exactly as well as "plan_tier"
+  // does, so only a concrete example pins the collapsing behaviour.
+  it('(A2) collapses a run of inner whitespace into a single underscore', () => {
+    expect(normalizeAttributeKey('Plan  Tier')).toBe('plan_tier')
+    expect(normalizeAttributeKey('Plan\t Tier')).toBe('plan_tier')
+  })
 })

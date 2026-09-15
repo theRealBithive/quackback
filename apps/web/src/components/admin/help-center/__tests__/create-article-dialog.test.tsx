@@ -2,7 +2,7 @@
 /**
  * ## F — Forms
  * - F1 Typing in a post, changelog or help-center article editor updates the form's content as markdown and marks the form dirty, without running validation on each keystroke.
- * - F2 A checkbox that feeds a boolean setting (ticket field required, incident restores the status) stores true only for a checked box; an indeterminate box counts as unchecked.
+ * - F2 A checkbox that feeds a boolean setting (ticket field required, incident restores the status) stores true for a checked box and false for an unchecked one.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'

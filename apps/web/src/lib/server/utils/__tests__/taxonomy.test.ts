@@ -25,6 +25,12 @@ describe('assertTrimmedName', () => {
     ).toThrow(new ValidationError('VALIDATION_ERROR', 'PostTag name is required'))
   })
 
+  it('rejects undefined the same way as an empty string, with the required message (T1)', () => {
+    expect(() =>
+      assertTrimmedName(undefined, { required: 'Name is required', tooLong: 'too long' })
+    ).toThrow(new ValidationError('VALIDATION_ERROR', 'Name is required'))
+  })
+
   it('rejects over-length with the call-site tooLong message (T1)', () => {
     expect(() =>
       assertTrimmedName('x'.repeat(51), {
@@ -112,7 +118,7 @@ describe('assertHexColor', () => {
     )
   })
 
-  it('rejects 5-digit, 7-digit, missing-#, non-hex-char, and #rrggbbaa near-misses with the caller message (T2)', () => {
+  it('rejects 5-digit, 7-digit, missing-#, non-hex-char, prefixed, and #rrggbbaa near-misses with the caller message (T2)', () => {
     const fiveDigits = fc
       .array(hexDigit, { minLength: 5, maxLength: 5 })
       .map((d) => `#${d.join('')}`)
@@ -129,10 +135,22 @@ describe('assertHexColor', () => {
     const rgbaEightDigits = fc
       .array(hexDigit, { minLength: 8, maxLength: 8 })
       .map((d) => `#${d.join('')}`)
+    // A well-formed #rrggbb with junk BEFORE it — only rejected because the
+    // pattern is anchored at the start, not merely present anywhere.
+    const prefixedValidColor = fc
+      .tuple(fc.constantFrom('x', 'xx', ' ', '#'), validColor)
+      .map(([prefix, color]) => `${prefix}${color}`)
 
     fc.assert(
       fc.property(
-        fc.oneof(fiveDigits, sevenDigits, missingHash, nonHexChar, rgbaEightDigits),
+        fc.oneof(
+          fiveDigits,
+          sevenDigits,
+          missingHash,
+          nonHexChar,
+          rgbaEightDigits,
+          prefixedValidColor
+        ),
         (color) => {
           expect(() => assertHexColor(color, 'CALLER_COLOR_MSG')).toThrow(
             new ValidationError('VALIDATION_ERROR', 'CALLER_COLOR_MSG')

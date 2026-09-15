@@ -32,6 +32,10 @@ describe('HexColorSchema (T7)', () => {
     expect(result.success).toBe(false)
     expect(result.error?.issues[0]?.message).toBe('Color must be a valid hex color')
   })
+
+  it('rejects a valid #rrggbb hidden behind a prefix — the pattern is anchored at the start (T7)', () => {
+    expect(HexColorSchema.safeParse('xx#aabbcc').success).toBe(false)
+  })
 })
 
 describe('HexColorFormatSchema (T7)', () => {
@@ -43,6 +47,10 @@ describe('HexColorFormatSchema (T7)', () => {
     const result = HexColorFormatSchema.safeParse('blue')
     expect(result.success).toBe(false)
     expect(result.error?.issues[0]?.message).toBe('Invalid color format')
+  })
+
+  it('rejects a valid #rrggbb hidden behind a prefix — the pattern is anchored at the start (T7)', () => {
+    expect(HexColorFormatSchema.safeParse('xx#aabbcc').success).toBe(false)
   })
 })
 

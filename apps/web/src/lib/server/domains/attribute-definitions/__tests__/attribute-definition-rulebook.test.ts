@@ -24,6 +24,11 @@
  *   declare before create, update and delete, and hand the payload to the shared service
  *   unchanged. (Pinned in functions/__tests__/user-attributes.test.ts and
  *   functions/__tests__/company-attributes.test.ts, not here.)
+ * - A9 The request schemas the attribute-definition server functions validate against
+ *   name their own bounds: exactly the five value types and the ten currency codes are
+ *   accepted, an id, a key and a label must carry at least one character, and a key over
+ *   64, a label over 128, a description over 512 or an external key over 256 characters
+ *   is refused.
  *
  * Why this file is separate from attribute-definition.service.test.ts: that suite uses
  * the real transactional db-test-fixture (server/__tests__/README.md pattern 1) and
@@ -148,6 +153,13 @@ import {
   deleteCompanyAttribute,
 } from '@/lib/server/domains/company-attributes/company-attribute.service'
 import type { CreateAttributeDefinitionInput } from '@/lib/server/domains/attribute-definitions/attribute-definition.types'
+import {
+  AttributeTypeSchema,
+  CurrencyCodeSchema,
+  attributeDefinitionIdSchema,
+  createAttributeDefinitionSchema,
+  updateAttributeDefinitionSchema,
+} from '@/lib/server/domains/attribute-definitions/attribute-definition.service'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -312,6 +324,26 @@ describe('A2 — normalisation', () => {
     expect(result.description).toBeNull()
     expect(result.externalKey).toBeNull()
   })
+
+  it('(A2) create: externalKey is trimmed, and blank-after-trim normalises to null', async () => {
+    resetFakeDb()
+    const trimmed = await createUserAttribute({
+      key: 'k',
+      label: 'L',
+      type: 'string',
+      externalKey: '  ext  ',
+    })
+    expect(trimmed.externalKey).toBe('ext')
+
+    resetFakeDb()
+    const blank = await createUserAttribute({
+      key: 'k',
+      label: 'L',
+      type: 'string',
+      externalKey: '   ',
+    })
+    expect(blank.externalKey).toBeNull()
+  })
 })
 
 // --------------------------------------------------------------------- A3 ---
@@ -355,6 +387,41 @@ describe('A3 — validation messages, verbatim', () => {
       await expect(create({ key: 'k', label: 'L', type: 'currency' })).rejects.toMatchObject({
         code: 'VALIDATION_ERROR',
         message: 'Currency code is required for currency attributes',
+      })
+    }
+  )
+
+  // A `key` that is `undefined` (as opposed to a blank string) only reaches the
+  // "is required" branch through the optional chaining in validateCreate; a
+  // plain `.trim()` there would throw a TypeError instead.
+  it.each([
+    ['user', createUserAttribute],
+    ['company', createCompanyAttribute],
+  ])(
+    '(A3) %s: a key that is undefined (not just blank) is rejected as ValidationError, not a TypeError',
+    async (_label, create) => {
+      resetFakeDb()
+      await expect(
+        create({ key: undefined as unknown as string, label: 'Label', type: 'string' })
+      ).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+        message: 'Attribute key is required',
+      })
+    }
+  )
+
+  it.each([
+    ['user', createUserAttribute],
+    ['company', createCompanyAttribute],
+  ])(
+    '(A3) %s: a label that is undefined (not just blank) is rejected as ValidationError, not a TypeError',
+    async (_label, create) => {
+      resetFakeDb()
+      await expect(
+        create({ key: 'k', label: undefined as unknown as string, type: 'string' })
+      ).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+        message: 'Attribute label is required',
       })
     }
   )
@@ -408,6 +475,29 @@ describe('A4 — currency code lifecycle', () => {
     expect(dbState.captured.updateSet).toMatchObject({ type: 'currency', currencyCode: 'USD' })
     expect(result.currencyCode).toBe('USD')
   })
+
+  it('(A4) create: a currency attribute with a currencyCode stores it on the inserted row', async () => {
+    resetFakeDb()
+    await createUserAttribute({
+      key: 'k',
+      label: 'L',
+      type: 'currency',
+      currencyCode: 'EUR',
+    })
+    expect(dbState.captured.insertValues).toMatchObject({ currencyCode: 'EUR' })
+  })
+
+  it('(A4) update: setting the type to currency without a currencyCode leaves the stored code untouched', async () => {
+    resetFakeDb()
+    dbState.outcomes.select = {
+      kind: 'resolve',
+      rows: [existingRow({ type: 'currency', currencyCode: 'EUR' })],
+    }
+    await updateUserAttribute(createId('user_attr'), { type: 'currency' })
+    // The set payload carries only `type` — no `currencyCode` key at all — so
+    // the stored 'EUR' is left exactly as it was.
+    expect(dbState.captured.updateSet).toEqual({ type: 'currency' })
+  })
 })
 
 // --------------------------------------------------------- A2 (on update) ---
@@ -425,6 +515,22 @@ describe('A2 — update forwards description and normalises externalKey', () => 
     resetFakeDb()
     dbState.outcomes.select = { kind: 'resolve', rows: [existingRow()] }
     const result = await updateUserAttribute(createId('user_attr'), { externalKey: '   ' })
+    expect(dbState.captured.updateSet).toEqual({ externalKey: null })
+    expect(result.externalKey).toBeNull()
+  })
+
+  it('(A2) update: a label is trimmed before being stored', async () => {
+    resetFakeDb()
+    dbState.outcomes.select = { kind: 'resolve', rows: [existingRow()] }
+    const result = await updateUserAttribute(createId('user_attr'), { label: '  New  ' })
+    expect(dbState.captured.updateSet).toEqual({ label: 'New' })
+    expect(result.label).toBe('New')
+  })
+
+  it('(A2) update: an explicit null externalKey is stored as null without throwing', async () => {
+    resetFakeDb()
+    dbState.outcomes.select = { kind: 'resolve', rows: [existingRow()] }
+    const result = await updateUserAttribute(createId('user_attr'), { externalKey: null })
     expect(dbState.captured.updateSet).toEqual({ externalKey: null })
     expect(result.externalKey).toBeNull()
   })
@@ -619,5 +725,187 @@ describe('A7 — database failures', () => {
       code: 'DATABASE_ERROR',
       message: 'Failed to delete user attributes',
     })
+  })
+})
+
+/**
+ * A9 — the request schemas themselves.
+ *
+ * These are what the user- and company-attribute server functions hand to
+ * TanStack Start's `validator`, so they are the outermost boundary: a payload
+ * that gets past them reaches the service, and the service's own rulebook
+ * (A2/A3 above) never re-checks a length. Every bound below is asserted from
+ * both sides — the longest value still accepted and the first one refused —
+ * because a limit only means something if it lets the legal case through.
+ */
+describe('(A9) the request schemas the server functions validate against', () => {
+  /** A key/label/description of exactly `length` characters. */
+  function textOfLength(length: number): string {
+    return 'a'.repeat(length)
+  }
+
+  function validCreatePayload(overrides: Record<string, unknown> = {}) {
+    return { key: 'employee_id', label: 'Employee ID', type: 'string', ...overrides }
+  }
+
+  it('(A9) accepts each of the five value types by name', () => {
+    for (const type of ['string', 'number', 'boolean', 'date', 'currency']) {
+      expect(AttributeTypeSchema.safeParse(type)).toMatchObject({ success: true, data: type })
+    }
+  })
+
+  it('(A9) refuses a value type it does not name', () => {
+    for (const notAType of ['', 'text', 'money', 'String', 'datetime']) {
+      expect(AttributeTypeSchema.safeParse(notAType).success).toBe(false)
+    }
+  })
+
+  it('(A9) accepts each of the ten currency codes by name', () => {
+    const codes = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF', 'CNY', 'INR', 'BRL']
+    for (const code of codes) {
+      expect(CurrencyCodeSchema.safeParse(code)).toMatchObject({ success: true, data: code })
+    }
+  })
+
+  it('(A9) refuses a currency code outside its ten, including lower case and an empty one', () => {
+    for (const notACode of ['', 'usd', 'SEK', 'XBT', 'EURO']) {
+      expect(CurrencyCodeSchema.safeParse(notACode).success).toBe(false)
+    }
+  })
+
+  it('(A9) the id schema keeps the id it was given and refuses an empty one', () => {
+    const id = createId('user_attr')
+
+    expect(attributeDefinitionIdSchema.safeParse({ id })).toMatchObject({
+      success: true,
+      data: { id },
+    })
+    expect(attributeDefinitionIdSchema.safeParse({ id: '' }).success).toBe(false)
+    expect(attributeDefinitionIdSchema.safeParse({}).success).toBe(false)
+  })
+
+  it('(A9) create keeps every field it was given rather than stripping them', () => {
+    const payload = {
+      key: 'employee_id',
+      label: 'Employee ID',
+      description: 'Internal payroll number',
+      type: 'currency',
+      currencyCode: 'EUR',
+      externalKey: 'hr.employee_id',
+    }
+
+    expect(createAttributeDefinitionSchema.safeParse(payload)).toMatchObject({
+      success: true,
+      data: payload,
+    })
+  })
+
+  it('(A9) create refuses an empty key and an empty label', () => {
+    expect(createAttributeDefinitionSchema.safeParse(validCreatePayload({ key: '' })).success).toBe(
+      false
+    )
+    expect(
+      createAttributeDefinitionSchema.safeParse(validCreatePayload({ label: '' })).success
+    ).toBe(false)
+  })
+
+  it('(A9) create takes a 64-character key and refuses the 65th character', () => {
+    expect(
+      createAttributeDefinitionSchema.safeParse(validCreatePayload({ key: textOfLength(64) }))
+        .success
+    ).toBe(true)
+    expect(
+      createAttributeDefinitionSchema.safeParse(validCreatePayload({ key: textOfLength(65) }))
+        .success
+    ).toBe(false)
+  })
+
+  it('(A9) create takes a 128-character label and refuses the 129th character', () => {
+    expect(
+      createAttributeDefinitionSchema.safeParse(validCreatePayload({ label: textOfLength(128) }))
+        .success
+    ).toBe(true)
+    expect(
+      createAttributeDefinitionSchema.safeParse(validCreatePayload({ label: textOfLength(129) }))
+        .success
+    ).toBe(false)
+  })
+
+  it('(A9) create takes a 512-character description and refuses the 513th character', () => {
+    expect(
+      createAttributeDefinitionSchema.safeParse(
+        validCreatePayload({ description: textOfLength(512) })
+      ).success
+    ).toBe(true)
+    expect(
+      createAttributeDefinitionSchema.safeParse(
+        validCreatePayload({ description: textOfLength(513) })
+      ).success
+    ).toBe(false)
+  })
+
+  it('(A9) create takes a 256-character external key and refuses the 257th character', () => {
+    expect(
+      createAttributeDefinitionSchema.safeParse(
+        validCreatePayload({ externalKey: textOfLength(256) })
+      ).success
+    ).toBe(true)
+    expect(
+      createAttributeDefinitionSchema.safeParse(
+        validCreatePayload({ externalKey: textOfLength(257) })
+      ).success
+    ).toBe(false)
+  })
+
+  it('(A9) update keeps every field it was given and needs only an id', () => {
+    const id = createId('company_attr')
+
+    expect(updateAttributeDefinitionSchema.safeParse({ id })).toMatchObject({
+      success: true,
+      data: { id },
+    })
+    expect(
+      updateAttributeDefinitionSchema.safeParse({
+        id,
+        label: 'Renamed',
+        description: null,
+        type: 'currency',
+        currencyCode: 'CHF',
+        externalKey: null,
+      })
+    ).toMatchObject({
+      success: true,
+      data: { id, label: 'Renamed', description: null, currencyCode: 'CHF', externalKey: null },
+    })
+  })
+
+  it('(A9) update refuses an empty id and an empty label', () => {
+    expect(updateAttributeDefinitionSchema.safeParse({ id: '' }).success).toBe(false)
+    expect(
+      updateAttributeDefinitionSchema.safeParse({ id: createId('user_attr'), label: '' }).success
+    ).toBe(false)
+  })
+
+  it('(A9) update applies the same label, description and external-key bounds as create', () => {
+    const id = createId('user_attr')
+
+    expect(
+      updateAttributeDefinitionSchema.safeParse({ id, label: textOfLength(128) }).success
+    ).toBe(true)
+    expect(
+      updateAttributeDefinitionSchema.safeParse({ id, label: textOfLength(129) }).success
+    ).toBe(false)
+    expect(
+      updateAttributeDefinitionSchema.safeParse({ id, description: textOfLength(512) }).success
+    ).toBe(true)
+    expect(
+      updateAttributeDefinitionSchema.safeParse({ id, description: textOfLength(513) }).success
+    ).toBe(false)
+    expect(
+      updateAttributeDefinitionSchema.safeParse({ id, externalKey: textOfLength(256) }).success
+    ).toBe(true)
+    expect(
+      updateAttributeDefinitionSchema.safeParse({ id, externalKey: textOfLength(257) }).success
+    ).toBe(false)
   })
 })

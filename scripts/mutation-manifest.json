@@ -573,6 +573,62 @@
       "line": "if (isFullAsCatalogue(params.scope ?? '')) return [...MCP_FIRST_CONNECT_SCOPES]",
       "replacement": "\"Stryker was here!\"",
       "why": "The fallback is only read when the scope parameter is absent. isFullAsCatalogue is true for exactly one token set, the eleven authorization-server scopes, and neither the empty string nor a three-word sentence is that set, so both fall through to parsing the absent parameter as no scopes at all."
+    },
+    {
+      "file": "apps/web/src/lib/server/domains/attribute-definitions/attribute-definition.service.ts",
+      "mutator": "ObjectLiteral",
+      "line": "const log = logger.child({ component: logComponent })",
+      "replacement": "{}",
+      "why": "The child logger's component name is log metadata: every code path behaves the same with or without it, and no test reads the logger's bound fields. Same reason as the widget-install-pairing and install-context records."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "OptionalChaining",
+      "line": "raw = storage()?.getItem(EMOJI_RECENT_STORAGE_KEY) ?? null",
+      "replacement": "storage().getItem",
+      "why": "storage() returns null only when window is missing or localStorage access throws. Without the optional chaining that null becomes a TypeError inside the same try block, whose catch returns [] — the value the original returns for a null storage as well. Both paths yield 'nothing remembered'."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "BlockStatement",
+      "line": "} catch {",
+      "replacement": "{}",
+      "why": "Emptying the catch leaves raw at its initial null, and the very next line returns [] for a null raw. A throwing getItem therefore still reads as 'nothing remembered'."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (!raw) return []",
+      "replacement": "false",
+      "why": "Skipping the null/empty guard sends null or '' into JSON.parse: null parses to null, which fails the Array.isArray check on the next line and returns [] as well; '' throws SyntaxError, which the surrounding catch turns into []. Every input reaches the same result."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (!Array.isArray(parsed)) return []",
+      "replacement": "false",
+      "why": "Without the array guard a parsed object, string, number or boolean reaches .filter, which does not exist on any of them; the TypeError is caught by the surrounding catch and read as []. Only an array passes either way."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "OptionalChaining",
+      "line": "storage()?.setItem(EMOJI_RECENT_STORAGE_KEY, JSON.stringify(next))",
+      "replacement": "storage().setItem",
+      "why": "When storage() is null the mutant throws a TypeError inside the try block whose catch deliberately swallows storage failures, so the recording is dropped exactly as the original drops it."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "UnaryOperator",
+      "line": "const aRecent = a.emoji ? recents.indexOf(a.emoji) : -1",
+      "replacement": "+1",
+      "why": "The false arm of a.emoji ? … : -1 is unreachable: matches is filtered on item.emoji two lines above, so every item compared here has a glyph. The comparator never evaluates the constant."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "UnaryOperator",
+      "line": "const bRecent = b.emoji ? recents.indexOf(b.emoji) : -1",
+      "replacement": "+1",
+      "why": "Same unreachable false arm for b: both operands of the comparator come from the glyph-filtered list."
     }
   ]
 }
