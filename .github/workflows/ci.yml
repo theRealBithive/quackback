@@ -56,6 +56,10 @@ jobs:
       - run: bun run --cwd packages/widget typecheck
       - run: bun run --cwd packages/widget test
       - run: bun run --cwd packages/db typecheck
+      # `packages/ids` has a typecheck script and nothing ran it, so the id
+      # helpers and their suite were the one workspace TypeScript no job
+      # compiled — found by a cast that only `tsc` rejects.
+      - run: bun run --cwd packages/ids typecheck
       - run: bunx tsc --noEmit -p packages/email/tsconfig.json
       # `scripts/` was the only TypeScript nothing typechecked, and the
       # dependency-audit gate lives there.
@@ -174,7 +178,7 @@ jobs:
     # grades tests that pass.
     needs: unit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       # Without a database the DB-backed suites skip themselves, Stryker sees no
       # test covering the code they hold, and the gate reports those mutants as
@@ -208,7 +212,12 @@ jobs:
       - name: Every mutant of the touched code has to be caught
         env:
           DIFF_BASE: origin/${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
-          MUTATION_BUDGET_SECONDS: '900'
+          # Wall clock for the whole run, and an exceeded budget fails as
+          # "nothing measured" rather than as a low score. 900 was sized when
+          # the gate graded 15 files and 714 mutants; the manifest now reaches
+          # 16 files and 1,037, measured at 8m30s on a developer machine, and a
+          # four-core runner is slower than that.
+          MUTATION_BUDGET_SECONDS: '1500'
         run: bun scripts/mutation-check.ts
 
   e2e-smoke:

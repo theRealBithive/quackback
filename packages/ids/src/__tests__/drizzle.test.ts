@@ -62,6 +62,11 @@ function defaultGeneratorOf(builder: unknown): {
   return { hasDefault, defaultFn }
 }
 
+/** The column name drizzle stored on the builder, reachable only through `config`. */
+function columnNameOf(builder: unknown): string {
+  return (builder as { config: { name: string } }).config.name
+}
+
 /** A UUIDv7 in the canonical hyphenated form, as PostgreSQL hands one back. */
 const RAW_UUID = '01893d8c-7e80-7000-8000-000000000000'
 
@@ -292,9 +297,7 @@ describe('typeIdReference — a foreign key onto a TypeID column (I3)', () => {
   })
 
   it('keeps the column name it was given (I3)', () => {
-    const builder = typeIdReference(ID_PREFIXES.board)('board_id') as {
-      config: { name: string }
-    }
-    expect(builder.config.name).toBe('board_id')
+    const builder = typeIdReference(ID_PREFIXES.board)('board_id')
+    expect(columnNameOf(builder)).toBe('board_id')
   })
 })

@@ -693,6 +693,48 @@ describe('the mutations excused as equivalent (B6)', () => {
         replacement: '+1',
         why: expect.stringContaining('Same unreachable false arm for b: both o'),
       },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'ConditionalExpression',
+        line: "if (typeof window === 'undefined') return null",
+        replacement: 'false',
+        why: expect.stringContaining('Never taking the guard evaluates window.'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'StringLiteral',
+        line: "if (typeof window === 'undefined') return null",
+        replacement: '""',
+        why: expect.stringContaining('typeof never yields the empty string, so'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (aRecent !== -1 || bRecent !== -1) {',
+        replacement: 'true',
+        why: expect.stringContaining('Entering the block when neither item is '),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (aRecent !== -1 || bRecent !== -1) {',
+        replacement: 'false',
+        why: expect.stringContaining('The second operand can only decide the e'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'EqualityOperator',
+        line: 'if (aRecent !== -1 || bRecent !== -1) {',
+        replacement: 'bRecent === -1',
+        why: expect.stringContaining('Flipping the second comparison changes t'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'UnaryOperator',
+        line: 'if (aRecent !== -1 || bRecent !== -1) {',
+        replacement: '+1',
+        why: expect.stringContaining('The -1 in the second comparison is reach'),
+      },
     ])
   })
 
