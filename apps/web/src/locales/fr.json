@@ -546,6 +546,8 @@
   "ui.combobox.search": "Rechercher…",
   "ui.combobox.empty": "Aucun résultat trouvé.",
   "ui.editor.placeholder": "Écrivez quelque chose...",
+  "ui.editor.emoji.recent": "Récents",
+  "ui.editor.emoji.popular": "Populaires",
   "ui.editor.slash.text.title": "Texte",
   "ui.editor.slash.text.description": "Paragraphe simple",
   "ui.editor.slash.heading1.title": "Titre 1",

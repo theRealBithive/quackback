@@ -3,8 +3,19 @@
  * create/reorder happy paths and the three delete guards (default, last-of-
  * category, in-use — the block-if-in-use policy). Runs inside the db-test-fixture
  * rollback transaction (see server/__tests__/README.md).
+ *
+ * ## T — Taxonomy names, colours, slugs, positions
+ * - T3 Post tags, conversation labels, changelog categories, post statuses,
+ *   ticket types and ticket statuses keep their pre-consolidation rejection
+ *   messages word for word, and a create payload without a colour gets the
+ *   shared default swatch `#6b7280`.
+ * - T8 Update paths validate like create paths: renaming or recolouring a
+ *   post tag, conversation label, changelog category, post status, ticket
+ *   status or ticket type applies the same name and colour rules and
+ *   messages as creating one.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
+import { ValidationError } from '@/lib/shared/errors'
 
 import { createDbTestFixture, testDb } from '@/lib/server/__tests__/db-test-fixture'
 import { tickets, ticketStatuses, isNull } from '@/lib/server/db'
@@ -19,6 +30,7 @@ import {
   softDeleteTicketStatus,
   listTicketStatuses,
   reorderTicketStatuses,
+  updateTicketStatusEntity,
 } from '../ticket-status.service'
 
 const fixture = await createDbTestFixture({
@@ -112,5 +124,43 @@ describe.skipIf(!fixture.available)('ticket-status.service (real DB, rolled back
     const byId = new Map(listed.map((s) => [s.id, s.position]))
     expect(byId.get(b.id)).toBe(0)
     expect(byId.get(a.id)).toBe(1)
+  })
+
+  it('updateTicketStatusEntity rejects an empty rename with "Name cannot be empty" (T3, T8)', async () => {
+    await cleanSlate()
+    const status = await seedStatus({ category: 'open', isDefault: true })
+    await expect(updateTicketStatusEntity(status.id, { name: '   ' })).rejects.toThrow(
+      new ValidationError('VALIDATION_ERROR', 'Name cannot be empty')
+    )
+  })
+
+  it('updateTicketStatusEntity rejects an over-length rename with "Name must be 50 characters or less" (T3, T8)', async () => {
+    await cleanSlate()
+    const status = await seedStatus({ category: 'open', isDefault: true })
+    await expect(updateTicketStatusEntity(status.id, { name: 'x'.repeat(51) })).rejects.toThrow(
+      new ValidationError('VALIDATION_ERROR', 'Name must be 50 characters or less')
+    )
+  })
+
+  it('updateTicketStatusEntity applies a valid rename, trimmed (T3, T8)', async () => {
+    await cleanSlate()
+    const status = await seedStatus({ category: 'open', isDefault: true })
+    const updated = await updateTicketStatusEntity(status.id, { name: '  Renamed  ' })
+    expect(updated.name).toBe('Renamed')
+  })
+
+  it('updateTicketStatusEntity rejects an invalid update colour with "Color must be in hex format (e.g., #3b82f6)" (T3, T8)', async () => {
+    await cleanSlate()
+    const status = await seedStatus({ category: 'open', isDefault: true })
+    await expect(updateTicketStatusEntity(status.id, { color: 'not-a-color' })).rejects.toThrow(
+      new ValidationError('VALIDATION_ERROR', 'Color must be in hex format (e.g., #3b82f6)')
+    )
+  })
+
+  it('updateTicketStatusEntity applies a valid update colour (T3, T8)', async () => {
+    await cleanSlate()
+    const status = await seedStatus({ category: 'open', isDefault: true })
+    const updated = await updateTicketStatusEntity(status.id, { color: '#654321' })
+    expect(updated.color).toBe('#654321')
   })
 })

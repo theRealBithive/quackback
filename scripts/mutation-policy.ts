@@ -447,6 +447,7 @@ export type StrykerConfig = {
   tempDirName: string
   tsconfigFile: string
   inPlace: boolean
+  disableTypeChecks: false
 }
 
 /**
@@ -506,5 +507,15 @@ export function strykerConfigFor(input: {
     // leaves mutants in the working tree. Stated rather than left to the
     // default, because the default is the only thing keeping it false.
     inPlace: false,
+    // By default Stryker writes `// @ts-nocheck` into every sandbox copy that
+    // matches `{test,src,lib}/**/*.{js,ts,jsx,tsx}`, so that its own
+    // instrumentation does not trip a TypeScript checker. This gate runs no
+    // checker — vitest transpiles without one — so the line buys nothing, and
+    // it changes the bytes of files the suites read as data: the permissions
+    // drift test compares the committed mirror with the generator's output
+    // and failed the dry run on exactly that inserted line, which read as the
+    // gate grading nothing. A sandbox copy has to be the checkout, byte for
+    // byte, or a suite that reads a file cannot be trusted under mutation.
+    disableTypeChecks: false,
   }
 }

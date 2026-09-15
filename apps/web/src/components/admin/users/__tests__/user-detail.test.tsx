@@ -3,6 +3,12 @@
  * UserDetail — the reworked admin profile (identity header, facts strip,
  * activity/conversations tabs, CRM rail).
  *
+ * The overflow menu of the same header is held here too:
+ *
+ * ## M — Admin menus moved to dropdown items
+ * - M1 Every entry of the migrated admin menus does what its label says: workflow Edit navigates and View runs opens the runs; a saved view applies its filters and Save is offered only with active filters; Link existing issue opens the picker and Create new issue creates one; Merge opens the merge dialog; Block, Unblock and Remove act or open their confirmation; a connector policy entry changes the policy.
+ * - M2 A menu entry that opens a confirmation (workflow Delete) does so after the menu has closed, so the dialog, not the menu, receives focus.
+ *
  * Covers layout contracts that the mockups pin:
  *   - facts strip shows em dashes for missing last-seen / country
  *   - destructive actions live in the overflow menu, not stacked buttons
@@ -12,7 +18,8 @@
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import type { ReactElement, ReactNode } from 'react'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { PortalUserDetail } from '@/lib/shared/types'
 import type { PrincipalId } from '@quackback/ids'
@@ -91,6 +98,7 @@ vi.mock('@/components/admin/conversation/new-conversation-dialog', () => ({
 }))
 
 import { UserDetail } from '../user-detail'
+import { getPersonBlockStatusFn, unblockPersonFn } from '@/lib/server/functions/blocking'
 
 const BASE_USER: PortalUserDetail = {
   principalId: 'principal_1' as PrincipalId,
@@ -151,7 +159,7 @@ describe('UserDetail', () => {
 
     // Destructive actions are in the overflow menu, not stacked buttons.
     expect(screen.queryByRole('button', { name: 'Remove from portal' })).not.toBeInTheDocument()
-    fireEvent.pointerDown(screen.getByLabelText('More actions'), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByLabelText('More actions'))
     expect(await screen.findByRole('menuitem', { name: 'Block' })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: 'Remove from portal' })).toBeInTheDocument()
   })
@@ -193,7 +201,75 @@ describe('UserDetail', () => {
     expect(screen.getByText('Lead')).toBeInTheDocument()
     expect(screen.getByText(/No email/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Send message/ })).toBeDisabled()
-    fireEvent.pointerDown(screen.getByLabelText('More actions'), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByLabelText('More actions'))
     expect(await screen.findByRole('menuitem', { name: 'Merge' })).toBeInTheDocument()
+  })
+})
+
+describe('UserDetail overflow menu', () => {
+  beforeEach(() => {
+    vi.mocked(getPersonBlockStatusFn).mockResolvedValue({ blockedAt: null })
+    vi.mocked(unblockPersonFn).mockResolvedValue({ ok: true })
+  })
+  afterEach(cleanup)
+
+  function renderUser(user: PortalUserDetail, onRemoveUser = vi.fn()) {
+    renderDetail(
+      <UserDetail
+        user={user}
+        isLoading={false}
+        onClose={vi.fn()}
+        onRemoveUser={onRemoveUser}
+        isRemovePending={false}
+        currentMemberRole="admin"
+      />
+    )
+  }
+
+  async function openMenu() {
+    await userEvent.click(await screen.findByLabelText('More actions'))
+  }
+
+  it('asks before blocking someone who is not blocked yet (M1)', async () => {
+    renderUser(BASE_USER)
+    await openMenu()
+
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Block' }))
+
+    expect(await screen.findByText('Block Maya Chen?')).toBeInTheDocument()
+    expect(unblockPersonFn).not.toHaveBeenCalled()
+  })
+
+  it('unblocks straight away, with no confirmation, when they are blocked (M1)', async () => {
+    vi.mocked(getPersonBlockStatusFn).mockResolvedValue({
+      blockedAt: '2026-09-01T00:00:00.000Z',
+    })
+    renderUser(BASE_USER)
+    await openMenu()
+
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Unblock' }))
+
+    await waitFor(() => expect(unblockPersonFn).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText('Block Maya Chen?')).toBeNull()
+  })
+
+  it('opens the merge dialog from the Merge entry of a lead (M1)', async () => {
+    renderUser({ ...BASE_USER, isLead: true })
+    await openMenu()
+
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Merge' }))
+
+    expect(await screen.findByText('Merge Maya Chen into a user')).toBeInTheDocument()
+  })
+
+  it('asks before removing someone from the portal (M1)', async () => {
+    const onRemoveUser = vi.fn()
+    renderUser(BASE_USER, onRemoveUser)
+    await openMenu()
+
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Remove from portal' }))
+
+    expect(await screen.findByText('Remove Maya Chen?')).toBeInTheDocument()
+    expect(onRemoveUser).not.toHaveBeenCalled()
   })
 })

@@ -229,6 +229,71 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'apps/web/src/routes/api/widget/install-context.ts',
         suites: ['apps/web/src/routes/api/widget/__tests__/install-context.test.ts'],
       },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/emoji-recommendations.test.ts'],
+      },
+      {
+        file: 'apps/web/src/components/ui/suggestion-list-keys.ts',
+        suites: ['apps/web/src/components/ui/__tests__/suggestion-list-keys.test.ts'],
+      },
+      {
+        file: 'apps/web/src/components/ui/highlight-query.tsx',
+        suites: ['apps/web/src/components/ui/__tests__/highlight-query.test.tsx'],
+      },
+      {
+        file: 'apps/web/src/lib/shared/content-emoji.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/content-emoji.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/shared/normalize-attribute-key.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/normalize-attribute-key.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/domains/attribute-definitions/attribute-definition.service.ts',
+        suites: [
+          'apps/web/src/lib/server/domains/attribute-definitions/__tests__/attribute-definition-rulebook.test.ts',
+          'apps/web/src/lib/server/domains/attribute-definitions/__tests__/attribute-definition.service.test.ts',
+        ],
+      },
+      {
+        file: 'packages/db/src/permissions-mirror.ts',
+        suites: [
+          'packages/db/src/__tests__/permissions-mirror.test.ts',
+          'apps/web/src/lib/shared/__tests__/permissions-catalogue-drift.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/domains/tickets/unique-slug.ts',
+        suites: ['apps/web/src/lib/server/domains/tickets/__tests__/unique-slug.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/events/safe-dispatch.ts',
+        suites: ['apps/web/src/lib/server/events/__tests__/safe-dispatch.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/utils/taxonomy.ts',
+        suites: ['apps/web/src/lib/server/utils/__tests__/taxonomy.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/shared/schemas/taxonomy.ts',
+        suites: ['apps/web/src/lib/shared/schemas/__tests__/taxonomy.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/shared/record.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/record.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/utils/next-position.ts',
+        suites: [
+          'apps/web/src/lib/server/utils/__tests__/next-position.test.ts',
+          'apps/web/src/lib/server/utils/__tests__/next-position.db.test.ts',
+        ],
+      },
+      {
+        file: 'packages/ids/src/drizzle.ts',
+        suites: ['packages/ids/src/__tests__/drizzle.test.ts'],
+      },
     ])
   })
 
@@ -571,6 +636,104 @@ describe('the mutations excused as equivalent (B6)', () => {
         why: expect.stringContaining(
           'The fallback is only read when the scope parameter is absent'
         ),
+      },
+      {
+        file: 'apps/web/src/lib/server/domains/attribute-definitions/attribute-definition.service.ts',
+        mutator: 'ObjectLiteral',
+        line: 'const log = logger.child({ component: logComponent })',
+        replacement: '{}',
+        why: expect.stringContaining("The child logger's component name is log"),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'OptionalChaining',
+        line: 'raw = storage()?.getItem(EMOJI_RECENT_STORAGE_KEY) ?? null',
+        replacement: 'storage().getItem',
+        why: expect.stringContaining('storage() returns null only when window '),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'BlockStatement',
+        line: '} catch {',
+        replacement: '{}',
+        why: expect.stringContaining('Emptying the catch leaves raw at its ini'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (!raw) return []',
+        replacement: 'false',
+        why: expect.stringContaining('Skipping the null/empty guard sends null'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (!Array.isArray(parsed)) return []',
+        replacement: 'false',
+        why: expect.stringContaining('Without the array guard a parsed object,'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'OptionalChaining',
+        line: 'storage()?.setItem(EMOJI_RECENT_STORAGE_KEY, JSON.stringify(next))',
+        replacement: 'storage().setItem',
+        why: expect.stringContaining('When storage() is null the mutant throws'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'UnaryOperator',
+        line: 'const aRecent = a.emoji ? recents.indexOf(a.emoji) : -1',
+        replacement: '+1',
+        why: expect.stringContaining('The false arm of a.emoji ? … : -1 is unr'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'UnaryOperator',
+        line: 'const bRecent = b.emoji ? recents.indexOf(b.emoji) : -1',
+        replacement: '+1',
+        why: expect.stringContaining('Same unreachable false arm for b: both o'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'ConditionalExpression',
+        line: "if (typeof window === 'undefined') return null",
+        replacement: 'false',
+        why: expect.stringContaining('Never taking the guard evaluates window.'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'StringLiteral',
+        line: "if (typeof window === 'undefined') return null",
+        replacement: '""',
+        why: expect.stringContaining('typeof never yields the empty string, so'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (aRecent !== -1 || bRecent !== -1) {',
+        replacement: 'true',
+        why: expect.stringContaining('Entering the block when neither item is '),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (aRecent !== -1 || bRecent !== -1) {',
+        replacement: 'false',
+        why: expect.stringContaining('The second operand can only decide the e'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'EqualityOperator',
+        line: 'if (aRecent !== -1 || bRecent !== -1) {',
+        replacement: 'bRecent === -1',
+        why: expect.stringContaining('Flipping the second comparison changes t'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/emoji-recommendations.ts',
+        mutator: 'UnaryOperator',
+        line: 'if (aRecent !== -1 || bRecent !== -1) {',
+        replacement: '+1',
+        why: expect.stringContaining('The -1 in the second comparison is reach'),
       },
     ])
   })

@@ -790,8 +790,8 @@ describe('<ProviderDetailPage> connection options', () => {
     renderPage(makeProvider({}))
     editConnection()
     openConnectionOptions()
-    fireEvent.click(screen.getByLabelText('Sign-in prompt'))
-    fireEvent.click(await screen.findByTestId('prompt-choice-omit'))
+    await userEvent.click(screen.getByLabelText('Sign-in prompt'))
+    await userEvent.click(await screen.findByTestId('prompt-choice-omit'))
     saveConnection()
     await waitFor(() => expect(upsertSpy).toHaveBeenCalled())
     expect(lastUpsert().prompt).toBe('omit')
@@ -801,8 +801,10 @@ describe('<ProviderDetailPage> connection options', () => {
     renderPage(makeProvider({}))
     editConnection()
     openConnectionOptions()
-    fireEvent.click(screen.getByLabelText('Client authentication'))
-    fireEvent.click(await screen.findByRole('option', { name: 'Send credentials as HTTP Basic' }))
+    await userEvent.click(screen.getByLabelText('Client authentication'))
+    await userEvent.click(
+      await screen.findByRole('option', { name: 'Send credentials as HTTP Basic' })
+    )
     saveConnection()
     await waitFor(() => expect(upsertSpy).toHaveBeenCalled())
     expect(lastUpsert().tokenEndpointAuthMethod).toBe('basic')
@@ -902,8 +904,8 @@ describe('<ProviderDetailPage> sign-in & access', () => {
 
   it('saves a new account role chosen from the New account role picker', async () => {
     renderPage(makeProvider({ autoCreateUsers: true, autoProvisionRole: 'user' }))
-    fireEvent.click(screen.getByLabelText('New account role'))
-    fireEvent.click(await screen.findByRole('option', { name: 'Admin' }))
+    await userEvent.click(screen.getByLabelText('New account role'))
+    await userEvent.click(await screen.findByRole('option', { name: 'Admin' }))
     saveSignIn()
     await waitFor(() => expect(upsertSpy).toHaveBeenCalled())
     expect(lastUpsert().autoProvisionRole).toBe('admin')
@@ -917,7 +919,8 @@ describe('<ProviderDetailPage> sign-in & access', () => {
 describe('<ProviderDetailPage> account options', () => {
   const openAccountOptions = () =>
     fireEvent.click(screen.getByRole('button', { name: /Account options/ }))
-  const missingEmail = () => screen.getByLabelText('Let people sign in without an email address')
+  const missingEmail = () =>
+    screen.getByRole('checkbox', { name: 'Let people sign in without an email address' })
 
   it('is off and collapsed for a provider that has never been configured', () => {
     renderPage(makeProvider({ claimMapping: null }))
@@ -1151,9 +1154,9 @@ describe('<ProviderDetailPage> claim → person-attribute mapping', () => {
     renderPage(makeProvider({ claimMapping: null }))
     customize()
     fireEvent.click(screen.getByRole('button', { name: 'Add mapping' }))
-    fireEvent.click(screen.getByRole('combobox', { name: 'Set from this provider' }))
-    fireEvent.click(screen.getByRole('option', { name: /Department/ }))
-    fireEvent.click(screen.getByRole('combobox', { name: 'Provider claim' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Set from this provider' }))
+    await userEvent.click(screen.getByRole('option', { name: /Department/ }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Provider claim' }))
     fireEvent.change(screen.getByPlaceholderText('Search or type…'), {
       target: { value: 'department' },
     })
@@ -1222,8 +1225,12 @@ describe('<ProviderDetailPage> claim → person-attribute mapping', () => {
       })
     )
     customize()
-    await userEvent.click(screen.getByLabelText('Overwrite attribute values that are already set'))
-    await userEvent.click(screen.getByLabelText('Clear an attribute when its claim is missing'))
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Overwrite attribute values that are already set' })
+    )
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Clear an attribute when its claim is missing' })
+    )
     saveUserDetails()
     await waitFor(() => expect(mappingSpy).toHaveBeenCalled())
     const sent = lastSavedMapping() as {

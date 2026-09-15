@@ -3,6 +3,12 @@
  * Priority reordering in the workflows manager (support platform §4.6).
  * Customer-facing workflows share one first-match list in stored order
  * (including draft/paused); background workflows are unranked.
+ *
+ * The row overflow menu of the same manager is held here too:
+ *
+ * ## M — Admin menus moved to dropdown items
+ * - M1 Every entry of the migrated admin menus does what its label says: workflow Edit navigates and View runs opens the runs; a saved view applies its filters and Save is offered only with active filters; Link existing issue opens the picker and Create new issue creates one; Merge opens the merge dialog; Block, Unblock and Remove act or open their confirmation; a connector policy entry changes the policy.
+ * - M2 A menu entry that opens a confirmation (workflow Delete) does so after the menu has closed, so the dialog, not the menu, receives focus.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import type { ReactElement } from 'react'
@@ -11,15 +17,30 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderWithIntl } from '@/test/render-with-intl'
 
-vi.mock('@tanstack/react-router', () => ({
-  useNavigate: () => vi.fn(),
-  useRouteContext: () => ({ settings: { featureFlags: {}, publicWidgetConfig: {} } }),
-}))
-
 const hoisted = vi.hoisted(() => ({
   listWorkflowsFn: vi.fn(),
   reorderWorkflowsFn: vi.fn(),
   workflowEffectivenessFn: vi.fn(),
+  workflowRunsFn: vi.fn(),
+  workflowRunTimelineFn: vi.fn(),
+  navigate: vi.fn(),
+  /** Whether a menu was still on the page when the confirmation first rendered. */
+  menuOpenWhenConfirmAppeared: [] as boolean[],
+}))
+
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => hoisted.navigate,
+  useRouteContext: () => ({ settings: { featureFlags: {}, publicWidgetConfig: {} } }),
+  Link: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
+}))
+
+// The confirmation records, at its first render, whether the menu that opened
+// it was still on the page — the ordering M2 is about.
+vi.mock('@/components/shared/confirm-dialog', () => ({
+  ConfirmDialog: ({ title }: { title: string }) => {
+    hoisted.menuOpenWhenConfirmAppeared.push(document.querySelector('[role="menu"]') !== null)
+    return <div role="alertdialog">{title}</div>
+  },
 }))
 
 vi.mock('@/lib/server/functions/workflows', () => ({
@@ -35,8 +56,8 @@ vi.mock('@/lib/server/functions/workflows', () => ({
 }))
 vi.mock('@/lib/server/functions/workflow-reporting', () => ({
   workflowEffectivenessFn: hoisted.workflowEffectivenessFn,
-  workflowRunsFn: vi.fn(),
-  workflowRunTimelineFn: vi.fn(),
+  workflowRunsFn: hoisted.workflowRunsFn,
+  workflowRunTimelineFn: hoisted.workflowRunTimelineFn,
 }))
 
 import {
@@ -271,5 +292,49 @@ describe('useReorderWorkflows', () => {
     await waitFor(() =>
       expect(hoisted.reorderWorkflowsFn).toHaveBeenCalledWith({ data: { ids: ['c', 'a', 'b'] } })
     )
+  })
+})
+
+describe('WorkflowsManager row overflow menu', () => {
+  async function openRowMenu(name: string) {
+    hoisted.listWorkflowsFn.mockResolvedValue([workflow('workflow_1', name)])
+    hoisted.workflowEffectivenessFn.mockResolvedValue([])
+    hoisted.workflowRunsFn.mockResolvedValue([])
+    hoisted.workflowRunTimelineFn.mockResolvedValue([])
+    hoisted.navigate.mockClear()
+    hoisted.menuOpenWhenConfirmAppeared.length = 0
+    renderManager()
+    await screen.findByText(name)
+    await userEvent.click(screen.getByLabelText(`Actions for ${name}`))
+  }
+
+  it('opens the builder for the workflow the menu belongs to (M1)', async () => {
+    await openRowMenu('Welcome tour')
+
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Edit' }))
+
+    expect(hoisted.navigate).toHaveBeenCalledWith({
+      to: '/admin/automation/workflows/$workflowId',
+      params: { workflowId: 'workflow_1' },
+    })
+  })
+
+  it('opens the run history of the workflow the menu belongs to (M1)', async () => {
+    await openRowMenu('Welcome tour')
+
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'View runs' }))
+
+    expect(await screen.findByText('Run history')).toBeInTheDocument()
+    expect(hoisted.navigate).not.toHaveBeenCalled()
+  })
+
+  it('opens the delete confirmation only once the menu has gone (M2)', async () => {
+    await openRowMenu('Welcome tour')
+
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+
+    await waitFor(() => expect(screen.getByRole('alertdialog')).toBeInTheDocument())
+    expect(hoisted.menuOpenWhenConfirmAppeared[0]).toBe(false)
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 })

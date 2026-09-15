@@ -21,13 +21,69 @@
  *    form; the submit button still does.
  */
 
+/**
+ * Batch C — group G: editor suggestion lists and emoji.
+ *
+ * The contract, copied verbatim. (Lettered G rather than E because `(E1)`/`(E2)` in this file belong to an earlier batch's group E; the user confirmed the list under the letter E on 2026-09-15, the letter alone was changed.)
+ *
+ * G1 A key pressed in an open suggestion list either moves the highlight, confirms
+ *    the highlighted entry, or is left to the editor. Arrow keys wrap at both ends,
+ *    Home and End jump to the first and last entry, Enter and Tab confirm (Shift+Tab
+ *    counts as Tab), and every other key is left to the editor.
+ * G2 With an empty list no key does anything, and a confirm never fires without an
+ *    entry under the highlight.
+ * G3 Recently used emoji are remembered most-recent-first, without duplicates, at
+ *    most eight. A blank glyph is not remembered, and unreadable, blocked or corrupt
+ *    storage reads as "nothing remembered", never as an error.
+ * G4 With nothing typed after the colon, the suggestions are the remembered emoji
+ *    first, then the popular set, each glyph at most once, capped at the list size.
+ * G5 With a query, only emoji whose name, shortcode or tag contains the query are
+ *    suggested: an exact name or shortcode match first, then remembered emoji in
+ *    recency order, then prefix matches, then the rest; capped, and only emoji that
+ *    have a glyph.
+ * G6 The letter case and surrounding whitespace of a query never change the
+ *    suggestions.
+ * G7 Highlighting a query inside a label splits the label into pieces that
+ *    concatenate back to the label exactly; every highlighted piece equals the query
+ *    ignoring case, no unhighlighted piece contains the query, and an empty or
+ *    whitespace query highlights nothing.
+ * G8 The label shown for an emoji suggestion is the emoji's name when the name
+ *    contains the query, otherwise the first shortcode that contains it, otherwise
+ *    its primary shortcode.
+ * G9 Looking an emoji up by its canonical name resolves the same glyph as looking it
+ *    up by any of its shortcodes; an unknown name resolves to nothing. (Also feeds
+ *    the server-side markdown serializer.)
+ * G10 Typing `:shortcode:` in the editor inserts that emoji, remembers it as recently
+ *    used and keeps the surrounding text marks; an unknown shortcode inserts nothing
+ *    and leaves the text as typed.
+ * G11 Choosing an entry from the emoji or slash list, by mouse or by keyboard, runs
+ *    that entry's command exactly once; a chosen emoji is remembered as recently used
+ *    before it is inserted.
+ * G12 The emoji list labels its leading remembered entries as recent only on a bare
+ *    colon; with a query nothing is labelled recent.
+ * G13 A suggestion popup sits above the caret it annotates and flips below when there
+ *    is no room; it never grows down over the composer (its height is capped, at
+ *    least 96px, and it scrolls inside); it follows the caret while open and stops
+ *    following when closed or re-attached elsewhere.
+ * G14 The editor handle's `clear` empties the document through the live editor, in
+ *    place: the same editor instance stays mounted and the host is not re-created.
+ *    Once the editor is gone the call is a no-op rather than a throw.
+ */
+
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
-import type { JSONContent } from '@tiptap/core'
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react'
+import type { Editor, JSONContent } from '@tiptap/core'
 import { renderWithIntl } from '@/test/render-with-intl'
 import enMessages from '@/locales/en.json'
 import { COMMENT_EDITOR_FEATURES } from '@/components/public/comment-editor-features'
-import { generateContentHTML, RichTextContent, RichTextEditor } from '../rich-text-editor'
+import { createRef } from 'react'
+import {
+  generateContentHTML,
+  RichTextContent,
+  RichTextEditor,
+  withLiveEditor,
+  type RichTextEditorHandle,
+} from '../rich-text-editor'
 
 const english = enMessages as Record<string, string>
 
@@ -296,5 +352,97 @@ describe('RichTextEditor — Enter inside a form', () => {
     fireEvent.keyDown(surface, { key: 'a' })
 
     expect(reachedTheForm).toHaveBeenCalledOnce()
+  })
+})
+
+/**
+ * The imperative handle a host uses to empty or focus a mounted editor.
+ *
+ * `clear` is pinned by G14. `focus` is not — the confirmed list names nothing
+ * about it — so its test below carries no number and that gap is reported
+ * rather than papered over by stretching G14 across it.
+ */
+describe('RichTextEditor — the imperative handle', () => {
+  afterEach(cleanup)
+
+  const surfaceText = () => document.querySelector('.ProseMirror')?.textContent ?? ''
+
+  function mountWithHandle() {
+    const editorRef = createRef<RichTextEditorHandle>()
+    const rendered = renderWithIntl(
+      <RichTextEditor
+        value={{
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'draft text' }] }],
+        }}
+        onChange={() => {}}
+        editorRef={editorRef}
+      />
+    )
+    return { editorRef, rendered }
+  }
+
+  it('clear() empties the document through the editor already mounted (G14)', () => {
+    const { editorRef } = mountWithHandle()
+    const surface = document.querySelector('.ProseMirror')
+    const host = surface?.parentElement
+    expect(surfaceText()).toContain('draft text')
+
+    act(() => editorRef.current!.clear())
+
+    expect(surfaceText()).toBe('')
+    // The same nodes, so the caret never left the composer — and only one
+    // surface, so nothing was mounted beside the editor it emptied.
+    expect(document.querySelector('.ProseMirror')).toBe(surface)
+    expect(document.querySelector('.ProseMirror')?.parentElement).toBe(host)
+    expect(document.querySelectorAll('.ProseMirror')).toHaveLength(1)
+  })
+
+  it('clear() after the editor is gone does nothing rather than throwing (G14)', async () => {
+    const { editorRef, rendered } = mountWithHandle()
+    // Held the way a late caller holds it — an async upload that resolves
+    // after the composer closed still has the handle object, while React has
+    // already nulled the ref it was published through.
+    const handle = editorRef.current!
+
+    rendered.unmount()
+    // TipTap tears the editor down a tick after unmount rather than during it
+    // (that is how it survives StrictMode's double-mount), so a call made in
+    // the same tick would still meet a live editor and prove nothing.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(editorRef.current).toBeNull()
+    expect(() => handle.clear()).not.toThrow()
+    expect(document.querySelector('.ProseMirror')).toBeNull()
+  })
+
+  it('runs a command only against a live editor, never a missing or torn-down one (G14)', () => {
+    // The guard behind `clear`, on its own. The no-op above reaches its
+    // torn-down branch through the handle (measured: across the two clear
+    // tests the command runs once, not twice); the not-yet-created branch is
+    // only reachable here, and both are what keep a late call from throwing.
+    const run = vi.fn()
+
+    withLiveEditor(null, run)
+    withLiveEditor({ isDestroyed: true } as unknown as Editor, run)
+
+    expect(run).not.toHaveBeenCalled()
+
+    const live = { isDestroyed: false } as unknown as Editor
+    withLiveEditor(live, run)
+
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenCalledWith(live)
+  })
+
+  it('focus() puts the cursor in the editing surface', () => {
+    const { editorRef } = mountWithHandle()
+
+    act(() => editorRef.current!.focus('start'))
+
+    expect(document.querySelector('.ProseMirror')).toBeTruthy()
+    expect(surfaceText()).toContain('draft text')
   })
 })

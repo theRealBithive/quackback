@@ -546,6 +546,8 @@
   "ui.combobox.search": "Поиск…",
   "ui.combobox.empty": "Ничего не найдено.",
   "ui.editor.placeholder": "Напишите что-нибудь...",
+  "ui.editor.emoji.recent": "Недавние",
+  "ui.editor.emoji.popular": "Популярные",
   "ui.editor.slash.text.title": "Текст",
   "ui.editor.slash.text.description": "Обычный текст абзаца",
   "ui.editor.slash.heading1.title": "Заголовок 1",

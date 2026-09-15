@@ -14,9 +14,30 @@
  * viewport) are stubbed — this test is about capability wiring, not those
  * components' own behavior, and several of them fire unconditional queries
  * that would otherwise hit real server functions.
+ *
+ * The suite at the foot of this file pins the composer's send lifecycle.
+ * Contract group C (verbatim from contract-c.md):
+ *
+ *  C1 After a send completes, focus returns to the composer only when focus
+ *     was still on the composer or its send controls; a user who moved to
+ *     another control mid-flight is not pulled back.
+ *  C2 A successful send clears the composer in place and keeps the caret in
+ *     it.
+ *  C3 When a send fails and the composer is still empty, the failed draft is
+ *     restored verbatim.
+ *  C4 When a send fails and the user has typed on, the new typing stays on
+ *     top and the failed text is kept below it behind a separator, a toast
+ *     says so, and the composer regains focus.
+ *  C5 A reply that could not be translated is refused rather than sent in the
+ *     wrong language: whether the translation was unavailable or the reply
+ *     carried an image or embed a translation cannot keep, the toast offers
+ *     "Send untranslated", and taking it empties the restored composer, sends
+ *     the same reply with translation skipped, and hands focus back to the
+ *     composer.
  */
 import { createRef } from 'react'
-import { describe, expect, it, vi, afterEach } from 'vitest'
+import fc from 'fast-check'
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 import { act, render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { TicketDTO } from '@/lib/server/domains/tickets'
@@ -78,11 +99,30 @@ vi.mock('../macro-picker', () => ({
     <div data-testid="macro-picker" data-open={open ? 'true' : 'false'} />
   ),
 }))
-vi.mock('../composer-ai-actions', () => ({
-  ComposerAiActions: ({ activeMode }: { activeMode: string }) => (
-    <div data-testid="composer-ai-actions" data-active-mode={activeMode} />
-  ),
+// The AI actions row is the only child handed the ACTIVE draft's markdown, so
+// it is the seam through which the composer tests read that mirror. Recorded
+// into a probe rather than a DOM attribute: the merged markdown carries
+// newlines, and an attribute round-trip is a variable those tests do not need.
+const { composerAiProbe } = vi.hoisted(() => ({
+  composerAiProbe: { activeDraftText: '' },
 }))
+vi.mock('../composer-ai-actions', async () => {
+  const { useEffect } = await import('react')
+  return {
+    ComposerAiActions: ({
+      activeMode,
+      activeDraftText,
+    }: {
+      activeMode: string
+      activeDraftText?: string
+    }) => {
+      useEffect(() => {
+        composerAiProbe.activeDraftText = activeDraftText ?? ''
+      })
+      return <div data-testid="composer-ai-actions" data-active-mode={activeMode} />
+    },
+  }
+})
 vi.mock('@/components/admin/conversation/priority-control', () => ({
   PriorityControl: () => null,
 }))
@@ -139,19 +179,61 @@ vi.mock('@/components/admin/inbox/ticket-controls', () => ({
 }))
 // The editor stub keeps the real `editorRef` contract: whichever instance is
 // mounted publishes a focus handle, so the composer-focus tests below assert
-// against real DOM focus rather than a spy.
+// against real DOM focus rather than a spy. It also records everything the
+// composer does to the editor — `focus(position)`, `clear()`, the `value` it is
+// handed, and how many editor instances have been mounted (a key bump remounts
+// it, a clear-in-place does not) — and republishes the live `onChange` so a
+// test can type the way the real editor reports typing.
+const { editorProbe } = vi.hoisted(() => ({
+  editorProbe: {
+    mounts: 0,
+    focusCalls: [] as (string | undefined)[],
+    clearCalls: 0,
+    value: undefined as unknown,
+    onChange: null as null | ((json: unknown, html: string, markdown: string) => void),
+    reset() {
+      editorProbe.mounts = 0
+      editorProbe.focusCalls = []
+      editorProbe.clearCalls = 0
+      editorProbe.value = undefined
+      editorProbe.onChange = null
+    },
+  },
+}))
 vi.mock('@/components/ui/rich-text-editor', async () => {
-  const { useImperativeHandle, useRef } = await import('react')
+  const { useEffect, useImperativeHandle, useRef } = await import('react')
   return {
     RichTextEditor: ({
       placeholder,
       editorRef,
+      value,
+      onChange,
     }: {
       placeholder?: string
-      editorRef?: React.RefObject<{ focus: () => void } | null>
+      editorRef?: React.RefObject<{
+        focus: (position?: string) => void
+        clear: () => void
+      } | null>
+      value?: unknown
+      onChange?: (json: unknown, html: string, markdown: string) => void
     }) => {
       const areaRef = useRef<HTMLTextAreaElement>(null)
-      useImperativeHandle(editorRef, () => ({ focus: () => areaRef.current?.focus() }))
+      useEffect(() => {
+        editorProbe.mounts += 1
+      }, [])
+      useEffect(() => {
+        editorProbe.value = value
+        editorProbe.onChange = onChange ?? null
+      })
+      useImperativeHandle(editorRef, () => ({
+        focus: (position?: string) => {
+          editorProbe.focusCalls.push(position)
+          areaRef.current?.focus()
+        },
+        clear: () => {
+          editorProbe.clearCalls += 1
+        },
+      }))
       return <textarea ref={areaRef} data-testid="editor" placeholder={placeholder} readOnly />
     },
     RichTextContent: () => null,
@@ -213,13 +295,19 @@ vi.mock('@/lib/client/hooks/use-image-upload', () => ({
     return { upload: vi.fn() }
   },
 }))
-const addFiles = vi.fn()
+// `clearAttachments` is the composer's own "the send landed" signal: both
+// mutations call it first thing in onSuccess. Stable across renders so a test
+// can wait on it.
+const { addFiles, clearAttachments } = vi.hoisted(() => ({
+  addFiles: vi.fn(),
+  clearAttachments: vi.fn(),
+}))
 vi.mock('@/lib/client/hooks/use-conversation-composer-attachments', () => ({
   useConversationComposerAttachments: () => ({
     pending: [],
     addFiles,
     remove: vi.fn(),
-    clear: vi.fn(),
+    clear: clearAttachments,
     uploading: false,
   }),
 }))
@@ -376,8 +464,16 @@ vi.mock('@/lib/client/queries/conversation-inbox', () => ({
 
 import { AgentConversationThread } from '../agent-conversation-thread'
 import type { ThreadComposerHandle } from '../agent-conversation-thread'
-import { setConversationStatusFn } from '@/lib/server/functions/conversation'
+import {
+  setConversationStatusFn,
+  sendAgentMessageFn,
+  addConversationNoteFn,
+} from '@/lib/server/functions/conversation'
 import { setTicketStatusFn } from '@/lib/server/functions/tickets'
+import {
+  TRANSLATION_RICH_CONTENT_MESSAGE,
+  TRANSLATION_UNAVAILABLE_MESSAGE,
+} from '@/lib/shared/conversation/translation'
 
 afterEach(() => {
   mockTicketLink.value = null
@@ -490,7 +586,7 @@ describe('AgentConversationThread — ticket capability wiring', () => {
       </QueryClientProvider>
     )
     const trigger = await screen.findByRole('button', { name: 'Reply' })
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+    fireEvent.click(trigger)
     expect(await screen.findByRole('menuitemradio', { name: 'Note' })).toBeInTheDocument()
   })
 
@@ -533,7 +629,7 @@ describe('AgentConversationThread — conversation kind unaffected', () => {
   it('still renders the conversation detail panel and the Reply/Note switcher', async () => {
     renderThread({ kind: 'conversation', id: 'conversation_1' })
     const trigger = await screen.findByRole('button', { name: 'Reply' })
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+    fireEvent.click(trigger)
     expect(await screen.findByRole('menuitemradio', { name: 'Note' })).toBeInTheDocument()
     expect(screen.getByTestId('inbox-detail-panel')).toBeInTheDocument()
     expect(screen.getByTestId('composer-ai-actions')).toHaveAttribute('data-active-mode', 'reply')
@@ -896,5 +992,534 @@ describe('AgentConversationThread — composer focus handle', () => {
     act(() => composerRef.current?.openMacros())
 
     expect(screen.queryByTestId('macro-picker')).not.toBeInTheDocument()
+  })
+})
+
+/** The inbox composer's send lifecycle — focus hand-back, the in-place clear,
+ *  and what happens to a draft whose send failed. Contract group C is quoted
+ *  in this file's header. */
+describe('AgentConversationThread — composer send lifecycle', () => {
+  /** A promise whose settlement this test controls, so a send can be held in
+   *  flight while the test moves focus or types on. */
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    let reject!: (reason: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  // The composer schedules its post-restore focus on the next animation frame.
+  // Queue the callbacks instead of running them, so a test can flush them once
+  // the remount it is waiting for has actually committed.
+  const frameQueue: FrameRequestCallback[] = []
+  function flushFrames() {
+    const queued = frameQueue.splice(0)
+    act(() => {
+      for (const callback of queued) callback(0)
+    })
+  }
+
+  beforeEach(() => {
+    frameQueue.length = 0
+    editorProbe.reset()
+    composerAiProbe.activeDraftText = ''
+    // vi.clearAllMocks() (file-level afterEach) clears calls, not
+    // implementations — so each test below sets its own, and these start from
+    // nothing rather than from the previous test's leftovers.
+    vi.mocked(sendAgentMessageFn).mockReset()
+    vi.mocked(addConversationNoteFn).mockReset()
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frameQueue.push(callback)
+      return frameQueue.length
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const TYPED_JSON = {
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello' }] }],
+  }
+  const RETYPED_JSON = {
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Typed anew' }] }],
+  }
+
+  function renderComposer() {
+    const composerRef = createRef<ThreadComposerHandle>()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <AgentConversationThread
+          item={{ kind: 'conversation', id: 'conversation_1' } as never}
+          targetMessageId={null}
+          onChanged={vi.fn()}
+          onBack={vi.fn()}
+          onSelectItem={vi.fn()}
+          onOpenPost={vi.fn()}
+          isVisitorTyping={false}
+          isOtherAgentTyping={false}
+          composerRef={composerRef}
+        />
+      </QueryClientProvider>
+    )
+    return composerRef
+  }
+
+  /** Wait until the thread query has settled, so the placeholder no longer
+   *  changes underneath a mount count taken afterwards. */
+  async function settledReplyComposer() {
+    const editor = await screen.findByTestId('editor')
+    await waitFor(() => expect(editor).toHaveAttribute('placeholder', 'Type your reply…'))
+    return editor
+  }
+
+  /** Report typing the way the real editor does: json + html + markdown. */
+  function typeIntoComposer(json: unknown, markdown: string) {
+    act(() => {
+      editorProbe.onChange?.(json, '', markdown)
+    })
+  }
+
+  /** The server's own reply to a successful send. */
+  function sentMessage() {
+    return {
+      conversation: makeConversation(),
+      message: makeMessage({
+        id: 'conversation_msg_sent' as AgentConversationMessageDTO['id'],
+        senderType: 'agent',
+        content: 'Hello',
+      }),
+    }
+  }
+
+  it('hands focus back to the composer when the send controls still hold it (C1)', async () => {
+    const inFlight = deferred<unknown>()
+    vi.mocked(sendAgentMessageFn).mockReturnValue(inFlight.promise as never)
+    renderComposer()
+    const editor = await settledReplyComposer()
+    typeIntoComposer(TYPED_JSON, 'Hello')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
+    // The send itself puts the caret back in the editor, which is inside the
+    // composer box — the state the hand-back is allowed to act on.
+    expect(document.activeElement).toBe(editor)
+    expect(editor.closest('[data-inbox-composer]')).not.toBeNull()
+    const focusCallsBeforeCompletion = editorProbe.focusCalls.length
+
+    await act(async () => {
+      inFlight.resolve(sentMessage())
+      await inFlight.promise
+    })
+    await waitFor(() => expect(clearAttachments).toHaveBeenCalled())
+
+    expect(editorProbe.focusCalls.length).toBe(focusCallsBeforeCompletion + 1)
+    expect(editorProbe.focusCalls.at(-1)).toBe('end')
+  })
+
+  it('hands focus back to the composer when nothing holds focus at all (C1)', async () => {
+    const inFlight = deferred<unknown>()
+    vi.mocked(sendAgentMessageFn).mockReturnValue(inFlight.promise as never)
+    renderComposer()
+    await settledReplyComposer()
+    typeIntoComposer(TYPED_JSON, 'Hello')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
+    act(() => (document.activeElement as HTMLElement | null)?.blur())
+    expect(document.activeElement).toBe(document.body)
+    const focusCallsBeforeCompletion = editorProbe.focusCalls.length
+
+    await act(async () => {
+      inFlight.resolve(sentMessage())
+      await inFlight.promise
+    })
+    await waitFor(() => expect(clearAttachments).toHaveBeenCalled())
+
+    expect(editorProbe.focusCalls.length).toBe(focusCallsBeforeCompletion + 1)
+    expect(editorProbe.focusCalls.at(-1)).toBe('end')
+  })
+
+  it('never yanks focus back from a control the agent moved to mid-flight (C1)', async () => {
+    const inFlight = deferred<unknown>()
+    vi.mocked(sendAgentMessageFn).mockReturnValue(inFlight.promise as never)
+    renderComposer()
+    await settledReplyComposer()
+    typeIntoComposer(TYPED_JSON, 'Hello')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
+    // A triage control in the header — outside the composer box, which is what
+    // the guard reads.
+    const elsewhere = screen.getByRole('button', { name: 'Close' })
+    expect(elsewhere.closest('[data-inbox-composer]')).toBeNull()
+    act(() => elsewhere.focus())
+    expect(document.activeElement).toBe(elsewhere)
+    const focusCallsBeforeCompletion = editorProbe.focusCalls.length
+
+    await act(async () => {
+      inFlight.resolve(sentMessage())
+      await inFlight.promise
+    })
+    await waitFor(() => expect(clearAttachments).toHaveBeenCalled())
+
+    expect(editorProbe.focusCalls.length).toBe(focusCallsBeforeCompletion)
+    expect(document.activeElement).toBe(elsewhere)
+  })
+
+  it('hands focus back after a note is added, under the same guard (C1)', async () => {
+    const inFlight = deferred<unknown>()
+    vi.mocked(addConversationNoteFn).mockReturnValue(inFlight.promise as never)
+    const composerRef = renderComposer()
+    await settledReplyComposer()
+    act(() => composerRef.current?.focusComposer('note'))
+    const note = screen.getByTestId('editor')
+    expect(note).toHaveAttribute('placeholder', 'Add an internal note for your team…')
+    typeIntoComposer(TYPED_JSON, 'Hello')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }))
+    expect(document.activeElement).toBe(note)
+    const focusCallsBeforeCompletion = editorProbe.focusCalls.length
+
+    await act(async () => {
+      inFlight.resolve(sentMessage())
+      await inFlight.promise
+    })
+    await waitFor(() => expect(clearAttachments).toHaveBeenCalled())
+
+    expect(editorProbe.focusCalls.length).toBe(focusCallsBeforeCompletion + 1)
+    expect(editorProbe.focusCalls.at(-1)).toBe('end')
+  })
+
+  it('clears the composer in place on send and keeps the caret in it (C2)', async () => {
+    const inFlight = deferred<unknown>()
+    vi.mocked(sendAgentMessageFn).mockReturnValue(inFlight.promise as never)
+    renderComposer()
+    const editor = await settledReplyComposer()
+    typeIntoComposer(TYPED_JSON, 'Hello')
+    const mountsBeforeSend = editorProbe.mounts
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
+
+    // Cleared imperatively, with the state mirroring it — and the caret left
+    // where it was, because nothing remounted the editing surface.
+    expect(editorProbe.clearCalls).toBe(1)
+    expect(editorProbe.focusCalls.at(-1)).toBe('end')
+    expect(document.activeElement).toBe(editor)
+
+    await act(async () => {
+      inFlight.resolve(sentMessage())
+      await inFlight.promise
+    })
+    await waitFor(() => expect(clearAttachments).toHaveBeenCalled())
+
+    expect(editorProbe.mounts).toBe(mountsBeforeSend)
+    expect(screen.getByTestId('editor')).toBe(editor)
+    expect(editorProbe.value).toBe('')
+  })
+
+  it('restores the failed draft verbatim into an untouched reply composer (C3)', async () => {
+    const inFlight = deferred<unknown>()
+    vi.mocked(sendAgentMessageFn).mockReturnValue(inFlight.promise as never)
+    renderComposer()
+    await settledReplyComposer()
+    typeIntoComposer(TYPED_JSON, 'Hello')
+    const mountsBeforeSend = editorProbe.mounts
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
+    expect(editorProbe.value).toBe('')
+
+    await act(async () => {
+      inFlight.reject(new Error('the network went away'))
+      await inFlight.promise.catch(() => {})
+    })
+
+    await waitFor(() => expect(editorProbe.value).toEqual(TYPED_JSON))
+    // Verbatim means the document itself, which only a remount can re-seed.
+    expect(editorProbe.mounts).toBe(mountsBeforeSend + 1)
+    expect(composerAiProbe.activeDraftText).toBe('Hello')
+    expect(toastError).toHaveBeenCalledWith('Failed to send message')
+
+    flushFrames()
+    expect(editorProbe.focusCalls.at(-1)).toBe('end')
+  })
+
+  it('restores the failed draft verbatim into an untouched note composer (C3)', async () => {
+    const inFlight = deferred<unknown>()
+    vi.mocked(addConversationNoteFn).mockReturnValue(inFlight.promise as never)
+    const composerRef = renderComposer()
+    await settledReplyComposer()
+    act(() => composerRef.current?.focusComposer('note'))
+    typeIntoComposer(TYPED_JSON, 'Hello')
+    const mountsBeforeSend = editorProbe.mounts
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }))
+    expect(editorProbe.value).toBe('')
+
+    await act(async () => {
+      inFlight.reject(new Error('the network went away'))
+      await inFlight.promise.catch(() => {})
+    })
+
+    await waitFor(() => expect(editorProbe.value).toEqual(TYPED_JSON))
+    expect(editorProbe.mounts).toBe(mountsBeforeSend + 1)
+    expect(screen.getByTestId('editor')).toHaveAttribute(
+      'placeholder',
+      'Add an internal note for your team…'
+    )
+    expect(toastError).toHaveBeenCalledWith('Failed to add note')
+
+    flushFrames()
+    expect(editorProbe.focusCalls.at(-1)).toBe('end')
+  })
+
+  it('keeps new reply typing on top and the failed text below a separator (C4)', async () => {
+    const inFlight = deferred<unknown>()
+    vi.mocked(sendAgentMessageFn).mockReturnValue(inFlight.promise as never)
+    renderComposer()
+    await settledReplyComposer()
+    typeIntoComposer(TYPED_JSON, 'Hello')
+    const mountsBeforeSend = editorProbe.mounts
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
+    // The composer stays editable mid-flight; the trailing blank line proves
+    // the merge strips it rather than stacking four newlines.
+    typeIntoComposer(RETYPED_JSON, 'Typed anew\n\n')
+
+    await act(async () => {
+      inFlight.reject(new Error('the network went away'))
+      await inFlight.promise.catch(() => {})
+    })
+
+    await waitFor(() =>
+      expect(editorProbe.value).toEqual({
+        type: 'doc',
+        content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'Typed anew' }] },
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: '— failed to send, kept below —' }],
+          },
+          { type: 'paragraph', content: [{ type: 'text', text: 'Hello' }] },
+        ],
+      })
+    )
+    expect(composerAiProbe.activeDraftText).toBe(
+      'Typed anew\n\n--- failed to send, kept below ---\n\nHello'
+    )
+    expect(editorProbe.mounts).toBe(mountsBeforeSend + 1)
+    expect(toastError).toHaveBeenCalledWith('Failed to send message — kept below your new typing')
+
+    flushFrames()
+    expect(editorProbe.focusCalls.at(-1)).toBe('end')
+  })
+
+  it('keeps new note typing on top and the failed note below a separator (C4)', async () => {
+    const inFlight = deferred<unknown>()
+    vi.mocked(addConversationNoteFn).mockReturnValue(inFlight.promise as never)
+    const composerRef = renderComposer()
+    await settledReplyComposer()
+    act(() => composerRef.current?.focusComposer('note'))
+    typeIntoComposer(TYPED_JSON, 'Hello')
+    const mountsBeforeSend = editorProbe.mounts
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }))
+    typeIntoComposer(RETYPED_JSON, 'Typed anew\n\n')
+
+    await act(async () => {
+      inFlight.reject(new Error('the network went away'))
+      await inFlight.promise.catch(() => {})
+    })
+
+    await waitFor(() =>
+      expect(editorProbe.value).toEqual({
+        type: 'doc',
+        content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'Typed anew' }] },
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: '— failed to send, kept below —' }],
+          },
+          { type: 'paragraph', content: [{ type: 'text', text: 'Hello' }] },
+        ],
+      })
+    )
+    expect(composerAiProbe.activeDraftText).toBe(
+      'Typed anew\n\n--- failed to send, kept below ---\n\nHello'
+    )
+    expect(editorProbe.mounts).toBe(mountsBeforeSend + 1)
+    expect(screen.getByTestId('editor')).toHaveAttribute(
+      'placeholder',
+      'Add an internal note for your team…'
+    )
+    expect(toastError).toHaveBeenCalledWith('Failed to send message — kept below your new typing')
+
+    flushFrames()
+    expect(editorProbe.focusCalls.at(-1)).toBe('end')
+  })
+
+  it('keeps every node of both drafts, in order, around the separator (C4)', async () => {
+    // The generator reaches: one- and many-paragraph drafts on each side of the
+    // merge, and a new draft that ends in nothing, a newline, several
+    // newlines, or a tab — the states the merge's own trailing-whitespace
+    // handling distinguishes. Trailing whitespace is a NON-INTERFERENCE input:
+    // the drafts' own text never carries any, so however much of it the agent
+    // leaves behind, the merged result must read the same.
+    const paragraphTexts = fc.array(fc.constantFrom('alpha', 'beta', 'gamma', 'delta'), {
+      minLength: 1,
+      maxLength: 3,
+    })
+    const document = (texts: readonly string[]) => ({
+      type: 'doc',
+      content: texts.map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] })),
+    })
+
+    await fc.assert(
+      fc.asyncProperty(
+        paragraphTexts,
+        paragraphTexts,
+        fc.constantFrom('', '\n', '\n\n\n', '  ', '\t'),
+        async (failedTexts, retypedTexts, trailing) => {
+          cleanup()
+          editorProbe.reset()
+          frameQueue.length = 0
+          const inFlight = deferred<unknown>()
+          vi.mocked(sendAgentMessageFn)
+            .mockReset()
+            .mockReturnValue(inFlight.promise as never)
+
+          renderComposer()
+          await settledReplyComposer()
+          const failedMarkdown = failedTexts.join('\n\n')
+          const retypedMarkdown = retypedTexts.join('\n\n')
+          typeIntoComposer(document(failedTexts), failedMarkdown)
+
+          fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
+          typeIntoComposer(document(retypedTexts), retypedMarkdown + trailing)
+
+          await act(async () => {
+            inFlight.reject(new Error('the network went away'))
+            await inFlight.promise.catch(() => {})
+          })
+
+          await waitFor(() =>
+            expect(editorProbe.value).toEqual({
+              type: 'doc',
+              content: [
+                ...document(retypedTexts).content,
+                {
+                  type: 'paragraph',
+                  content: [{ type: 'text', text: '— failed to send, kept below —' }],
+                },
+                ...document(failedTexts).content,
+              ],
+            })
+          )
+          expect(composerAiProbe.activeDraftText).toBe(
+            `${retypedMarkdown}\n\n--- failed to send, kept below ---\n\n${failedMarkdown}`
+          )
+        }
+      ),
+      { numRuns: 12 }
+    )
+  })
+
+  // C5's two blocked branches. Neither reply went out in the wrong language:
+  // each send was refused, and the toast is the only way to send that reply
+  // untranslated. Taking the offer re-clears the composer the failure
+  // restored, resends with translation skipped, and puts the caret back on the
+  // next frame. The re-clear remounts the editing surface rather than clearing
+  // it in place, which is what C5 asks for — an empty composer, not an
+  // in-place clear.
+  for (const [label, message, description] of [
+    [
+      'an image the translation cannot carry',
+      TRANSLATION_RICH_CONTENT_MESSAGE,
+      'Translation cannot carry images or embeds. Send untranslated to keep them, or remove them and try again.',
+    ],
+    [
+      'a translation that is unavailable',
+      TRANSLATION_UNAVAILABLE_MESSAGE,
+      'Send it in your own language instead, or try again.',
+    ],
+  ] as const) {
+    it(`"Send untranslated" after ${label} resends, re-clears and refocuses (C5)`, async () => {
+      const inFlight = deferred<unknown>()
+      vi.mocked(sendAgentMessageFn).mockReturnValue(inFlight.promise as never)
+      renderComposer()
+      await settledReplyComposer()
+      typeIntoComposer(TYPED_JSON, 'Hello')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
+      await act(async () => {
+        inFlight.reject(new Error(message))
+        await inFlight.promise.catch(() => {})
+      })
+
+      // The blocked send restored the draft, so the offer has something to
+      // resend and something to re-clear.
+      await waitFor(() => expect(editorProbe.value).toEqual(TYPED_JSON))
+      // Refused rather than sent in the wrong language: exactly one attempt
+      // reached the server, and it was the one that asked for a translation.
+      expect(vi.mocked(sendAgentMessageFn)).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(sendAgentMessageFn).mock.calls[0]?.[0]).not.toMatchObject({
+        data: { skipTranslation: true },
+      })
+      const [title, options] = toastError.mock.calls.at(-1) as [
+        string,
+        { description: string; action: { label: string; onClick: () => void } },
+      ]
+      expect(title).toBe('Could not translate your reply.')
+      expect(options.description).toBe(description)
+      expect(options.action.label).toBe('Send untranslated')
+
+      // Drain the restore's own scheduled focus first, so what the offer
+      // schedules is the only frame left to account for.
+      flushFrames()
+      const mountsBeforeRetry = editorProbe.mounts
+      const focusCallsBeforeRetry = editorProbe.focusCalls.length
+      // The retry is left in flight so the only focus that follows is the
+      // scheduled one.
+      vi.mocked(sendAgentMessageFn).mockReturnValue(new Promise(() => {}) as never)
+      await act(async () => options.action.onClick())
+
+      expect(vi.mocked(sendAgentMessageFn)).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(sendAgentMessageFn).mock.calls.at(-1)?.[0]).toMatchObject({
+        data: { content: 'Hello', skipTranslation: true },
+      })
+      expect(editorProbe.mounts).toBe(mountsBeforeRetry + 1)
+      expect(editorProbe.value).toBe('')
+
+      flushFrames()
+      expect(editorProbe.focusCalls.length).toBe(focusCallsBeforeRetry + 1)
+      expect(editorProbe.focusCalls.at(-1)).toBe('end')
+    })
+  }
+
+  it('offers nothing untranslated when the send failed for any other reason (C5)', async () => {
+    const inFlight = deferred<unknown>()
+    vi.mocked(sendAgentMessageFn).mockReturnValue(inFlight.promise as never)
+    renderComposer()
+    await settledReplyComposer()
+    typeIntoComposer(TYPED_JSON, 'Hello')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
+    await act(async () => {
+      inFlight.reject(new Error('the network went away'))
+      await inFlight.promise.catch(() => {})
+    })
+
+    await waitFor(() => expect(editorProbe.value).toEqual(TYPED_JSON))
+    // One argument and no second one, so there is no options object and
+    // therefore no action: taking the translation offer is the only route to
+    // an untranslated send, which is what makes C5 a refusal rather than a
+    // detour.
+    expect(toastError.mock.calls.at(-1)).toEqual(['Failed to send message'])
+    expect(vi.mocked(sendAgentMessageFn)).toHaveBeenCalledTimes(1)
   })
 })

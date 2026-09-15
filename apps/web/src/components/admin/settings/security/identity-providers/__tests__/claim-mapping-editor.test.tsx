@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { RoleMappingRulesBody } from '../claim-mapping-editor'
 import type { RoleMapping } from '../provider-shared'
 
@@ -91,10 +92,10 @@ describe('RoleMappingRulesBody', () => {
     expect(onChange).toHaveBeenCalledWith({ ...mapping, claimPath: 'realm_access.roles' })
   })
 
-  it('turns on reapplying roles on every sign-in', () => {
+  it('turns on reapplying roles on every sign-in', async () => {
     const mapping = twoRules()
     const onChange = renderRules(mapping)
-    fireEvent.click(screen.getByRole('switch', { name: 'Reapply roles on every sign-in' }))
+    await userEvent.click(screen.getByRole('switch', { name: 'Reapply roles on every sign-in' }))
     expect(onChange).toHaveBeenCalledWith({ ...mapping, syncOnEverySignIn: true })
   })
 })

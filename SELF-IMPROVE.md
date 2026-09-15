@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 9x — Test suites are flaky under parallel load
+## 10x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -114,6 +114,15 @@ names out of the selection into their own small run, and point each run at its o
 `coverage/local-<n>` directory — the diff gate merges every `coverage-final.json`
 under `coverage/`, so the split costs nothing and a flake in one part no longer
 throws away the other's report.
+
+Tenth run, and the widest sample yet: four full shards with coverage on, for a
+branch that had already been green in CI. Six failures across three shards, all
+six green when re-run alone — `seat-usage.db.test.ts` (three of its cases),
+`singletons-not-shared.test.ts` (a 20-second timeout), `settings.test.ts` and
+`module-state.test.ts`. Coverage instrumentation is the aggravating factor: the
+same shards pass in CI without it. The practical cost is that a local full run
+can no longer be read as a verdict at all — every red line has to be re-run
+alone before it means anything, which is four extra minutes on top of fourteen.
 
 ## 6x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -454,38 +463,7 @@ suite — twice today, once with `--coverage` (ten minutes, killed). Guard the
 expansion (`[ -s list ] || exit`) or `mapfile` the list and check its length
 before the call. The `$param` route files need the array form anyway.
 
-## 3x — Coverage had to be re-installed for every measurement
-
-The tooling for non-trivial logic is half-present. `fast-check` is a
-devDependency and is used by a handful of suites; a mutation runner was missing,
-so every mutation number in this repo up to the audit-gate change was produced by
-a throwaway script that applies mutants textually one at a time and re-runs the
-suite by hand.
-
-Second run: the infrastructure gate on the DB fixture needed 25 mutants written
-out by hand to find the four that mattered (three unasserted lines of the
-remediation message, and — the one that counted — no end-to-end test that an
-unreachable database _without_ `REQUIRE_TEST_DB` still skips instead of throwing,
-which is the regression that would have turned every laptop run red). A real
-runner would have listed those in one command instead of one bespoke script per
-change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
-transiently and `package.json`/`bun.lock` restored afterwards, every time.
-
-Third run closed the mutation half — Stryker landed with the dependency-audit
-gate — and left the coverage half exactly as it was. `@vitest/coverage-v8` still
-has to be added, used, and then unpicked from `package.json` and `bun.lock`
-before anything can be committed, and the whole-file percentage it prints is not
-the number the discipline asks for: the lines a change touches have to be
-intersected with the JSON reporter's uncovered list by hand. Installing it as a
-devDependency the way Stryker now is would remove one install, one restore and
-one chance to commit a stray manifest per change.
-
-**Closed** by the diff-coverage gate: `@vitest/coverage-v8` is a devDependency,
-the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
-does the intersection with the diff that used to be done by hand. Three runs
-paid for it.
-
-## 3x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+## 4x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
 `lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
 `error:03000098:digital envelope routines::invalid digest`. It is not the repo:
@@ -531,6 +509,47 @@ coverage report was taken from a narrow run instead, so nothing was lost but
 the minute spent working out whether the red line was mine. It was not: the
 same test is red on `origin/main`. Checking the fixture in would have made
 that answer free.
+
+Fourth run, and this one paid the full price because the run was sharded. Four
+shards, fourteen minutes, and three of them ended red — one on this same SHA-1
+fixture, two on the flakes above. `coverage/` afterwards held exactly one
+directory, `local4`, the only shard that had passed, and the gate happily graded
+that quarter of the repository without saying it was a quarter. The missing
+three had to be re-run with `--coverage.reportOnFailure`, another eleven
+minutes. Both fixes are still unmade, and the sharded case adds a third
+observation: a partial set of reports is worse than none, because the gate reads
+it as a complete measurement.
+
+## 3x — Coverage had to be re-installed for every measurement
+
+The tooling for non-trivial logic is half-present. `fast-check` is a
+devDependency and is used by a handful of suites; a mutation runner was missing,
+so every mutation number in this repo up to the audit-gate change was produced by
+a throwaway script that applies mutants textually one at a time and re-runs the
+suite by hand.
+
+Second run: the infrastructure gate on the DB fixture needed 25 mutants written
+out by hand to find the four that mattered (three unasserted lines of the
+remediation message, and — the one that counted — no end-to-end test that an
+unreachable database _without_ `REQUIRE_TEST_DB` still skips instead of throwing,
+which is the regression that would have turned every laptop run red). A real
+runner would have listed those in one command instead of one bespoke script per
+change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
+transiently and `package.json`/`bun.lock` restored afterwards, every time.
+
+Third run closed the mutation half — Stryker landed with the dependency-audit
+gate — and left the coverage half exactly as it was. `@vitest/coverage-v8` still
+has to be added, used, and then unpicked from `package.json` and `bun.lock`
+before anything can be committed, and the whole-file percentage it prints is not
+the number the discipline asks for: the lines a change touches have to be
+intersected with the JSON reporter's uncovered list by hand. Installing it as a
+devDependency the way Stryker now is would remove one install, one restore and
+one chance to commit a stray manifest per change.
+
+**Closed** by the diff-coverage gate: `@vitest/coverage-v8` is a devDependency,
+the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
+does the intersection with the diff that used to be done by hand. Three runs
+paid for it.
 
 ## 3x — Mounting a real route in a test: three traps, none of which say so
 
@@ -605,7 +624,7 @@ knowing that the widget SDK guards `event.source !== window.parent`, so a test
 has to dispatch `new MessageEvent('message', { data, source: window })` — a bare
 `postMessage` never reaches the handler and reads as "the effect did not run".
 
-## 2x — A mutation survivor is reported by line, and a line can hold several mutants
+## 3x — A mutation survivor is reported by line, and a line can hold several mutants
 
 The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that
 holds more than one mutable sub-expression that does not say which one, and the two
@@ -650,6 +669,28 @@ without the gate saying anything. It was written as two `if`s instead, one mutan
 line. That is a workaround: the matcher should carry the column, or refuse a record that
 matches more than one mutant, so a genuine `&&` does not have to be split to be graded
 honestly.
+
+Third time, on `if (aRecent !== -1 || bRecent !== -1)` in
+`emoji-recommendations.ts`, and the workaround from last time did not apply.
+That line carried two colliding addresses at once: `ConditionalExpression ->
+false` on three mutants (two killed, one equivalent) and `UnaryOperator -> +1`
+on two (one killed, one equivalent). Splitting the `&&` worked in the i18n
+policy because that file is ours; this one is upstream, and splitting it would
+have diverged a file the fork otherwise carries unchanged — for nothing, because
+a two-operand condition still occupies one line however it is written, and
+hoisting the operands into named booleans just moves the collision to the new
+line.
+
+So the record was written with the collision named in its `why`, listing the
+tests that hold the killed siblings. What makes that tolerable rather than an
+allowlist is a property of the gate that is worth knowing before you reason
+about this: `gradeReport` consults `excusing()` **only** for a mutant whose
+status is `Survived` or `NoCoverage`, and a record matching no survivor at all
+fails the run as stale. A record therefore cannot silence a mutant a test is
+currently killing — it can only start covering for one later, if the test that
+kills it is broken. That is a real hole and it is the argument for the fix this
+entry already asks for: match on the column, or refuse a record that matches
+more than one mutant.
 
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
@@ -760,6 +801,116 @@ production bug and then could not measure the rest of its suite:
 `--coverage.reportOnFailure=true` makes vitest write the report anyway. Only
 for a probe, never for the gate — the gate reading a report over a red suite is
 exactly the quiet failure the entry above describes.
+
+## 2x — Parallel coverage runs share `coverage/.tmp` and delete each other's
+
+Four subagents measured their own suites with `--coverage` at the same time and
+two of them died with `Something removed the coverage directory .../coverage/.tmp`
+— v8's provider writes intermediate files under the report directory and cleans
+it up when it finishes, so the first run to finish takes the others' scratch with
+it. Every concurrent run needs its own `--coverage.reportsDirectory`, and the
+partial directories have to be removed before the gate runs, because the gate
+merges every `coverage-final.json` it finds under `coverage/`.
+
+Second hit, same shape: a batch of contract suites measured per-file coverage
+while several other agents did the same in the same checkout, and the first
+few runs used the default `--coverage.reportsDirectory` (or an unqualified
+`coverage/local`) and died the same way,
+`Error: Something removed the coverage directory "coverage/.tmp"` — a
+concurrent run elsewhere in the checkout finished first and took the shared
+scratch with it. Fixed the same way as the first hit: every measurement after
+that pointed at its own path under the scratchpad
+(`coverage/local-<name>` or a scratchpad `cov/<name>` directory), and no
+further collision happened once that was consistent.
+
+## 2x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
+
+`changeBoard('post_01jqzz000000000000000000', ...)` does not reach the not-found branch: the
+suffix is 24 characters, the TypeID parser wants 26, and it throws `Invalid length` long
+before the lookup. Two tests named `raises nothing when the post does not exist` and
+`raises nothing when the target board does not exist` were asserting a bare
+`.rejects.toThrow()`, so both passed on the parser's complaint and neither had ever
+executed the code they were named for.
+
+Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and absent,
+and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
+that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
+read as untested until proven otherwise.
+
+Seen again in batch C's form suites: a fixture id like `'board_1'` passes the
+type cast, fails schema parsing at submit, and surfaces as "the form never
+submitted" rather than as a validation error. Build fixture ids with
+`generateId(prefix)`.
+
+## 1x — A manifest entry can name a subset of a file's suites, and the gap reads as survivors
+
+`scripts/mutation-manifest.json` pairs a graded file with the suites that pin
+it, and nothing checks that the pairing is complete. When a second suite was
+added for `next-position.ts` — a `.db.test.ts` beside the existing mock-based
+one — the entry still named only the first, so the gate re-ran the file against
+half its coverage and reported the SQL fragment's two mutants as survivors. They
+were not survivors. They were mutants the selected suites never reached, which
+is exactly the failure mode the `NoCoverage` handling exists to catch, except
+that here the suite that covers them was on disk and simply unlisted.
+
+The sweep that finds it is three lines: for every graded file, list the
+`__tests__` directory beside it and flag any `<name>.*.test.ts` the entry does
+not name. Run against the whole manifest it turned up one more, pre-existing:
+`gitlab/server/inbound.ts` is graded against `inbound.test.ts` and
+`signature-matrix.test.ts`, and `inbound.properties.test.ts` sits unlisted
+beside them. That file was untouched by the branch, so the gate never graded it
+and never said anything.
+
+Two fixes, either would do. `mutation-scope.test.ts` already asserts the whole
+manifest and reads each named suite off disk; it could also assert that no
+sibling suite matching the graded file's name is missing from the entry. Or the
+gate could print unlisted siblings the way it prints files with no entry at
+all — naming the gap rather than failing on it, since a co-located name is a
+guess and the manifest is the assertion.
+
+## 1x — Replacing a whole `describe` block drops the tests inside it, and nothing counts
+
+Strengthening a suite by rewriting one `describe` in place — reading its
+boundaries, generating the replacement, writing it back — removed a test that
+had nothing to do with the change: an unnumbered `focus()` case that happened to
+live in the same block as the `clear()` cases being relabelled. The suite went
+from 14 tests to 13 and stayed green, because a test count is not asserted
+anywhere and a passing run reads the same at either number.
+
+Nothing catches this. `diff-coverage` grades the lines a change _adds_, so a
+deleted test is invisible to it; the mutation gate only notices if the deleted
+test was the only one killing some mutant, and here it was not. It surfaced by
+reading the diff, which is the one check that works and the one that gets
+skipped when the edit was supposed to be mechanical.
+
+Two cheap habits, in order of value. Diff the test _names_ across the edit —
+`grep -c "  it(" <file>` before and after, or the runner's own list — rather than
+trusting that a block boundary was read correctly. And prefer appending a new
+`describe` to rewriting an existing one: the merge is then additive and a
+deletion has to be deliberate.
+
+## 1x — Calling an exported `createServerFn(...).validator(...).handler(...)` const directly resolves to `undefined`
+
+Testing a TanStack Start server function by importing the exported const and
+calling it (`await someServerFn({ data: ... })`) — the pattern one existing
+suite in this repo happens to use — silently loses the success path in this
+vitest setup: `result` comes back `undefined` even when the handler resolves a
+real value, because there is no live Start request context to run the wrapper
+against. Confirmed with a throwaway probe: a bare `createServerFn(...)
+.validator(z.object({ name: z.string().optional().default('DEFAULTED') }))
+.handler(...)` called directly also returned `undefined`, and the handler's
+argument showed the validator never ran either (`color: undefined` reached the
+service instead of a defaulted value). The handler still executes for its side
+effects, and a thrown error still propagates through `.rejects.toThrow()` — so
+a suite that only checks a thrown error or a downstream mock's call args can
+pass while silently asserting nothing about the resolved value or defaulting.
+
+The reliable pattern, already in use in `admin-reset-two-factor.test.ts`: mock
+`@tanstack/react-start` so `createServerFn` returns a chain object whose
+`.validator()` is a no-op and whose `.handler(fn)` pushes `fn` into a
+module-level array, then `await import(...)` the module under test once and
+index into the array by the handlers' declaration order. That runs the actual
+handler body directly, with real arguments, and its real return value.
 
 ## 1x — A line that is only an arrow function passed as a JSX prop reads as uncovered until the handler actually fires
 
@@ -1207,20 +1358,6 @@ The order that works: merge without `--delete-branch`, retarget the PR above to
 `main` while its base still exists, then delete the branch. Or retarget every PR
 in the stack to `main` up front and accept that each diff temporarily contains
 the ones below it.
-
-## 1x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
-
-`changeBoard('post_01jqzz000000000000000000', ...)` does not reach the not-found branch: the
-suffix is 24 characters, the TypeID parser wants 26, and it throws `Invalid length` long
-before the lookup. Two tests named `raises nothing when the post does not exist` and
-`raises nothing when the target board does not exist` were asserting a bare
-`.rejects.toThrow()`, so both passed on the parser's complaint and neither had ever
-executed the code they were named for.
-
-Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and absent,
-and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
-that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
-read as untested until proven otherwise.
 
 ## 1x — postgres.js encodes a JSON _string_ parameter into jsonb a second time
 
@@ -1775,16 +1912,6 @@ The repair is always in the named suite, never in the suite list: widening the
 list to include the consumers would make the entry true by weakening it to "some
 combination of eight suites holds this", which is not a claim anyone can act on.
 
-## 1x — Parallel coverage runs share `coverage/.tmp` and delete each other's
-
-Four subagents measured their own suites with `--coverage` at the same time and
-two of them died with `Something removed the coverage directory .../coverage/.tmp`
-— v8's provider writes intermediate files under the report directory and cleans
-it up when it finishes, so the first run to finish takes the others' scratch with
-it. Every concurrent run needs its own `--coverage.reportsDirectory`, and the
-partial directories have to be removed before the gate runs, because the gate
-merges every `coverage-final.json` it finds under `coverage/`.
-
 ## 1x — `Image` never loads under the test DOM, so a natural-size read hangs
 
 `resizableImageInsertAttrs` awaits `new Image()` firing `onload` or `onerror` on
@@ -1806,3 +1933,102 @@ attachment-tray tests therefore live in a sibling file where the hooks run for
 real and `fetch` is the seam. The general shape: a hoisted `vi.mock` is a
 property of the whole file, and "extend the existing suite" stops being the
 right move as soon as the behaviour under test is the thing the suite mocked.
+
+## 1x — A Base UI Switch inside a `<label>` toggles at random under happy-dom
+
+Base UI's Switch and Checkbox toggle by dispatching a click on a hidden
+`<input>` beside the button. happy-dom's `<label>` forwards _every_ click to
+its control, including one whose target is already an interactive descendant,
+which browsers never do — so inside a `<label>` the input's click came back to
+the button, the button dispatched on the input again, and the pair looped
+until the call stack overflowed (200–270 rounds measured). Whether the toggle
+landed depended on where the stack gave out: 12 of 25 fresh renders lost it,
+and a suite clicking such a switch failed about half its runs, with a
+`RangeError` reported by React that vitest does not turn into a failure. It
+does not matter whether the click is `fireEvent` or `userEvent`, and the
+wrapper's React-level `stopPropagation` cannot reach it, because the loop is
+native. `vitest.setup.ts` now gives the label the browser's behaviour (skip the
+forward when the target is interactive content); `switch-in-label.test.tsx`
+pins it. Two smaller Base UI facts from the same run: a Select option is chosen
+by `userEvent.click` on trigger and option — `fireEvent.click` and
+`fireEvent.change` both leave the value untouched; and a Dialog unmounts its
+content after the close transition, so "closed" is a `waitFor`, not a same-tick
+`queryBy…toBeNull()`.
+
+## 1x — A suite whose query mock invents its own query key never shows the message it sent
+
+`agent-conversation-thread.test.tsx` seeds react-query under a key it made up
+(`['conv-thread', id]`) while the component writes sent messages through
+`conversationKeys.agentThread(id)`. `appendToThread` therefore updates a cache
+entry nobody renders, and "wait for the sent bubble to appear" is a signal that
+never arrives — a run was lost waiting for it. When a suite mocks the query
+layer, take the keys from the production key factory, or pick a seam the
+component actually crosses (here `clearAttachments`, the first call in both
+`onSuccess` handlers).
+
+## 1x — vitest's v8 `text` reporter prints nothing for a file that is fully covered
+
+Narrow a coverage run to one production file with `--coverage.include` and,
+once every metric on it reads 100%, the `text` reporter drops the row _and_ the
+"All files" line: the table is empty, which reads as "nothing was measured".
+It was measured. Cross-check with `--coverage.reporter=json` (or lower a test
+to see the row reappear) before concluding the include pattern missed.
+
+## 1x — TipTap's suggestion popup is rebuilt on every keystroke, and a same-tick read sees nothing
+
+The suggestion plugin resolves its items asynchronously and reports an empty
+list first, so each keystroke runs `onUpdate`'s teardown branch and then
+rebuilds the popup element when the real list arrives. Two consequences that
+cost a run each: an assertion keyed on element identity across keystrokes is
+wrong by construction (assert an invariant instead — every positioner stop
+except the last has been called), and a DOM read in the same tick as the
+keystroke reports no popup at all; a `setTimeout(…, 5)` flush is needed
+between typing and reading. Two smaller ones from the same suite:
+prosemirror-view 1.42 `someProp('handleTextInput', …)` takes a fifth
+`deflt: () => Transaction` argument (a 4-arg call is a TS2554, not a runtime
+failure), and `className.includes('bg-accent')` is always true on rows that
+carry `hover:bg-accent` — use `classList.contains` for a highlight check.
+
+## 1x — Base UI's `render` prop takes the trigger's children, not the render element's
+
+`<DialogTrigger render={<Button>Open</Button>} />` renders a button with no
+text: the element handed to `render` is a host, its children are dropped, and
+the label comes from the trigger's own children — `<DialogTrigger
+render={<Button />}>Open</DialogTrigger>` is the working idiom. The same holds
+for Popover, AlertDialog and Menu triggers. A dialog opened from a
+`DropdownMenuItem` must additionally live _outside_ `DropdownMenuContent`: the
+menu unmounts its content on selection and takes a nested dialog with it, which
+is why `merge-lead-control` and `block-person-control` lift the open state
+above the menu and why their suites need that harness too.
+
+## 1x — Stryker writes `// @ts-nocheck` into its sandbox copies, and a byte-comparing test fails the dry run
+
+Stryker's default `disableTypeChecks` pattern inserts `// @ts-nocheck` into
+every sandbox copy under `src/`, `lib/` or `test/`. A suite that reads a source
+file as _data_ — the permissions drift test compares the committed
+`permissions.ts` with the generator's output — then sees one extra line and
+fails during the dry run, and the gate reports that it graded nothing. The
+error names the test but not the cause; finding it meant running a probe inside
+the surviving sandbox and diffing the two strings. The gate now sets
+`disableTypeChecks: false` (no checker runs under it), pinned in the B10 tests.
+
+## Resolved
+
+Entries that were actually fixed, with what fixed them.
+
+### `packages/ids` was the one workspace nothing typechecked
+
+`packages/ids/package.json` has had a `typecheck` script since the package was
+created and no job ever ran it. The root `typecheck` covers `apps/web` and its
+workspace probe; CI's `check` job adds `packages/widget`, `packages/db`,
+`packages/email` and `scripts/`. `packages/ids` was in neither list, so the id
+helpers and their suite compiled nowhere — the root vitest run executes those
+tests, but vitest strips types rather than checking them.
+
+It was not theoretical: the first run of `bun run --cwd packages/ids typecheck`
+rejected a cast in a suite that had been green for a full session, because
+drizzle's `PgCustomColumnBuilder.config` is `protected` and a direct
+object-literal cast onto it needs to go through `unknown`.
+
+Fixed in the batch C pull request by adding `bun run --cwd packages/ids
+typecheck` to the `check` job, next to the other package typechecks.

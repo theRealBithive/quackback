@@ -201,6 +201,71 @@
     {
       "file": "apps/web/src/routes/api/widget/install-context.ts",
       "suites": ["apps/web/src/routes/api/widget/__tests__/install-context.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "suites": ["apps/web/src/lib/shared/__tests__/emoji-recommendations.test.ts"]
+    },
+    {
+      "file": "apps/web/src/components/ui/suggestion-list-keys.ts",
+      "suites": ["apps/web/src/components/ui/__tests__/suggestion-list-keys.test.ts"]
+    },
+    {
+      "file": "apps/web/src/components/ui/highlight-query.tsx",
+      "suites": ["apps/web/src/components/ui/__tests__/highlight-query.test.tsx"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/content-emoji.ts",
+      "suites": ["apps/web/src/lib/shared/__tests__/content-emoji.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/normalize-attribute-key.ts",
+      "suites": ["apps/web/src/lib/shared/__tests__/normalize-attribute-key.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/domains/attribute-definitions/attribute-definition.service.ts",
+      "suites": [
+        "apps/web/src/lib/server/domains/attribute-definitions/__tests__/attribute-definition-rulebook.test.ts",
+        "apps/web/src/lib/server/domains/attribute-definitions/__tests__/attribute-definition.service.test.ts"
+      ]
+    },
+    {
+      "file": "packages/db/src/permissions-mirror.ts",
+      "suites": [
+        "packages/db/src/__tests__/permissions-mirror.test.ts",
+        "apps/web/src/lib/shared/__tests__/permissions-catalogue-drift.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/src/lib/server/domains/tickets/unique-slug.ts",
+      "suites": ["apps/web/src/lib/server/domains/tickets/__tests__/unique-slug.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/events/safe-dispatch.ts",
+      "suites": ["apps/web/src/lib/server/events/__tests__/safe-dispatch.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/utils/taxonomy.ts",
+      "suites": ["apps/web/src/lib/server/utils/__tests__/taxonomy.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/schemas/taxonomy.ts",
+      "suites": ["apps/web/src/lib/shared/schemas/__tests__/taxonomy.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/record.ts",
+      "suites": ["apps/web/src/lib/shared/__tests__/record.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/utils/next-position.ts",
+      "suites": [
+        "apps/web/src/lib/server/utils/__tests__/next-position.test.ts",
+        "apps/web/src/lib/server/utils/__tests__/next-position.db.test.ts"
+      ]
+    },
+    {
+      "file": "packages/ids/src/drizzle.ts",
+      "suites": ["packages/ids/src/__tests__/drizzle.test.ts"]
     }
   ],
   "equivalents": [
@@ -511,6 +576,104 @@
       "line": "if (isFullAsCatalogue(params.scope ?? '')) return [...MCP_FIRST_CONNECT_SCOPES]",
       "replacement": "\"Stryker was here!\"",
       "why": "The fallback is only read when the scope parameter is absent. isFullAsCatalogue is true for exactly one token set, the eleven authorization-server scopes, and neither the empty string nor a three-word sentence is that set, so both fall through to parsing the absent parameter as no scopes at all."
+    },
+    {
+      "file": "apps/web/src/lib/server/domains/attribute-definitions/attribute-definition.service.ts",
+      "mutator": "ObjectLiteral",
+      "line": "const log = logger.child({ component: logComponent })",
+      "replacement": "{}",
+      "why": "The child logger's component name is log metadata: every code path behaves the same with or without it, and no test reads the logger's bound fields. Same reason as the widget-install-pairing and install-context records."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "OptionalChaining",
+      "line": "raw = storage()?.getItem(EMOJI_RECENT_STORAGE_KEY) ?? null",
+      "replacement": "storage().getItem",
+      "why": "storage() returns null only when window is missing or localStorage access throws. Without the optional chaining that null becomes a TypeError inside the same try block, whose catch returns [] — the value the original returns for a null storage as well. Both paths yield 'nothing remembered'."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "BlockStatement",
+      "line": "} catch {",
+      "replacement": "{}",
+      "why": "Emptying the catch leaves raw at its initial null, and the very next line returns [] for a null raw. A throwing getItem therefore still reads as 'nothing remembered'."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (!raw) return []",
+      "replacement": "false",
+      "why": "Skipping the null/empty guard sends null or '' into JSON.parse: null parses to null, which fails the Array.isArray check on the next line and returns [] as well; '' throws SyntaxError, which the surrounding catch turns into []. Every input reaches the same result."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (!Array.isArray(parsed)) return []",
+      "replacement": "false",
+      "why": "Without the array guard a parsed object, string, number or boolean reaches .filter, which does not exist on any of them; the TypeError is caught by the surrounding catch and read as []. Only an array passes either way."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "OptionalChaining",
+      "line": "storage()?.setItem(EMOJI_RECENT_STORAGE_KEY, JSON.stringify(next))",
+      "replacement": "storage().setItem",
+      "why": "When storage() is null the mutant throws a TypeError inside the try block whose catch deliberately swallows storage failures, so the recording is dropped exactly as the original drops it."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "UnaryOperator",
+      "line": "const aRecent = a.emoji ? recents.indexOf(a.emoji) : -1",
+      "replacement": "+1",
+      "why": "The false arm of a.emoji ? … : -1 is unreachable: matches is filtered on item.emoji two lines above, so every item compared here has a glyph. The comparator never evaluates the constant."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "UnaryOperator",
+      "line": "const bRecent = b.emoji ? recents.indexOf(b.emoji) : -1",
+      "replacement": "+1",
+      "why": "Same unreachable false arm for b: both operands of the comparator come from the glyph-filtered list."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (typeof window === 'undefined') return null",
+      "replacement": "false",
+      "why": "Never taking the guard evaluates window.localStorage where window is not declared, which throws a ReferenceError inside the try block on the next line, and that catch returns the same null the guard returned. In a browser the guard is false anyway. Both environments therefore reach the identical null, and every caller reads null as \"storage unavailable\"."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "StringLiteral",
+      "line": "if (typeof window === 'undefined') return null",
+      "replacement": "\"\"",
+      "why": "typeof never yields the empty string, so comparing against it makes the guard permanently false. That is the same code path as the ConditionalExpression record on this line, and it ends at the same null by the same route through the catch."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (aRecent !== -1 || bRecent !== -1) {",
+      "replacement": "true",
+      "why": "Entering the block when neither item is remembered runs straight into if (aRecent === -1) return 1, so the comparator answers 1 where it answered 0. Both answers say \"do not put a ahead of b\", and the sort is stable, so no arrangement can show the difference. Measured rather than assumed, because the mutant also makes the comparator inconsistent: 540,000 arrangements (60,000 each at lengths 2, 3, 4, 5, 8, 16, 40, 80 and 200) sorted identically under V8."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (aRecent !== -1 || bRecent !== -1) {",
+      "replacement": "false",
+      "why": "The second operand can only decide the entry when the first one is false, that is when aRecent === -1 — and that is exactly the case the block answers with its first statement, return 1. Dropping the operand therefore answers 0 where the original answered 1, which a stable sort reads the same way. Measured rather than assumed, because the mutant also makes the comparator inconsistent: 540,000 arrangements (60,000 each at lengths 2, 3, 4, 5, 8, 16, 40, 80 and 200) sorted identically under V8. Two further mutants share this address, replacing the whole condition and its first operand with false; both are caught by \"orders exact, then remembered by recency, then prefix, then the rest (G5)\", and that test, not this record, is what holds them. A record is only consulted for a mutant that survived, and one matching no survivor fails the run as stale."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "EqualityOperator",
+      "line": "if (aRecent !== -1 || bRecent !== -1) {",
+      "replacement": "bRecent === -1",
+      "why": "Flipping the second comparison changes the entry only where the first operand is false, so again only where aRecent === -1, and there the block answers 1 while skipping it answers 0. Measured rather than assumed, because the mutant also makes the comparator inconsistent: 540,000 arrangements (60,000 each at lengths 2, 3, 4, 5, 8, 16, 40, 80 and 200) sorted identically under V8."
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "mutator": "UnaryOperator",
+      "line": "if (aRecent !== -1 || bRecent !== -1) {",
+      "replacement": "+1",
+      "why": "The -1 in the second comparison is reachable only when the first one is false, so changing it swings the entry only where aRecent === -1, and there the block answers 1 against the 0 of skipping it. Measured rather than assumed, because the mutant also makes the comparator inconsistent: 540,000 arrangements (60,000 each at lengths 2, 3, 4, 5, 8, 16, 40, 80 and 200) sorted identically under V8. Its sibling on this line, aRecent !== +1, shares the address and is a different matter: with aRecent a real index and bRecent === -1 the block reaches if (bRecent === -1) return -1, and -1 against 0 does move an element. It is caught by \"a remembered exact match wins even when it is not the most recently used glyph (G5)\", and by the property test beside it."
     }
   ]
 }
