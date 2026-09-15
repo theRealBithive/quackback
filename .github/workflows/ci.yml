@@ -215,8 +215,9 @@ jobs:
           # Wall clock for the whole run, and an exceeded budget fails as
           # "nothing measured" rather than as a low score. 900 was sized when
           # the gate graded 15 files and 714 mutants; the manifest now reaches
-          # 16 files and 1,037, measured at 8m30s on a developer machine, and a
-          # four-core runner is slower than that.
+          # 16 and 1,037. Measured on both machines afterwards: 8m30s on a
+          # developer laptop and under 6m on the runner, so the headroom is for
+          # the next few manifest entries rather than for this batch.
           MUTATION_BUDGET_SECONDS: '1500'
         run: bun scripts/mutation-check.ts
 
