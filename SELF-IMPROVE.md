@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 9x — Test suites are flaky under parallel load
+## 10x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -114,6 +114,15 @@ names out of the selection into their own small run, and point each run at its o
 `coverage/local-<n>` directory — the diff gate merges every `coverage-final.json`
 under `coverage/`, so the split costs nothing and a flake in one part no longer
 throws away the other's report.
+
+Tenth run, and the widest sample yet: four full shards with coverage on, for a
+branch that had already been green in CI. Six failures across three shards, all
+six green when re-run alone — `seat-usage.db.test.ts` (three of its cases),
+`singletons-not-shared.test.ts` (a 20-second timeout), `settings.test.ts` and
+`module-state.test.ts`. Coverage instrumentation is the aggravating factor: the
+same shards pass in CI without it. The practical cost is that a local full run
+can no longer be read as a verdict at all — every red line has to be re-run
+alone before it means anything, which is four extra minutes on top of fourteen.
 
 ## 6x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -454,38 +463,7 @@ suite — twice today, once with `--coverage` (ten minutes, killed). Guard the
 expansion (`[ -s list ] || exit`) or `mapfile` the list and check its length
 before the call. The `$param` route files need the array form anyway.
 
-## 3x — Coverage had to be re-installed for every measurement
-
-The tooling for non-trivial logic is half-present. `fast-check` is a
-devDependency and is used by a handful of suites; a mutation runner was missing,
-so every mutation number in this repo up to the audit-gate change was produced by
-a throwaway script that applies mutants textually one at a time and re-runs the
-suite by hand.
-
-Second run: the infrastructure gate on the DB fixture needed 25 mutants written
-out by hand to find the four that mattered (three unasserted lines of the
-remediation message, and — the one that counted — no end-to-end test that an
-unreachable database _without_ `REQUIRE_TEST_DB` still skips instead of throwing,
-which is the regression that would have turned every laptop run red). A real
-runner would have listed those in one command instead of one bespoke script per
-change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
-transiently and `package.json`/`bun.lock` restored afterwards, every time.
-
-Third run closed the mutation half — Stryker landed with the dependency-audit
-gate — and left the coverage half exactly as it was. `@vitest/coverage-v8` still
-has to be added, used, and then unpicked from `package.json` and `bun.lock`
-before anything can be committed, and the whole-file percentage it prints is not
-the number the discipline asks for: the lines a change touches have to be
-intersected with the JSON reporter's uncovered list by hand. Installing it as a
-devDependency the way Stryker now is would remove one install, one restore and
-one chance to commit a stray manifest per change.
-
-**Closed** by the diff-coverage gate: `@vitest/coverage-v8` is a devDependency,
-the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
-does the intersection with the diff that used to be done by hand. Three runs
-paid for it.
-
-## 3x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+## 4x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
 `lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
 `error:03000098:digital envelope routines::invalid digest`. It is not the repo:
@@ -531,6 +509,47 @@ coverage report was taken from a narrow run instead, so nothing was lost but
 the minute spent working out whether the red line was mine. It was not: the
 same test is red on `origin/main`. Checking the fixture in would have made
 that answer free.
+
+Fourth run, and this one paid the full price because the run was sharded. Four
+shards, fourteen minutes, and three of them ended red — one on this same SHA-1
+fixture, two on the flakes above. `coverage/` afterwards held exactly one
+directory, `local4`, the only shard that had passed, and the gate happily graded
+that quarter of the repository without saying it was a quarter. The missing
+three had to be re-run with `--coverage.reportOnFailure`, another eleven
+minutes. Both fixes are still unmade, and the sharded case adds a third
+observation: a partial set of reports is worse than none, because the gate reads
+it as a complete measurement.
+
+## 3x — Coverage had to be re-installed for every measurement
+
+The tooling for non-trivial logic is half-present. `fast-check` is a
+devDependency and is used by a handful of suites; a mutation runner was missing,
+so every mutation number in this repo up to the audit-gate change was produced by
+a throwaway script that applies mutants textually one at a time and re-runs the
+suite by hand.
+
+Second run: the infrastructure gate on the DB fixture needed 25 mutants written
+out by hand to find the four that mattered (three unasserted lines of the
+remediation message, and — the one that counted — no end-to-end test that an
+unreachable database _without_ `REQUIRE_TEST_DB` still skips instead of throwing,
+which is the regression that would have turned every laptop run red). A real
+runner would have listed those in one command instead of one bespoke script per
+change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
+transiently and `package.json`/`bun.lock` restored afterwards, every time.
+
+Third run closed the mutation half — Stryker landed with the dependency-audit
+gate — and left the coverage half exactly as it was. `@vitest/coverage-v8` still
+has to be added, used, and then unpicked from `package.json` and `bun.lock`
+before anything can be committed, and the whole-file percentage it prints is not
+the number the discipline asks for: the lines a change touches have to be
+intersected with the JSON reporter's uncovered list by hand. Installing it as a
+devDependency the way Stryker now is would remove one install, one restore and
+one chance to commit a stray manifest per change.
+
+**Closed** by the diff-coverage gate: `@vitest/coverage-v8` is a devDependency,
+the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
+does the intersection with the diff that used to be done by hand. Three runs
+paid for it.
 
 ## 3x — Mounting a real route in a test: three traps, none of which say so
 
@@ -605,7 +624,7 @@ knowing that the widget SDK guards `event.source !== window.parent`, so a test
 has to dispatch `new MessageEvent('message', { data, source: window })` — a bare
 `postMessage` never reaches the handler and reads as "the effect did not run".
 
-## 2x — A mutation survivor is reported by line, and a line can hold several mutants
+## 3x — A mutation survivor is reported by line, and a line can hold several mutants
 
 The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that
 holds more than one mutable sub-expression that does not say which one, and the two
@@ -650,6 +669,28 @@ without the gate saying anything. It was written as two `if`s instead, one mutan
 line. That is a workaround: the matcher should carry the column, or refuse a record that
 matches more than one mutant, so a genuine `&&` does not have to be split to be graded
 honestly.
+
+Third time, on `if (aRecent !== -1 || bRecent !== -1)` in
+`emoji-recommendations.ts`, and the workaround from last time did not apply.
+That line carried two colliding addresses at once: `ConditionalExpression ->
+false` on three mutants (two killed, one equivalent) and `UnaryOperator -> +1`
+on two (one killed, one equivalent). Splitting the `&&` worked in the i18n
+policy because that file is ours; this one is upstream, and splitting it would
+have diverged a file the fork otherwise carries unchanged — for nothing, because
+a two-operand condition still occupies one line however it is written, and
+hoisting the operands into named booleans just moves the collision to the new
+line.
+
+So the record was written with the collision named in its `why`, listing the
+tests that hold the killed siblings. What makes that tolerable rather than an
+allowlist is a property of the gate that is worth knowing before you reason
+about this: `gradeReport` consults `excusing()` **only** for a mutant whose
+status is `Survived` or `NoCoverage`, and a record matching no survivor at all
+fails the run as stale. A record therefore cannot silence a mutant a test is
+currently killing — it can only start covering for one later, if the test that
+kills it is broken. That is a real hole and it is the argument for the fix this
+entry already asks for: match on the column, or refuse a record that matches
+more than one mutant.
 
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
@@ -800,6 +841,27 @@ Seen again in batch C's form suites: a fixture id like `'board_1'` passes the
 type cast, fails schema parsing at submit, and surfaces as "the form never
 submitted" rather than as a validation error. Build fixture ids with
 `generateId(prefix)`.
+
+## 1x — Replacing a whole `describe` block drops the tests inside it, and nothing counts
+
+Strengthening a suite by rewriting one `describe` in place — reading its
+boundaries, generating the replacement, writing it back — removed a test that
+had nothing to do with the change: an unnumbered `focus()` case that happened to
+live in the same block as the `clear()` cases being relabelled. The suite went
+from 14 tests to 13 and stayed green, because a test count is not asserted
+anywhere and a passing run reads the same at either number.
+
+Nothing catches this. `diff-coverage` grades the lines a change _adds_, so a
+deleted test is invisible to it; the mutation gate only notices if the deleted
+test was the only one killing some mutant, and here it was not. It surfaced by
+reading the diff, which is the one check that works and the one that gets
+skipped when the edit was supposed to be mechanical.
+
+Two cheap habits, in order of value. Diff the test _names_ across the edit —
+`grep -c "  it(" <file>` before and after, or the runner's own list — rather than
+trusting that a block boundary was read correctly. And prefer appending a new
+`describe` to rewriting an existing one: the merge is then additive and a
+deletion has to be deliberate.
 
 ## 1x — Calling an exported `createServerFn(...).validator(...).handler(...)` const directly resolves to `undefined`
 
@@ -1923,3 +1985,24 @@ fails during the dry run, and the gate reports that it graded nothing. The
 error names the test but not the cause; finding it meant running a probe inside
 the surviving sandbox and diffing the two strings. The gate now sets
 `disableTypeChecks: false` (no checker runs under it), pinned in the B10 tests.
+
+## Resolved
+
+Entries that were actually fixed, with what fixed them.
+
+### `packages/ids` was the one workspace nothing typechecked
+
+`packages/ids/package.json` has had a `typecheck` script since the package was
+created and no job ever ran it. The root `typecheck` covers `apps/web` and its
+workspace probe; CI's `check` job adds `packages/widget`, `packages/db`,
+`packages/email` and `scripts/`. `packages/ids` was in neither list, so the id
+helpers and their suite compiled nowhere — the root vitest run executes those
+tests, but vitest strips types rather than checking them.
+
+It was not theoretical: the first run of `bun run --cwd packages/ids typecheck`
+rejected a cast in a suite that had been green for a full session, because
+drizzle's `PgCustomColumnBuilder.config` is `protected` and a direct
+object-literal cast onto it needs to go through `unknown`.
+
+Fixed in the batch C pull request by adding `bun run --cwd packages/ids
+typecheck` to the `check` job, next to the other package typechecks.
