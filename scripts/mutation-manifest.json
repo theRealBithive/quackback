@@ -201,6 +201,68 @@
     {
       "file": "apps/web/src/routes/api/widget/install-context.ts",
       "suites": ["apps/web/src/routes/api/widget/__tests__/install-context.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
+      "suites": ["apps/web/src/lib/shared/__tests__/emoji-recommendations.test.ts"]
+    },
+    {
+      "file": "apps/web/src/components/ui/suggestion-list-keys.ts",
+      "suites": ["apps/web/src/components/ui/__tests__/suggestion-list-keys.test.ts"]
+    },
+    {
+      "file": "apps/web/src/components/ui/highlight-query.tsx",
+      "suites": ["apps/web/src/components/ui/__tests__/highlight-query.test.tsx"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/content-emoji.ts",
+      "suites": ["apps/web/src/lib/shared/__tests__/content-emoji.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/normalize-attribute-key.ts",
+      "suites": ["apps/web/src/lib/shared/__tests__/normalize-attribute-key.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/domains/attribute-definitions/attribute-definition.service.ts",
+      "suites": [
+        "apps/web/src/lib/server/domains/attribute-definitions/__tests__/attribute-definition-rulebook.test.ts",
+        "apps/web/src/lib/server/domains/attribute-definitions/__tests__/attribute-definition.service.test.ts"
+      ]
+    },
+    {
+      "file": "packages/db/src/permissions-mirror.ts",
+      "suites": [
+        "packages/db/src/__tests__/permissions-mirror.test.ts",
+        "apps/web/src/lib/shared/__tests__/permissions-catalogue-drift.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/src/lib/server/domains/tickets/unique-slug.ts",
+      "suites": ["apps/web/src/lib/server/domains/tickets/__tests__/unique-slug.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/events/safe-dispatch.ts",
+      "suites": ["apps/web/src/lib/server/events/__tests__/safe-dispatch.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/utils/taxonomy.ts",
+      "suites": ["apps/web/src/lib/server/utils/__tests__/taxonomy.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/schemas/taxonomy.ts",
+      "suites": ["apps/web/src/lib/shared/schemas/__tests__/taxonomy.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/record.ts",
+      "suites": ["apps/web/src/lib/shared/__tests__/record.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/utils/next-position.ts",
+      "suites": ["apps/web/src/lib/server/utils/__tests__/next-position.test.ts"]
+    },
+    {
+      "file": "packages/ids/src/drizzle.ts",
+      "suites": ["packages/ids/src/__tests__/drizzle.test.ts"]
     }
   ],
   "equivalents": [

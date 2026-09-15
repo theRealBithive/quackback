@@ -33,7 +33,13 @@ import {
 import { DEFAULT_BOARD_ACCESS, type BoardAccess } from '@/lib/shared/db-types'
 import { ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy'
 import { getPublicRoadmapPosts, getRoadmapPosts } from '../roadmap.query'
-import { listPublicRoadmaps } from '../roadmap.service'
+import { createRoadmap, listPublicRoadmaps } from '../roadmap.service'
+
+/**
+ * ## T — Taxonomy names, colours, slugs, positions
+ * - T6 A newly created ordered entity lands one position after the current
+ *   last one, and at position 0 in an empty (or filtered-empty) list.
+ */
 
 const fixture = await createDbTestFixture({
   probe: async (db) => {
@@ -302,6 +308,29 @@ describe.skipIf(!fixture.available)('roadmap derived membership (real DB)', () =
     expect(admin.items.some((post) => post.board.id === seeded.deletedBoard)).toBe(false)
     expect(admin.items.some((post) => post.id === canonical)).toBe(true)
     expect(admin.items.some((post) => post.id === merged)).toBe(false)
+  })
+
+  it('createRoadmap lands the first roadmap at position 0 and the next one after it (T6)', async () => {
+    const seeded = await seedBase()
+    const columns = [{ statusId: seeded.statusA, name: 'Now', color: '#123456', position: 0 }]
+
+    const hyphenSuffix = suffix().replace(/_/g, '-')
+
+    const first = await createRoadmap({
+      name: 'Now',
+      slug: `now-${hyphenSuffix}`,
+      type: 'column',
+      columns,
+    })
+    expect(first.position).toBe(0)
+
+    const second = await createRoadmap({
+      name: 'Next',
+      slug: `next-${hyphenSuffix}`,
+      type: 'column',
+      columns,
+    })
+    expect(second.position).toBe(1)
   })
 
   it('makes an internal tag inert in caller-supplied public roadmap filters, but not for team', async () => {

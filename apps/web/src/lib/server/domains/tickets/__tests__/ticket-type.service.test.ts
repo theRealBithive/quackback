@@ -6,6 +6,16 @@
  * (resolveIntakeCreate), and the listTickets registry-type filter. Runs
  * inside the db-test-fixture rollback transaction (see
  * server/__tests__/README.md).
+ *
+ * ## T — Taxonomy names, colours, slugs, positions
+ * - T3 Post tags, conversation labels, changelog categories, post statuses,
+ *   ticket types and ticket statuses keep their pre-consolidation rejection
+ *   messages word for word, and a create payload without a colour gets the
+ *   shared default swatch `#6b7280`.
+ * - T8 Update paths validate like create paths: renaming or recolouring a
+ *   post tag, conversation label, changelog category, post status, ticket
+ *   status or ticket type applies the same name and colour rules and
+ *   messages as creating one.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
 import { createId, type PrincipalId, type TicketTypeId } from '@quackback/ids'
@@ -171,6 +181,36 @@ describe.skipIf(!fixture.available)('ticket-type.service (real DB, rolled back)'
     const aAfter = await getTicketType(a.id)
     expect(aAfter.isDefault).toBe(false)
     expect(aAfter.deletedAt).toBeNull()
+  })
+
+  it('create without a colour gets the shared default swatch #6b7280 (T3)', async () => {
+    await cleanSlate()
+    const created = await createTicketType({ name: 'Bug report', category: 'customer' })
+    expect(created.color).toBe('#6b7280')
+  })
+
+  it('create rejects an invalid explicit colour with "Color must be in hex format (e.g., #3b82f6)" (T3)', async () => {
+    await cleanSlate()
+    await expect(
+      createTicketType({ name: 'Bug report', category: 'customer', color: 'blue' })
+    ).rejects.toThrow(
+      new ValidationError('VALIDATION_ERROR', 'Color must be in hex format (e.g., #3b82f6)')
+    )
+  })
+
+  it('update rejects an invalid colour with the same message as create (T3, T8)', async () => {
+    await cleanSlate()
+    const type = await createTicketType({ name: 'Bug report', category: 'customer' })
+    await expect(updateTicketType(type.id, { color: 'not-a-color' })).rejects.toThrow(
+      new ValidationError('VALIDATION_ERROR', 'Color must be in hex format (e.g., #3b82f6)')
+    )
+  })
+
+  it('update applies a valid colour (T3, T8)', async () => {
+    await cleanSlate()
+    const type = await createTicketType({ name: 'Bug report', category: 'customer' })
+    const updated = await updateTicketType(type.id, { color: '#654321' })
+    expect(updated.color).toBe('#654321')
   })
 
   it('rejects a duplicate slug with ConflictError', async () => {

@@ -22,12 +22,60 @@
  *    max-width and keeps its ratio; without one only keep-ratio is set.
  */
 
-import { describe, it, expect, vi } from 'vitest'
+/**
+ * Batch C — group G: editor suggestion lists and emoji.
+ *
+ * The contract, copied verbatim. (Lettered G rather than E because `(E2)` in this file belongs to an earlier batch's group E; the user confirmed the list under the letter E on 2026-09-15, the letter alone was changed.)
+ *
+ * G1 A key pressed in an open suggestion list either moves the highlight, confirms
+ *    the highlighted entry, or is left to the editor. Arrow keys wrap at both ends,
+ *    Home and End jump to the first and last entry, Enter and Tab confirm (Shift+Tab
+ *    counts as Tab), and every other key is left to the editor.
+ * G2 With an empty list no key does anything, and a confirm never fires without an
+ *    entry under the highlight.
+ * G3 Recently used emoji are remembered most-recent-first, without duplicates, at
+ *    most eight. A blank glyph is not remembered, and unreadable, blocked or corrupt
+ *    storage reads as "nothing remembered", never as an error.
+ * G4 With nothing typed after the colon, the suggestions are the remembered emoji
+ *    first, then the popular set, each glyph at most once, capped at the list size.
+ * G5 With a query, only emoji whose name, shortcode or tag contains the query are
+ *    suggested: an exact name or shortcode match first, then remembered emoji in
+ *    recency order, then prefix matches, then the rest; capped, and only emoji that
+ *    have a glyph.
+ * G6 The letter case and surrounding whitespace of a query never change the
+ *    suggestions.
+ * G7 Highlighting a query inside a label splits the label into pieces that
+ *    concatenate back to the label exactly; every highlighted piece equals the query
+ *    ignoring case, no unhighlighted piece contains the query, and an empty or
+ *    whitespace query highlights nothing.
+ * G8 The label shown for an emoji suggestion is the emoji's name when the name
+ *    contains the query, otherwise the first shortcode that contains it, otherwise
+ *    its primary shortcode.
+ * G9 Looking an emoji up by its canonical name resolves the same glyph as looking it
+ *    up by any of its shortcodes; an unknown name resolves to nothing. (Also feeds
+ *    the server-side markdown serializer.)
+ * G10 Typing `:shortcode:` in the editor inserts that emoji, remembers it as recently
+ *    used and keeps the surrounding text marks; an unknown shortcode inserts nothing
+ *    and leaves the text as typed.
+ * G11 Choosing an entry from the emoji or slash list, by mouse or by keyboard, runs
+ *    that entry's command exactly once; a chosen emoji is remembered as recently used
+ *    before it is inserted.
+ * G12 The emoji list labels its leading remembered entries as recent only on a bare
+ *    colon; with a query nothing is labelled recent.
+ * G13 A suggestion popup sits above the caret it annotates and flips below when there
+ *    is no room; it never grows down over the composer (its height is capped, at
+ *    least 96px, and it scrolls inside); it follows the caret while open and stops
+ *    following when closed or re-attached elsewhere.
+ */
+
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { createIntl } from 'react-intl'
 import { Editor } from '@tiptap/core'
 import type { EditorFeatures } from '../rich-text-editor'
+import { autoUpdate } from '@floating-ui/dom'
 import {
   buildExtensions,
+  createEmojiExtension,
   generateContentHTML,
   getSlashMenuItems,
   handleImageDrop,
@@ -35,6 +83,32 @@ import {
   stopEnterFromReachingParentForm,
 } from '../rich-text-editor'
 import { COMMENT_EDITOR_FEATURES } from '@/components/public/comment-editor-features'
+import { installInMemoryLocalStorage } from '@/test/local-storage'
+import { readRecentEmojis, recordRecentEmoji } from '@/lib/shared/emoji-recommendations'
+import { SUGGESTION_POPUP_ATTR } from '../suggestion-popup'
+
+/**
+ * Only the two calls the popup positioner makes are replaced; the middleware
+ * factories stay real, because `@tiptap/extension-bubble-menu` imports four
+ * more names from this module (`arrow`, `autoPlacement`, `hide`, `inline`) and
+ * a hand-written module object would leave those undefined for every editor
+ * this file builds.
+ */
+vi.mock('@floating-ui/dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@floating-ui/dom')>()
+  return {
+    ...actual,
+    computePosition: vi.fn(async () => ({
+      x: 120,
+      y: 48,
+      placement: 'top-start',
+      strategy: 'fixed',
+    })),
+    autoUpdate: vi.fn(() => vi.fn()),
+  }
+})
+
+installInMemoryLocalStorage()
 
 /**
  * `buildExtensions` with the language argument filled in.
@@ -833,5 +907,568 @@ describe('the slash menu’s image row', () => {
       width: 500,
       height: 281,
     })
+  })
+})
+
+// ============================================================================
+// Batch C, group E — the emoji input rule and the suggestion popups
+// ============================================================================
+
+/**
+ * Types `text` the way a person does, one character at a time through
+ * ProseMirror's `handleTextInput`, which is what input rules listen on.
+ * `insertContent` bypasses them entirely, so `:tada:` would arrive as five
+ * characters of literal text and the rule under test would never run.
+ */
+function typeText(editor: Editor, text: string): void {
+  for (const char of text) {
+    const { from, to } = editor.state.selection
+    const plainInsert = () => editor.state.tr.insertText(char, from, to)
+    const handled = editor.view.someProp('handleTextInput', (handler) =>
+      handler(editor.view, from, to, char, plainInsert)
+    )
+    if (!handled) editor.view.dispatch(plainInsert())
+  }
+}
+
+/**
+ * The suggestion plugin resolves its item list through a promise, so the popup
+ * appears a tick after the keystroke rather than inside it. Reading the DOM on
+ * the same tick reports "nothing opened" for a popup that is about to.
+ */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 5))
+
+const openPopups = () => document.querySelectorAll(`[${SUGGESTION_POPUP_ATTR}]`)
+const livePopup = () => document.querySelector(`[${SUGGESTION_POPUP_ATTR}]`)
+
+/** The element the newest caret-follower was anchored to. */
+const newestAnchor = () => vi.mocked(autoUpdate).mock.calls.at(-1)?.[1]
+
+const followers = () =>
+  vi.mocked(autoUpdate).mock.results.map((result) => result.value as ReturnType<typeof vi.fn>)
+
+/**
+ * "one live follower" — every caret-follower the run started has been stopped
+ * except the newest one, which is still running.
+ *
+ * Asserted rather than counting attachments, because the emoji popup is torn
+ * down and rebuilt on each keystroke (the suggestion plugin resolves its items
+ * asynchronously and reports an empty list first), so the popup element is a
+ * different node after every character. What must hold across that is that no
+ * abandoned follower is left tracking a node nobody can see.
+ */
+function expectExactlyOneLiveFollower(): void {
+  const all = followers()
+  expect(all.length).toBeGreaterThan(0)
+  for (const stop of all.slice(0, -1)) expect(stop).toHaveBeenCalled()
+  expect(all[all.length - 1]).not.toHaveBeenCalled()
+}
+
+function expectNoLiveFollower(): void {
+  for (const stop of followers()) expect(stop).toHaveBeenCalled()
+}
+
+describe('the `:shortcode:` input rule', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    vi.mocked(autoUpdate).mockClear()
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  function mountEditor(content = '<p></p>') {
+    const editor = new Editor({
+      extensions: build({ slashMenu: false, mentions: false }, { placeholder: '' }),
+      content,
+    })
+    editor.commands.focus()
+    return editor
+  }
+
+  function emojiNodesIn(editor: Editor) {
+    const nodes: Array<{ name?: string; emoji?: string }> = []
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === 'emoji') nodes.push(node.attrs as { name?: string; emoji?: string })
+    })
+    return nodes
+  }
+
+  it('inserts the emoji and remembers it as recently used (G10)', async () => {
+    const editor = mountEditor()
+    try {
+      typeText(editor, ':tada:')
+      await settle()
+
+      expect(emojiNodesIn(editor)).toEqual([{ name: 'tada', emoji: '🎉' }])
+      expect(editor.getText()).not.toContain(':tada:')
+      expect(readRecentEmojis()).toEqual(['🎉'])
+    } finally {
+      editor.destroy()
+    }
+  })
+
+  it('resolves a canonical name that is not itself a shortcode (G10)', async () => {
+    const editor = mountEditor()
+    try {
+      typeText(editor, ':crossed_fingers:')
+      await settle()
+
+      expect(emojiNodesIn(editor)).toEqual([{ name: 'crossed_fingers', emoji: '🤞' }])
+      expect(readRecentEmojis()).toEqual(['🤞'])
+    } finally {
+      editor.destroy()
+    }
+  })
+
+  it('keeps the marks the surrounding text was carrying (G10)', async () => {
+    const editor = mountEditor('<p><strong>shipped </strong></p>')
+    try {
+      editor.commands.focus('end')
+      typeText(editor, ':tada:')
+      await settle()
+
+      // The rule restores the marks of the position in front of the emoji, so
+      // whatever the writer types next stays bold instead of dropping out of it.
+      const storedMarks = editor.state.storedMarks ?? []
+      expect(storedMarks.map((mark) => mark.type.name)).toContain('bold')
+    } finally {
+      editor.destroy()
+    }
+  })
+
+  it('leaves an unknown shortcode exactly as it was typed (G10)', async () => {
+    const editor = mountEditor()
+    try {
+      typeText(editor, ':nope:')
+      await settle()
+
+      expect(emojiNodesIn(editor)).toEqual([])
+      expect(editor.getText()).toBe(':nope:')
+      expect(readRecentEmojis()).toEqual([])
+    } finally {
+      editor.destroy()
+    }
+  })
+
+  it('remembers each inserted emoji, most recent first (G10)', async () => {
+    const editor = mountEditor()
+    try {
+      typeText(editor, ':tada: :fire: :tada:')
+      await settle()
+
+      expect(emojiNodesIn(editor).map((node) => node.emoji)).toEqual(['🎉', '🔥', '🎉'])
+      expect(readRecentEmojis()).toEqual(['🎉', '🔥'])
+    } finally {
+      editor.destroy()
+    }
+  })
+})
+
+describe('the slash popup lifecycle', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    vi.mocked(autoUpdate).mockClear()
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('opens above the caret, follows it, and is gone when the menu closes (G13)', async () => {
+    const editor = new Editor({
+      extensions: build(
+        { slashMenu: true, mentions: false, emojiPicker: false },
+        { placeholder: '' }
+      ),
+      content: '<p></p>',
+    })
+    try {
+      editor.commands.focus()
+      typeText(editor, '/')
+      await settle()
+
+      expect(openPopups(), 'the slash popup did not open').toHaveLength(1)
+      expect(newestAnchor()).toBe(livePopup())
+      expectExactlyOneLiveFollower()
+
+      typeText(editor, 'bul')
+      await settle()
+      // Still one popup, still anchored on the caret it annotates, and no
+      // abandoned follower left behind by the re-anchoring.
+      expect(openPopups()).toHaveLength(1)
+      expect(newestAnchor()).toBe(livePopup())
+      expectExactlyOneLiveFollower()
+
+      editor.commands.selectAll()
+      editor.commands.deleteSelection()
+      await settle()
+
+      expect(openPopups()).toHaveLength(0)
+      expectNoLiveFollower()
+    } finally {
+      editor.destroy()
+    }
+  })
+
+  it('keeps the menu open on a search that matches nothing (G13)', async () => {
+    const editor = new Editor({
+      extensions: build(
+        { slashMenu: true, mentions: false, emojiPicker: false },
+        { placeholder: '' }
+      ),
+      content: '<p></p>',
+    })
+    try {
+      editor.commands.focus()
+      typeText(editor, '/zzzz')
+      await settle()
+
+      // The slash list renders its own "nothing matched" copy, so the popup
+      // stays; only the emoji list tears itself down on an empty result.
+      expect(openPopups()).toHaveLength(1)
+    } finally {
+      editor.destroy()
+    }
+  })
+})
+
+describe('the emoji popup lifecycle', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    vi.mocked(autoUpdate).mockClear()
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  function mountEditor() {
+    return new Editor({
+      extensions: build({ slashMenu: false, mentions: false }, { placeholder: '' }),
+      content: '<p></p>',
+    })
+  }
+
+  it('opens on a bare colon and follows the caret while it is open (G13)', async () => {
+    const editor = mountEditor()
+    try {
+      editor.commands.focus()
+      typeText(editor, ':')
+      await settle()
+
+      expect(openPopups(), 'the emoji popup did not open').toHaveLength(1)
+      expect(newestAnchor()).toBe(livePopup())
+      expectExactlyOneLiveFollower()
+
+      typeText(editor, 'ta')
+      await settle()
+      expect(openPopups()).toHaveLength(1)
+      expect(newestAnchor()).toBe(livePopup())
+      expectExactlyOneLiveFollower()
+    } finally {
+      editor.destroy()
+    }
+  })
+
+  it('tears itself down as soon as nothing matches any more (G13)', async () => {
+    const editor = mountEditor()
+    try {
+      editor.commands.focus()
+      typeText(editor, ':ta')
+      await settle()
+      expect(openPopups()).toHaveLength(1)
+
+      typeText(editor, 'zzzz')
+      await settle()
+
+      // A bare `:` in ordinary prose must not leave a dropdown floating.
+      expect(openPopups()).toHaveLength(0)
+      expectNoLiveFollower()
+    } finally {
+      editor.destroy()
+    }
+  })
+
+  it('stops following the caret when the popup closes (G13)', async () => {
+    const editor = mountEditor()
+    try {
+      editor.commands.focus()
+      typeText(editor, ':ta')
+      await settle()
+      expect(openPopups()).toHaveLength(1)
+
+      editor.commands.selectAll()
+      editor.commands.deleteSelection()
+      await settle()
+
+      expect(openPopups()).toHaveLength(0)
+      expectNoLiveFollower()
+    } finally {
+      editor.destroy()
+    }
+  })
+})
+
+/**
+ * The emoji popup's renderer, driven directly.
+ *
+ * `createEmojiExtension()` exports the whole suggestion configuration, so the
+ * renderer can be started, updated and exited without a ProseMirror view. That
+ * is what makes the props the list is handed readable: TipTap's `ReactRenderer`
+ * only mounts React through `editor.contentComponent`, so a stub in that slot
+ * captures the renderer object (and keeps React out of it, which is why no
+ * `IntlProvider` is needed here).
+ */
+describe('the emoji suggestion renderer', () => {
+  interface CapturedRenderer {
+    props: {
+      items: Array<{ name: string; emoji?: string }>
+      command: (item: { name: string; emoji?: string }) => void
+      recentCount: number
+      query: string
+    }
+  }
+
+  type SuggestionConfig = {
+    items: (args: { query: string }) => Array<{ name: string; emoji?: string }>
+    allow: (args: { editor: unknown }) => boolean
+    render: () => {
+      onStart: (props: unknown) => void
+      onUpdate: (props: unknown) => void
+      onKeyDown: (props: { event: KeyboardEvent }) => boolean
+      onExit: () => void
+    }
+  }
+
+  function suggestionConfig(): SuggestionConfig {
+    return createEmojiExtension().options.suggestion as unknown as SuggestionConfig
+  }
+
+  /** An editor stand-in that records the renderers ReactRenderer builds. */
+  function fakeEditorCapturing(captured: CapturedRenderer[]) {
+    return {
+      isEditorContentInitialized: true,
+      contentComponent: {
+        setRenderer: (_id: string, renderer: CapturedRenderer) => {
+          captured.push(renderer)
+        },
+        removeRenderer: () => {},
+      },
+    }
+  }
+
+  function suggestionPropsFor(
+    editor: unknown,
+    query: string,
+    items: Array<{ name: string; emoji?: string }>,
+    command: (item: { name: string; emoji?: string }) => void = () => {}
+  ) {
+    return {
+      editor,
+      query,
+      items,
+      command,
+      clientRect: () => new DOMRect(200, 400, 1, 18),
+    }
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear()
+    vi.mocked(autoUpdate).mockClear()
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('offers the remembered emoji before the popular ones on a bare colon (G4)', () => {
+    recordRecentEmoji('🤞')
+    recordRecentEmoji('🔥')
+
+    const offered = suggestionConfig().items({ query: '' })
+
+    expect(offered.slice(0, 2).map((item) => item.emoji)).toEqual(['🔥', '🤞'])
+    expect(offered.length).toBeGreaterThan(2)
+    for (const item of offered) expect(item.emoji).toBeTruthy()
+  })
+
+  it('offers only emoji that answer the typed query (G5)', () => {
+    const offered = suggestionConfig().items({ query: 'tada' })
+
+    expect(offered[0]?.name).toBe('tada')
+    for (const item of offered) expect(item.emoji).toBeTruthy()
+  })
+
+  it('does not offer anything inside a code block (G5)', () => {
+    const allow = suggestionConfig().allow
+    expect(allow({ editor: { isActive: (name: string) => name === 'codeBlock' } })).toBe(false)
+    expect(allow({ editor: { isActive: () => false } })).toBe(true)
+  })
+
+  it('labels the leading remembered rows as recent on a bare colon (G12)', () => {
+    recordRecentEmoji('🎉')
+    recordRecentEmoji('🤞')
+    const captured: CapturedRenderer[] = []
+    const editor = fakeEditorCapturing(captured)
+    const items = suggestionConfig().items({ query: '' })
+    const renderer = suggestionConfig().render()
+
+    renderer.onStart(suggestionPropsFor(editor, '', items))
+
+    expect(captured).toHaveLength(1)
+    expect(captured[0]!.props.recentCount).toBe(2)
+    expect(captured[0]!.props.items.slice(0, 2).map((item) => item.emoji)).toEqual(['🤞', '🎉'])
+    renderer.onExit()
+  })
+
+  it('counts only the unbroken run of remembered rows (G12)', () => {
+    recordRecentEmoji('🎉')
+    const captured: CapturedRenderer[] = []
+    const editor = fakeEditorCapturing(captured)
+    const items = [
+      { name: 'tada', emoji: '🎉' },
+      { name: 'fire', emoji: '🔥' },
+      { name: 'smile', emoji: '😄' },
+    ]
+    const renderer = suggestionConfig().render()
+
+    renderer.onStart(suggestionPropsFor(editor, '', items))
+
+    expect(captured[0]!.props.recentCount).toBe(1)
+    renderer.onExit()
+  })
+
+  it('labels nothing recent once something has been typed (G12)', () => {
+    recordRecentEmoji('🎉')
+    const captured: CapturedRenderer[] = []
+    const editor = fakeEditorCapturing(captured)
+    const renderer = suggestionConfig().render()
+
+    renderer.onStart(
+      suggestionPropsFor(editor, 'tada', [
+        { name: 'tada', emoji: '🎉' },
+        { name: 'tada_2', emoji: '🎊' },
+      ])
+    )
+
+    expect(captured[0]!.props.recentCount).toBe(0)
+    expect(captured[0]!.props.query).toBe('tada')
+    renderer.onExit()
+  })
+
+  it('remembers a chosen emoji before it inserts it (G11)', () => {
+    const captured: CapturedRenderer[] = []
+    const editor = fakeEditorCapturing(captured)
+    const rememberedWhenInserted: string[][] = []
+    const insert = vi.fn(() => {
+      rememberedWhenInserted.push(readRecentEmojis())
+    })
+    const renderer = suggestionConfig().render()
+    renderer.onStart(suggestionPropsFor(editor, '', [{ name: 'tada', emoji: '🎉' }], insert))
+
+    captured[0]!.props.command({ name: 'tada', emoji: '🎉' })
+
+    expect(insert).toHaveBeenCalledOnce()
+    expect(insert).toHaveBeenCalledWith({ name: 'tada', emoji: '🎉' })
+    // Read inside the insert, so this is the order rather than the end state.
+    expect(rememberedWhenInserted).toEqual([['🎉']])
+    renderer.onExit()
+  })
+
+  it('inserts an emoji that has no glyph without remembering anything (G11)', () => {
+    const captured: CapturedRenderer[] = []
+    const editor = fakeEditorCapturing(captured)
+    const insert = vi.fn()
+    const renderer = suggestionConfig().render()
+    renderer.onStart(suggestionPropsFor(editor, '', [{ name: 'placeholder' }], insert))
+
+    captured[0]!.props.command({ name: 'placeholder' })
+
+    expect(insert).toHaveBeenCalledOnce()
+    expect(readRecentEmojis()).toEqual([])
+    renderer.onExit()
+  })
+
+  it('opens nothing at all when the first query already matches nothing (G13)', () => {
+    const captured: CapturedRenderer[] = []
+    const renderer = suggestionConfig().render()
+
+    renderer.onStart(suggestionPropsFor(fakeEditorCapturing(captured), 'zzzz', []))
+
+    expect(captured).toHaveLength(0)
+    expect(openPopups()).toHaveLength(0)
+    expect(autoUpdate).not.toHaveBeenCalled()
+    renderer.onExit()
+  })
+
+  it('anchors the popup on the caret rect it is handed, and lets it go on exit (G13)', () => {
+    const captured: CapturedRenderer[] = []
+    const editor = fakeEditorCapturing(captured)
+    const renderer = suggestionConfig().render()
+
+    renderer.onStart(suggestionPropsFor(editor, '', [{ name: 'tada', emoji: '🎉' }]))
+
+    expect(openPopups()).toHaveLength(1)
+    expect(newestAnchor()).toBe(livePopup())
+    expectExactlyOneLiveFollower()
+
+    renderer.onExit()
+
+    expect(openPopups()).toHaveLength(0)
+    expectNoLiveFollower()
+  })
+
+  it('re-anchors on an update and never leaves the old follower running (G13)', () => {
+    const captured: CapturedRenderer[] = []
+    const editor = fakeEditorCapturing(captured)
+    const renderer = suggestionConfig().render()
+    renderer.onStart(suggestionPropsFor(editor, '', [{ name: 'tada', emoji: '🎉' }]))
+
+    renderer.onUpdate(suggestionPropsFor(editor, 'fi', [{ name: 'fire', emoji: '🔥' }]))
+
+    expect(captured[captured.length - 1]!.props.query).toBe('fi')
+    expect(captured[captured.length - 1]!.props.items.map((item) => item.name)).toEqual(['fire'])
+    expect(openPopups()).toHaveLength(1)
+    expect(newestAnchor()).toBe(livePopup())
+    expectExactlyOneLiveFollower()
+    renderer.onExit()
+  })
+
+  it('tears the popup down when an update finds nothing, and rebuilds it after (G13)', () => {
+    const captured: CapturedRenderer[] = []
+    const editor = fakeEditorCapturing(captured)
+    const renderer = suggestionConfig().render()
+    renderer.onStart(suggestionPropsFor(editor, '', [{ name: 'tada', emoji: '🎉' }]))
+
+    renderer.onUpdate(suggestionPropsFor(editor, 'zzzz', []))
+    expect(openPopups()).toHaveLength(0)
+    expectNoLiveFollower()
+
+    renderer.onUpdate(suggestionPropsFor(editor, 'fi', [{ name: 'fire', emoji: '🔥' }]))
+    expect(openPopups()).toHaveLength(1)
+    expect(newestAnchor()).toBe(livePopup())
+    expectExactlyOneLiveFollower()
+
+    renderer.onExit()
+    expect(openPopups()).toHaveLength(0)
+  })
+
+  it('keeps Escape for itself and leaves every other key to the list (G1)', () => {
+    const captured: CapturedRenderer[] = []
+    const renderer = suggestionConfig().render()
+    renderer.onStart(
+      suggestionPropsFor(fakeEditorCapturing(captured), '', [{ name: 'tada', emoji: '🎉' }])
+    )
+
+    expect(renderer.onKeyDown({ event: new KeyboardEvent('keydown', { key: 'Escape' }) })).toBe(
+      true
+    )
+    // No list is mounted here, so nothing claims the key and the editor keeps it.
+    expect(renderer.onKeyDown({ event: new KeyboardEvent('keydown', { key: 'Enter' }) })).toBe(
+      false
+    )
+    renderer.onExit()
   })
 })

@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
-import { describe, expect, it, vi, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+/**
+ * ## M — Admin menus moved to dropdown items
+ * - M1 Every entry of the migrated admin menus does what its label says: workflow Edit navigates and View runs opens the runs; a saved view applies its filters and Save is offered only with active filters; Link existing issue opens the picker and Create new issue creates one; Merge opens the merge dialog; Block, Unblock and Remove act or open their confirmation; a connector policy entry changes the policy.
+ * - M2 A menu entry that opens a confirmation (workflow Delete) does so after the menu has closed, so the dialog, not the menu, receives focus.
+ */
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
+import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { TicketId } from '@quackback/ids'
 import type { TicketDTO } from '@/lib/server/domains/tickets'
@@ -19,6 +25,7 @@ vi.mock('@/lib/server/functions/tickets', () => ({
 
 import { TicketLinks } from '../ticket-links'
 import { ticketKeys } from '@/lib/client/queries/inbox'
+import { listTicketsFn, linkTicketToTrackerFn } from '@/lib/server/functions/tickets'
 
 function ticket(overrides: Partial<TicketDTO> = {}): TicketDTO {
   return {
@@ -54,6 +61,10 @@ function renderLinks(t: TicketDTO, links: { tracker: TicketDTO | null; linked: T
 }
 
 describe('TicketLinks', () => {
+  beforeEach(() => {
+    vi.mocked(listTicketsFn).mockResolvedValue([])
+    vi.mocked(linkTicketToTrackerFn).mockClear()
+  })
   afterEach(cleanup)
 
   it('a tracker lists the customer tickets it tracks', () => {
@@ -91,5 +102,55 @@ describe('TicketLinks', () => {
     renderLinks(bo, { tracker: null, linked: [] })
     expect(screen.getByText('None')).toBeTruthy()
     expect(screen.queryByText('Link to tracker')).toBeNull()
+  })
+})
+
+describe('TicketLinks picker menu', () => {
+  beforeEach(() => {
+    vi.mocked(listTicketsFn).mockResolvedValue([])
+    vi.mocked(linkTicketToTrackerFn).mockReset()
+    vi.mocked(linkTicketToTrackerFn).mockResolvedValue({ success: true })
+  })
+  afterEach(cleanup)
+
+  it('links the ticket to the tracker the menu entry names (M1)', async () => {
+    const customer = ticket({ id: 'ticket_c' as TicketId, type: 'customer' })
+    const candidate = ticket({
+      id: 'ticket_tr' as TicketId,
+      type: 'tracker',
+      reference: '#9',
+      title: 'Login outage',
+    })
+    vi.mocked(listTicketsFn).mockResolvedValue([candidate])
+
+    renderLinks(customer, { tracker: null, linked: [] })
+
+    await userEvent.click(await screen.findByRole('button', { name: /Link to tracker/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Login outage/ }))
+
+    await waitFor(() => expect(linkTicketToTrackerFn).toHaveBeenCalledTimes(1))
+    expect(linkTicketToTrackerFn).toHaveBeenCalledWith({
+      data: { trackerTicketId: 'ticket_tr', ticketId: 'ticket_c' },
+    })
+  })
+
+  it('never offers the ticket itself as its own tracker (M1)', async () => {
+    const customer = ticket({ id: 'ticket_c' as TicketId, type: 'customer' })
+    vi.mocked(listTicketsFn).mockResolvedValue([
+      customer,
+      ticket({
+        id: 'ticket_tr' as TicketId,
+        type: 'tracker',
+        reference: '#9',
+        title: 'Login outage',
+      }),
+    ])
+
+    renderLinks(customer, { tracker: null, linked: [] })
+
+    await userEvent.click(await screen.findByRole('button', { name: /Link to tracker/ }))
+
+    expect(await screen.findByRole('menuitem', { name: /Login outage/ })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /Cannot log in/ })).toBeNull()
   })
 })

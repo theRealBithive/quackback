@@ -761,6 +761,69 @@ production bug and then could not measure the rest of its suite:
 for a probe, never for the gate — the gate reading a report over a red suite is
 exactly the quiet failure the entry above describes.
 
+## 2x — Parallel coverage runs share `coverage/.tmp` and delete each other's
+
+Four subagents measured their own suites with `--coverage` at the same time and
+two of them died with `Something removed the coverage directory .../coverage/.tmp`
+— v8's provider writes intermediate files under the report directory and cleans
+it up when it finishes, so the first run to finish takes the others' scratch with
+it. Every concurrent run needs its own `--coverage.reportsDirectory`, and the
+partial directories have to be removed before the gate runs, because the gate
+merges every `coverage-final.json` it finds under `coverage/`.
+
+Second hit, same shape: a batch of contract suites measured per-file coverage
+while several other agents did the same in the same checkout, and the first
+few runs used the default `--coverage.reportsDirectory` (or an unqualified
+`coverage/local`) and died the same way,
+`Error: Something removed the coverage directory "coverage/.tmp"` — a
+concurrent run elsewhere in the checkout finished first and took the shared
+scratch with it. Fixed the same way as the first hit: every measurement after
+that pointed at its own path under the scratchpad
+(`coverage/local-<name>` or a scratchpad `cov/<name>` directory), and no
+further collision happened once that was consistent.
+
+## 2x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
+
+`changeBoard('post_01jqzz000000000000000000', ...)` does not reach the not-found branch: the
+suffix is 24 characters, the TypeID parser wants 26, and it throws `Invalid length` long
+before the lookup. Two tests named `raises nothing when the post does not exist` and
+`raises nothing when the target board does not exist` were asserting a bare
+`.rejects.toThrow()`, so both passed on the parser's complaint and neither had ever
+executed the code they were named for.
+
+Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and absent,
+and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
+that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
+read as untested until proven otherwise.
+
+Seen again in batch C's form suites: a fixture id like `'board_1'` passes the
+type cast, fails schema parsing at submit, and surfaces as "the form never
+submitted" rather than as a validation error. Build fixture ids with
+`generateId(prefix)`.
+
+## 1x — Calling an exported `createServerFn(...).validator(...).handler(...)` const directly resolves to `undefined`
+
+Testing a TanStack Start server function by importing the exported const and
+calling it (`await someServerFn({ data: ... })`) — the pattern one existing
+suite in this repo happens to use — silently loses the success path in this
+vitest setup: `result` comes back `undefined` even when the handler resolves a
+real value, because there is no live Start request context to run the wrapper
+against. Confirmed with a throwaway probe: a bare `createServerFn(...)
+.validator(z.object({ name: z.string().optional().default('DEFAULTED') }))
+.handler(...)` called directly also returned `undefined`, and the handler's
+argument showed the validator never ran either (`color: undefined` reached the
+service instead of a defaulted value). The handler still executes for its side
+effects, and a thrown error still propagates through `.rejects.toThrow()` — so
+a suite that only checks a thrown error or a downstream mock's call args can
+pass while silently asserting nothing about the resolved value or defaulting.
+
+The reliable pattern, already in use in `admin-reset-two-factor.test.ts`: mock
+`@tanstack/react-start` so `createServerFn` returns a chain object whose
+`.validator()` is a no-op and whose `.handler(fn)` pushes `fn` into a
+module-level array, then `await import(...)` the module under test once and
+index into the array by the handlers' declaration order. That runs the actual
+handler body directly, with real arguments, and its real return value.
+
 ## 1x — A line that is only an arrow function passed as a JSX prop reads as uncovered until the handler actually fires
 
 Filling a diff-coverage hole for `onEdit={() => onEdit(row)}`-shaped lines
@@ -1207,20 +1270,6 @@ The order that works: merge without `--delete-branch`, retarget the PR above to
 `main` while its base still exists, then delete the branch. Or retarget every PR
 in the stack to `main` up front and accept that each diff temporarily contains
 the ones below it.
-
-## 1x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
-
-`changeBoard('post_01jqzz000000000000000000', ...)` does not reach the not-found branch: the
-suffix is 24 characters, the TypeID parser wants 26, and it throws `Invalid length` long
-before the lookup. Two tests named `raises nothing when the post does not exist` and
-`raises nothing when the target board does not exist` were asserting a bare
-`.rejects.toThrow()`, so both passed on the parser's complaint and neither had ever
-executed the code they were named for.
-
-Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and absent,
-and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
-that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
-read as untested until proven otherwise.
 
 ## 1x — postgres.js encodes a JSON _string_ parameter into jsonb a second time
 
@@ -1775,16 +1824,6 @@ The repair is always in the named suite, never in the suite list: widening the
 list to include the consumers would make the entry true by weakening it to "some
 combination of eight suites holds this", which is not a claim anyone can act on.
 
-## 1x — Parallel coverage runs share `coverage/.tmp` and delete each other's
-
-Four subagents measured their own suites with `--coverage` at the same time and
-two of them died with `Something removed the coverage directory .../coverage/.tmp`
-— v8's provider writes intermediate files under the report directory and cleans
-it up when it finishes, so the first run to finish takes the others' scratch with
-it. Every concurrent run needs its own `--coverage.reportsDirectory`, and the
-partial directories have to be removed before the gate runs, because the gate
-merges every `coverage-final.json` it finds under `coverage/`.
-
 ## 1x — `Image` never loads under the test DOM, so a natural-size read hangs
 
 `resizableImageInsertAttrs` awaits `new Image()` firing `onload` or `onerror` on
@@ -1806,3 +1845,70 @@ attachment-tray tests therefore live in a sibling file where the hooks run for
 real and `fetch` is the seam. The general shape: a hoisted `vi.mock` is a
 property of the whole file, and "extend the existing suite" stops being the
 right move as soon as the behaviour under test is the thing the suite mocked.
+
+## 1x — A Base UI Switch inside a `<label>` toggles at random under happy-dom
+
+Base UI's Switch and Checkbox toggle by dispatching a click on a hidden
+`<input>` beside the button. happy-dom's `<label>` forwards _every_ click to
+its control, including one whose target is already an interactive descendant,
+which browsers never do — so inside a `<label>` the input's click came back to
+the button, the button dispatched on the input again, and the pair looped
+until the call stack overflowed (200–270 rounds measured). Whether the toggle
+landed depended on where the stack gave out: 12 of 25 fresh renders lost it,
+and a suite clicking such a switch failed about half its runs, with a
+`RangeError` reported by React that vitest does not turn into a failure. It
+does not matter whether the click is `fireEvent` or `userEvent`, and the
+wrapper's React-level `stopPropagation` cannot reach it, because the loop is
+native. `vitest.setup.ts` now gives the label the browser's behaviour (skip the
+forward when the target is interactive content); `switch-in-label.test.tsx`
+pins it. Two smaller Base UI facts from the same run: a Select option is chosen
+by `userEvent.click` on trigger and option — `fireEvent.click` and
+`fireEvent.change` both leave the value untouched; and a Dialog unmounts its
+content after the close transition, so "closed" is a `waitFor`, not a same-tick
+`queryBy…toBeNull()`.
+
+## 1x — A suite whose query mock invents its own query key never shows the message it sent
+
+`agent-conversation-thread.test.tsx` seeds react-query under a key it made up
+(`['conv-thread', id]`) while the component writes sent messages through
+`conversationKeys.agentThread(id)`. `appendToThread` therefore updates a cache
+entry nobody renders, and "wait for the sent bubble to appear" is a signal that
+never arrives — a run was lost waiting for it. When a suite mocks the query
+layer, take the keys from the production key factory, or pick a seam the
+component actually crosses (here `clearAttachments`, the first call in both
+`onSuccess` handlers).
+
+## 1x — vitest's v8 `text` reporter prints nothing for a file that is fully covered
+
+Narrow a coverage run to one production file with `--coverage.include` and,
+once every metric on it reads 100%, the `text` reporter drops the row _and_ the
+"All files" line: the table is empty, which reads as "nothing was measured".
+It was measured. Cross-check with `--coverage.reporter=json` (or lower a test
+to see the row reappear) before concluding the include pattern missed.
+
+## 1x — TipTap's suggestion popup is rebuilt on every keystroke, and a same-tick read sees nothing
+
+The suggestion plugin resolves its items asynchronously and reports an empty
+list first, so each keystroke runs `onUpdate`'s teardown branch and then
+rebuilds the popup element when the real list arrives. Two consequences that
+cost a run each: an assertion keyed on element identity across keystrokes is
+wrong by construction (assert an invariant instead — every positioner stop
+except the last has been called), and a DOM read in the same tick as the
+keystroke reports no popup at all; a `setTimeout(…, 5)` flush is needed
+between typing and reading. Two smaller ones from the same suite:
+prosemirror-view 1.42 `someProp('handleTextInput', …)` takes a fifth
+`deflt: () => Transaction` argument (a 4-arg call is a TS2554, not a runtime
+failure), and `className.includes('bg-accent')` is always true on rows that
+carry `hover:bg-accent` — use `classList.contains` for a highlight check.
+
+## 1x — Base UI's `render` prop takes the trigger's children, not the render element's
+
+`<DialogTrigger render={<Button>Open</Button>} />` renders a button with no
+text: the element handed to `render` is a host, its children are dropped, and
+the label comes from the trigger's own children — `<DialogTrigger
+render={<Button />}>Open</DialogTrigger>` is the working idiom. The same holds
+for Popover, AlertDialog and Menu triggers. A dialog opened from a
+`DropdownMenuItem` must additionally live _outside_ `DropdownMenuContent`: the
+menu unmounts its content on selection and takes a nested dialog with it, which
+is why `merge-lead-control` and `block-person-control` lift the open state
+above the menu and why their suites need that harness too.
