@@ -1912,3 +1912,14 @@ for Popover, AlertDialog and Menu triggers. A dialog opened from a
 menu unmounts its content on selection and takes a nested dialog with it, which
 is why `merge-lead-control` and `block-person-control` lift the open state
 above the menu and why their suites need that harness too.
+
+## 1x — Stryker writes `// @ts-nocheck` into its sandbox copies, and a byte-comparing test fails the dry run
+
+Stryker's default `disableTypeChecks` pattern inserts `// @ts-nocheck` into
+every sandbox copy under `src/`, `lib/` or `test/`. A suite that reads a source
+file as _data_ — the permissions drift test compares the committed
+`permissions.ts` with the generator's output — then sees one extra line and
+fails during the dry run, and the gate reports that it graded nothing. The
+error names the test but not the cause; finding it meant running a probe inside
+the surviving sandbox and diffing the two strings. The gate now sets
+`disableTypeChecks: false` (no checker runs under it), pinned in the B10 tests.

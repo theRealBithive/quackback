@@ -783,7 +783,18 @@ describe('the Stryker run the gate asks for (B10)', () => {
       tempDirName: '.mutation-tmp/stryker',
       tsconfigFile: '.mutation-tmp/no-tsconfig-to-rewrite.json',
       inPlace: false,
+      disableTypeChecks: false,
     })
+  })
+
+  it('leaves every sandboxed file byte-identical to the checkout (B10)', () => {
+    // Stryker's default writes `// @ts-nocheck` into each sandbox copy under
+    // a src/, lib/ or test/ directory. No checker runs in this gate, and a
+    // suite that reads a file as data — the permissions drift test compares
+    // the committed mirror with the generator's output — then fails the dry
+    // run on the inserted line, which the gate reports as having graded
+    // nothing. Measured on the first run that graded packages/db.
+    expect(generated().disableTypeChecks).toBe(false)
   })
 
   it('asks for no tsconfig rewrite, which this repository does not need (B10)', () => {
