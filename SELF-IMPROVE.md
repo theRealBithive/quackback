@@ -842,6 +842,32 @@ type cast, fails schema parsing at submit, and surfaces as "the form never
 submitted" rather than as a validation error. Build fixture ids with
 `generateId(prefix)`.
 
+## 1x — A manifest entry can name a subset of a file's suites, and the gap reads as survivors
+
+`scripts/mutation-manifest.json` pairs a graded file with the suites that pin
+it, and nothing checks that the pairing is complete. When a second suite was
+added for `next-position.ts` — a `.db.test.ts` beside the existing mock-based
+one — the entry still named only the first, so the gate re-ran the file against
+half its coverage and reported the SQL fragment's two mutants as survivors. They
+were not survivors. They were mutants the selected suites never reached, which
+is exactly the failure mode the `NoCoverage` handling exists to catch, except
+that here the suite that covers them was on disk and simply unlisted.
+
+The sweep that finds it is three lines: for every graded file, list the
+`__tests__` directory beside it and flag any `<name>.*.test.ts` the entry does
+not name. Run against the whole manifest it turned up one more, pre-existing:
+`gitlab/server/inbound.ts` is graded against `inbound.test.ts` and
+`signature-matrix.test.ts`, and `inbound.properties.test.ts` sits unlisted
+beside them. That file was untouched by the branch, so the gate never graded it
+and never said anything.
+
+Two fixes, either would do. `mutation-scope.test.ts` already asserts the whole
+manifest and reads each named suite off disk; it could also assert that no
+sibling suite matching the graded file's name is missing from the entry. Or the
+gate could print unlisted siblings the way it prints files with no entry at
+all — naming the gap rather than failing on it, since a co-located name is a
+guess and the manifest is the assertion.
+
 ## 1x — Replacing a whole `describe` block drops the tests inside it, and nothing counts
 
 Strengthening a suite by rewriting one `describe` in place — reading its
