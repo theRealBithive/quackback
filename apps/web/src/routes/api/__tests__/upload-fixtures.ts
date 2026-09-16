@@ -6,6 +6,7 @@
  */
 import type { auth } from '@/lib/server/auth'
 import type { db } from '@/lib/server/db'
+import type { SessionScope } from '@/lib/shared/roles'
 
 // Derive types from the actual functions so tests stay in sync
 type SessionResult = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>
@@ -31,15 +32,25 @@ export function mockImageFile(name: string, type: string, extraBytes = 0): File 
   })
 }
 
-/** Create a mock Better Auth session result */
+/**
+ * Create a mock Better Auth session result.
+ *
+ * `scope` defaults to the dashboard because that is what these handlers are
+ * reached from — an admin uploading an image is at a dashboard. It is a
+ * parameter rather than a constant so a suite can say "this is the widget's
+ * session" and mean it: since migration 0280 a session carries the audience it
+ * was minted for, and a fixture that leaves it out is not a dashboard session,
+ * it is a session nobody stamped.
+ */
 export function mockSession(
-  overrides: Partial<{ user: Partial<SessionResult['user']> }> = {}
+  overrides: Partial<{ user: Partial<SessionResult['user']>; scope: SessionScope }> = {}
 ): SessionResult {
   return {
     session: {
       id: 'test-session-id',
       token: 'test-token',
       userId: 'user_test1',
+      scope: overrides.scope ?? 'dashboard',
       createdAt: new Date(),
       updatedAt: new Date(),
       expiresAt: new Date(Date.now() + 3600_000),

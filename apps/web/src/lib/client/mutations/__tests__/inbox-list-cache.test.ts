@@ -11,6 +11,16 @@
  *   V3 A post that appears in several list caches at once (one per filter
  *      combination) is patched in all of them.
  *   V4 A patch does not create a list cache that held nothing.
+ *
+ * Batch D adds one guarantee to that list, numbered in its own list (the whole
+ * of which is in lib/server/functions/__tests__/auth-scope.test.ts). It comes
+ * from upstream's own fix for the same bug, 615e4da2b, which descends into the
+ * pages where the fix here stopped at the array:
+ *
+ *   R13 A cached inbox entry is patched only when it really is a page of
+ *       posts. An entry under the same key prefix that is not a list of posts
+ *       is handed back untouched, whether it carries no pages or pages that
+ *       are not post lists.
  */
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
@@ -57,6 +67,28 @@ describe('a cache that is not a post list (V2, V4)', () => {
 
   it('hands an empty cache back as empty', () => {
     expect(patchInboxListCache(undefined, refuse)).toBeUndefined()
+    // `null` as well as `undefined`: `typeof null` is 'object', so it is the
+    // one empty value that reaches the property read below the guard.
+    expect(patchInboxListCache(null as never, refuse)).toBeNull()
+  })
+
+  it('hands back a callable that happens to carry pages', () => {
+    // Contrived on purpose, and the only shape that tells the two halves of
+    // the guard apart: a function is truthy and `typeof` says 'function', so
+    // dropping the type half would let this through and patch it.
+    const impostor = Object.assign(() => undefined, {
+      pages: [{ items: rows('post_a'), nextCursor: null, hasMore: false }],
+      pageParams: [undefined],
+    })
+
+    expect(patchInboxListCache(impostor as never, refuse)).toBe(impostor)
+  })
+
+  it('hands back a list whose page is a callable carrying rows', () => {
+    const page = Object.assign(() => undefined, { items: rows('post_a') })
+    const payload = { pages: [page], pageParams: [undefined] }
+
+    expect(patchInboxListCache(payload as never, refuse)).toBe(payload)
   })
 
   it('leaves any payload without pages untouched, whatever it holds', () => {
@@ -95,6 +127,58 @@ describe('a cache that is not a post list (V2, V4)', () => {
           expect(result).toBe(payload)
         }
       )
+    )
+  })
+})
+
+describe('a cache whose pages are not pages of posts (R13)', () => {
+  it('hands back a pages array of things that are not pages', () => {
+    // The shape that got through the first version of this check: `pages` is
+    // an array, so the outer test passed, and `page.items` threw one line on.
+    const payload = { pages: [{ count: 4 }, { count: 9 }] }
+
+    expect(
+      patchInboxListCache(payload as unknown as InfiniteData<InboxPostListResult>, refuse)
+    ).toBe(payload)
+  })
+
+  it('hands back a pages array holding nothing at all', () => {
+    const payload = { pages: [null, undefined] }
+
+    expect(
+      patchInboxListCache(payload as unknown as InfiniteData<InboxPostListResult>, refuse)
+    ).toBe(payload)
+  })
+
+  it('refuses the whole cache when a single page is not a list of posts', () => {
+    // One bad page is enough: the patch maps over all of them, so a cache that
+    // is right about three pages and wrong about the fourth still throws.
+    fc.assert(
+      fc.property(
+        anyListCache,
+        fc.oneof(fc.constant(null), fc.integer(), fc.string(), fc.record({ items: fc.integer() })),
+        fc.nat(),
+        (cached, badPage, at) => {
+          const pages = [...cached.pages]
+          pages.splice(at % (pages.length + 1), 0, badPage as never)
+          const payload = { ...cached, pages }
+
+          expect(patchInboxListCache(payload, refuse)).toBe(payload)
+        }
+      )
+    )
+  })
+
+  it('still patches a list whose every page carries rows', () => {
+    // The other side of the same law, so a check that simply refused
+    // everything would not pass by being strict.
+    fc.assert(
+      fc.property(anyListCache, (cached) => {
+        const result = patchInboxListCache(cached, (items) => items)
+
+        expect(result).not.toBe(cached)
+        expect(result?.pages.length).toBe(cached.pages.length)
+      })
     )
   })
 })

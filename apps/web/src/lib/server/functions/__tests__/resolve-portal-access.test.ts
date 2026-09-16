@@ -143,6 +143,7 @@ describe('resolvePortalAccessForRequest — config-throw contract', () => {
     // Same regression for an authenticated user — must NOT default to
     // granted/public. Authenticated callers get the unauthorized screen.
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_1', email: 'user@acme.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
@@ -200,6 +201,7 @@ describe('resolvePortalAccessForRequest — private portal', () => {
 
   it('denies an authenticated non-team caller whose domain is not allowed', async () => {
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_1', email: 'outsider@evil.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
@@ -217,6 +219,7 @@ describe('resolvePortalAccessForRequest — private portal', () => {
 
   it('grants a team member (admin) on a private portal', async () => {
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_admin', email: 'admin@acme.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'admin' })
@@ -229,8 +232,32 @@ describe('resolvePortalAccessForRequest — private portal', () => {
     expect(result).toEqual({ granted: true, reason: 'team' })
   })
 
+  it.each(['widget', 'portal'] as const)(
+    'refuses the team branch to that same admin on a %s session (R7)',
+    async (scope) => {
+      // The evaluator has a branch for teammates, and it is reached from the
+      // role on the principal row. On a non-dashboard audience that role is
+      // not a teammate's, so the caller is judged as the ordinary user they
+      // are here — refused, because their domain is not allowed. Contract R7;
+      // the confirmed list is in auth-scope.test.ts.
+      mockGetSession.mockResolvedValue({
+        session: { id: 'sess_1', scope },
+        user: { id: 'user_admin', email: 'admin@evil.com', emailVerified: true },
+      })
+      mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'admin' })
+      mockGetPortalConfig.mockResolvedValue({
+        access: { visibility: 'private', allowedDomains: [] },
+      })
+
+      const result = await resolvePortalAccessForRequest()
+
+      expect(result.granted).toBe(false)
+    }
+  )
+
   it('grants a verified caller whose email domain is on the allowlist', async () => {
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_2', email: 'person@acme.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
@@ -246,6 +273,7 @@ describe('resolvePortalAccessForRequest — private portal', () => {
   it('denies an anonymous-principal session on a private portal', async () => {
     // An anonymous Better Auth session must not count as authenticated.
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_anon', email: 'anon@anon.quackback.io', emailVerified: false },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'anonymous', role: 'user' })
@@ -265,6 +293,7 @@ describe('resolvePortalAccessForRequest — private portal', () => {
     // A DB error during principal resolution must never grant access and must
     // not throw out of the function — the never-throw contract must hold.
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_1', email: 'user@acme.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockRejectedValue(new Error('DB_CONN_TIMEOUT'))
@@ -286,6 +315,7 @@ describe('resolvePortalAccessForRequest — private portal', () => {
     // closed for team-member detection — but a public portal still grants.
     // The function must not throw.
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_1', email: 'user@acme.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockRejectedValue(new Error('DB_CONN_TIMEOUT'))
@@ -300,6 +330,7 @@ describe('resolvePortalAccessForRequest — private portal', () => {
 describe('resolvePortalAccessForRequest — portal invite grant', () => {
   it('grants reason=invite for a verified caller with an accepted portal invite', async () => {
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_inv', email: 'invitee@example.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
@@ -315,6 +346,7 @@ describe('resolvePortalAccessForRequest — portal invite grant', () => {
 
   it('denies when no accepted invite exists (invite lookup returns null)', async () => {
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_inv', email: 'uninvited@example.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
@@ -334,6 +366,7 @@ describe('resolvePortalAccessForRequest — portal invite grant', () => {
   it('fails CLOSED on invite lookup DB error (deny, not throw)', async () => {
     // A DB error during the invite lookup must never grant access.
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_inv', email: 'invitee@example.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
@@ -352,6 +385,7 @@ describe('resolvePortalAccessForRequest — portal invite grant', () => {
 
   it('skips invite lookup when emailVerified=false (unverified email cannot claim invite)', async () => {
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_inv', email: 'invitee@example.com', emailVerified: false },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
@@ -387,6 +421,7 @@ describe('resolvePortalAccessForRequest — case-insensitive invite lookup', () 
     // return a mixed-case address stored on the session as-is. The resolver
     // must lowercase before the SQL lookup.
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_inv', email: 'Alice@Example.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
@@ -411,6 +446,7 @@ describe('resolvePortalAccessForRequest — case-insensitive invite lookup', () 
     // We check the eq mock directly — it records the value passed for the
     // email column (invitation.email). The email field stub is 'email' (string).
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_inv', email: 'MixedCase@EXAMPLE.COM', emailVerified: true },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
@@ -446,6 +482,7 @@ describe('resolvePortalAccessForRequest — accepted invites are permanent', () 
     // Invite was sent 20 days ago, accepted on day 2. Without the fix, the
     // expires_at filter (< now) would exclude this row and deny access.
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_inv', email: 'alice@example.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
@@ -469,6 +506,7 @@ describe('resolvePortalAccessForRequest — accepted invites are permanent', () 
     const sqlCalls = (sqlMock as unknown as ReturnType<typeof vi.fn>).mock.calls
 
     mockGetSession.mockResolvedValue({
+      session: { id: 'sess_1', scope: 'dashboard' },
       user: { id: 'user_inv', email: 'bob@example.com', emailVerified: true },
     })
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })

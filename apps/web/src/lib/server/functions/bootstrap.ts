@@ -1,5 +1,6 @@
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import type { Role } from '@/lib/shared/roles'
+import { sessionRole, toSessionScope } from '@/lib/shared/roles'
 import { getThemeCookie, parsePrefersColorScheme, type Theme } from '@/lib/shared/theme'
 import { getUpdateBannerDismissedVersionCookie } from '@/lib/shared/update-banner-cookie'
 import { resolveLocale, type SupportedLocale } from '@/lib/shared/i18n'
@@ -122,6 +123,8 @@ async function getSessionAndRole(): Promise<{
       if (principalRecord) await cacheSet(cacheKey, principalRecord, 300)
     }
 
+    const scope = toSessionScope(session.session.scope)
+
     return {
       session: {
         session: {
@@ -130,6 +133,7 @@ async function getSessionAndRole(): Promise<{
           createdAt: session.session.createdAt.toISOString(),
           updatedAt: session.session.updatedAt.toISOString(),
           userId,
+          scope,
         },
         user: {
           id: userId,
@@ -142,7 +146,7 @@ async function getSessionAndRole(): Promise<{
           updatedAt: session.user.updatedAt.toISOString(),
         },
       },
-      role: (principalRecord?.role as Role | null) ?? null,
+      role: principalRecord ? sessionRole(principalRecord.role as Role, scope) : null,
       preferredLanguage:
         (session.user as { preferredLanguage?: string | null }).preferredLanguage ?? null,
     }

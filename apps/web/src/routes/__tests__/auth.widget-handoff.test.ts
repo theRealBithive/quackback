@@ -3,6 +3,23 @@
  *
  * The loader is tested by exercising its extracted behavior via mocks —
  * the actual TanStack Start route is not instantiated.
+ *
+ * `runHandoffLoader` below is therefore a hand-kept mirror of the production
+ * handler, and a mirror can agree with a test while disagreeing with the code
+ * it mirrors. That is fine for the branch logic, which is what these cases are
+ * about, and not fine for one claim in this batch's contract:
+ *
+ *   R6 The one-time-token handoff promotes the session to the portal audience
+ *      before the cookie is set, not after.
+ *
+ * "Before, not after" is a fact about the real handler, and the mirror cannot
+ * hold it — so the last describe reads the file instead. The handler itself is
+ * driven, and the same order asserted over what it actually writes, in
+ * auth.widget-handoff-promotion.test.ts; the two checks are independent on
+ * purpose, because a source-text check survives a refactor of the test double
+ * and a behavioural one survives a rewording of the source.
+ * The confirmed list this number comes from is in
+ * lib/server/functions/__tests__/auth-scope.test.ts.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -37,6 +54,12 @@ const mockOnConflictDoNothing: any = vi.fn()
 const mockInsertValues: any = vi.fn(() => ({ onConflictDoNothing: mockOnConflictDoNothing }))
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any
 const mockDbInsert: any = vi.fn(() => ({ values: mockInsertValues }))
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any
+const mockUpdateWhere: any = vi.fn(async () => undefined)
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any
+const mockUpdateSet: any = vi.fn(() => ({ where: mockUpdateWhere }))
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any
+const mockDbUpdate: any = vi.fn(() => ({ set: mockUpdateSet }))
 // Provenance lookup: tests default to hmacVerified=true so the
 // existing redirect/audit assertions still exercise the success
 // path. The provenance gate itself is covered in detail by
@@ -46,6 +69,7 @@ vi.mock('@/lib/server/db', () => ({
   db: {
     // oxlint-disable-next-line @typescript-eslint/no-explicit-any
     insert: (arg: any) => mockDbInsert(arg),
+    update: (arg: unknown) => mockDbUpdate(arg),
     query: {
       widgetIdentifiedSession: {
         findFirst: (...args: unknown[]) => mockWidgetIdentifiedFindFirst(...(args as [])),
@@ -54,6 +78,7 @@ vi.mock('@/lib/server/db', () => ({
   },
   widgetOriginSession: {},
   widgetIdentifiedSession: { sessionId: 'widget_identified_session.session_id' },
+  session: { id: 'session.id' },
   eq: vi.fn((col, val) => ({ kind: 'eq', col, val })),
 }))
 
@@ -70,7 +95,7 @@ vi.stubGlobal('fetch', mockFetch)
 async function runHandoffLoader(search: string) {
   const { setResponseHeader, getRequestHeaders } = await import('@tanstack/react-start/server')
   const { config } = await import('@/lib/server/config')
-  const { db, widgetOriginSession } = await import('@/lib/server/db')
+  const { db, widgetOriginSession, session, eq } = await import('@/lib/server/db')
   const { recordAuditEvent } = await import('@/lib/server/audit/log')
   const { isSafeCallbackUrl } = await import('@/lib/shared/routing')
 
@@ -172,7 +197,14 @@ async function runHandoffLoader(search: string) {
     return { status: 'invalid' as const }
   }
 
-  // Provenance passed — safe to install the session cookie now.
+  // Provenance passed — promote to portal audience, then install the cookie.
+  try {
+    // oxlint-disable-next-line @typescript-eslint/no-explicit-any
+    await (db.update(session) as any).set({ scope: 'portal' }).where(eq(session.id, sessionId))
+  } catch {
+    /* non-fatal */
+  }
+
   for (const cookie of setCookieValues) {
     setResponseHeader('Set-Cookie', cookie)
   }
@@ -265,6 +297,13 @@ describe('widget handoff loader — valid OTT', () => {
     expect(mockDbInsert).toHaveBeenCalled()
   })
 
+  it('promotes the verified session to portal scope (R6)', async () => {
+    mockFetch.mockResolvedValue(makeOkResponse({ id: 'sess_1', userId: 'user_abc' }))
+
+    await runHandoffLoader('?ott=valid-token')
+    expect(mockUpdateSet).toHaveBeenCalledWith({ scope: 'portal' })
+  })
+
   it('records the consumed audit event', async () => {
     mockFetch.mockResolvedValue(makeOkResponse({ id: 'sess_1', userId: 'user_abc' }))
 
@@ -305,6 +344,7 @@ describe('widget handoff loader — valid OTT', () => {
       const result = await runHandoffLoader('?ott=valid-token')
       expect(result.status).toBe('invalid')
       expect(mockDbInsert).not.toHaveBeenCalled()
+      expect(mockUpdateSet).not.toHaveBeenCalled()
     })
 
     it('rejects when hmac_verified is false (email-capture identify)', async () => {
@@ -415,5 +455,36 @@ describe('widget handoff loader — invalid/expired/replayed OTT', () => {
 
     await runHandoffLoader('?ott=bad-token')
     expect(mockDbInsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('the production handler, read rather than mirrored (R6)', () => {
+  it('promotes the session to the portal audience before it forwards the cookie', async () => {
+    // The order is the guarantee. Installing the cookie first opens a window —
+    // however short — in which the browser holds a session that still satisfies
+    // every dashboard gate, and a promotion that failed afterwards would leave
+    // it there for good.
+    const { readFileSync } = await import('node:fs')
+    const source = readFileSync('apps/web/src/routes/auth.widget-handoff.tsx', 'utf8')
+
+    const promoted = source.indexOf(".set({ scope: 'portal' })")
+    const cookieForwarded = source.indexOf(
+      'setResponseHeader as (name: string, value: string | string[]) => void'
+    )
+
+    expect(promoted).toBeGreaterThan(-1)
+    expect(cookieForwarded).toBeGreaterThan(-1)
+    expect(promoted).toBeLessThan(cookieForwarded)
+  })
+
+  it('refuses the handoff before either of them when provenance fails', async () => {
+    const { readFileSync } = await import('node:fs')
+    const source = readFileSync('apps/web/src/routes/auth.widget-handoff.tsx', 'utf8')
+
+    const provenanceRefusal = source.indexOf("metadata: { reason: 'unverified_provenance' }")
+    const promoted = source.indexOf(".set({ scope: 'portal' })")
+
+    expect(provenanceRefusal).toBeGreaterThan(-1)
+    expect(provenanceRefusal).toBeLessThan(promoted)
   })
 })

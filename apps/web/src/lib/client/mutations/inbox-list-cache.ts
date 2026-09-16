@@ -14,6 +14,11 @@
  * (reading 'map')" and never left the browser. So the shape is checked rather
  * than assumed, and anything that is not an inbox post list is handed back
  * exactly as it came in.
+ *
+ * The check descends into the pages, which upstream's own fix (615e4da2b) does
+ * and this one originally did not: an entry carrying a `pages` array of
+ * something other than post pages passed the outer test and threw one line
+ * further in, on `page.items`.
  */
 import type { InfiniteData } from '@tanstack/react-query'
 import type { InboxPostListResult, PostListItem } from '@/lib/shared/db-types'
@@ -33,9 +38,26 @@ export function patchInboxListCache(
   cached: InfiniteData<InboxPostListResult> | undefined,
   patchRows: InboxRowsPatch
 ): InfiniteData<InboxPostListResult> | undefined {
-  if (!cached || !Array.isArray(cached.pages)) return cached
+  // The negative branch types `cached` as `undefined`, which is the declared
+  // parameter type being honest about itself: anything else reaching here is a
+  // cache `setQueriesData` promised would be a post list and was not.
+  if (!isInboxPostList(cached)) return cached
   return {
     ...cached,
     pages: cached.pages.map((page) => ({ ...page, items: patchRows(page.items) })),
   }
+}
+
+/** True for `{ pages: [...] }` where every page carries a row array. */
+function isInboxPostList(cached: unknown): cached is InfiniteData<InboxPostListResult> {
+  if (!cached || typeof cached !== 'object') return false
+  const pages = (cached as { pages?: unknown }).pages
+  if (!Array.isArray(pages)) return false
+  return pages.every((page) => holdsRows(page))
+}
+
+/** True for one page of an inbox list: an object with an `items` array. */
+function holdsRows(page: unknown): boolean {
+  if (!page || typeof page !== 'object') return false
+  return Array.isArray((page as { items?: unknown }).items)
 }

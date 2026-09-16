@@ -68,6 +68,31 @@ describe('POST /api/upload/image', () => {
     expect(await res.json()).toMatchObject({ error: 'Forbidden' })
   })
 
+  it('returns 403 for an admin on a widget session (R2)', async () => {
+    // The promotion case: the principal really is an admin, and the session is
+    // not one. The role check further down would let this through.
+    vi.mocked(auth.api.getSession).mockResolvedValueOnce(
+      mockSession({ user: { id: 'user_admin' }, scope: 'widget' })
+    )
+    vi.mocked(db.query.principal.findFirst).mockResolvedValueOnce(adminPrincipal)
+
+    const res = await handleAdminUpload({ request: makeRequest() })
+
+    expect(res.status).toBe(403)
+    expect(db.query.principal.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('returns 403 for an admin on a portal session (R2)', async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValueOnce(
+      mockSession({ user: { id: 'user_admin' }, scope: 'portal' })
+    )
+    vi.mocked(db.query.principal.findFirst).mockResolvedValueOnce(adminPrincipal)
+
+    const res = await handleAdminUpload({ request: makeRequest() })
+
+    expect(res.status).toBe(403)
+  })
+
   it('allows members to upload', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValueOnce(memberSession)
     vi.mocked(db.query.principal.findFirst).mockResolvedValueOnce(memberPrincipal)

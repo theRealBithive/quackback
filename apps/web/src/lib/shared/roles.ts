@@ -21,6 +21,35 @@ export type Role = 'admin' | 'member' | 'user'
 /** What kind of actor a principal is. */
 export type PrincipalType = 'user' | 'anonymous' | 'service' | 'support'
 
+/** Session audience. Only 'dashboard' may satisfy team/permission gates. */
+export type SessionScope = 'dashboard' | 'widget' | 'portal'
+
+/**
+ * Normalize a stored scope. A value outside the three audiences reads as a
+ * portal session, the least authority an audience can carry.
+ *
+ * Upstream answers `dashboard` here, and this fork deliberately does not. Every
+ * writer of the column — the backfill and trigger in migration 0280, the
+ * library's own default, the session-create hook, the widget identify route,
+ * the handoff route — writes one of the three, so a fourth value means one of
+ * them went wrong. Reading that as the dashboard audience hands a broken deploy
+ * full team authority; reading it as portal costs a staff member one sign-in.
+ *
+ * `portal` rather than a fourth member of the union, because every gate in the
+ * product asks `=== 'dashboard'`, so the narrowest existing value already fails
+ * closed everywhere, and a new one would widen a type that travels into the
+ * client bootstrap payload and into the signed stream token.
+ */
+export function toSessionScope(value: unknown): SessionScope {
+  if (value === 'dashboard' || value === 'widget' || value === 'portal') return value
+  return 'portal'
+}
+
+/** Team roles only apply to dashboard sessions; every other audience is portal-tier. */
+export function sessionRole(role: Role, scope: SessionScope): Role {
+  return scope === 'dashboard' ? role : 'user'
+}
+
 /** Role privilege order, low to high. Used to compare/escalate roles. */
 export const ROLE_RANK: Record<Role, number> = { user: 0, member: 1, admin: 2 }
 

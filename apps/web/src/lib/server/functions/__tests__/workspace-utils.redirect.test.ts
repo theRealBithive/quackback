@@ -10,6 +10,10 @@ import { db } from '@/lib/server/db'
  * The handler is a `createServerFn`, so we stub `createServerFn` to
  * capture the raw handler and invoke it directly — the same pattern the
  * other function-handler tests use.
+ *
+ * Batch D adds the audience gate on the same route guard, contract R2 — a
+ * teammate's role is not enough, the session has to be a dashboard one. The
+ * confirmed list is in auth-scope.test.ts.
  */
 
 const hoisted = vi.hoisted(() => ({
@@ -23,6 +27,12 @@ vi.mock('@/lib/server/db', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/db')>()),
   db: { query: { settings: { findFirst: vi.fn() }, principal: { findFirst: vi.fn() } } },
   eq: vi.fn(),
+}))
+
+// The permission resolver opens its own query builder; this suite drives the
+// route guard, and the resolver has its own tests next door.
+vi.mock('@/lib/server/policy/permissions', () => ({
+  permissionsForPrincipal: vi.fn(async () => new Set<string>()),
 }))
 
 vi.mock('@/lib/server/logger', () => ({
@@ -83,6 +93,41 @@ describe('requireWorkspaceRole redirect target', () => {
       .catch((e) => e as { to?: string; options?: { to?: string } })
 
     expect(err?.to ?? err?.options?.to).toBe('/')
+  })
+
+  it.each(['widget', 'portal'] as const)(
+    'turns an admin on a %s session away from a team route (R2)',
+    async (scope) => {
+      hoisted.mockGetSession.mockResolvedValue({ session: { scope }, user: { id: 'user_001' } })
+      ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
+      ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'principal_1',
+        role: 'admin',
+      })
+
+      const err = await requireWorkspaceRole({ data: { allowedRoles: ['admin', 'member'] } })
+        .then(() => null)
+        .catch((e) => e as RedirectErr)
+
+      const search = err?.search ?? err?.options?.search
+      expect(search?.error).toBe('not_team_member')
+    }
+  )
+
+  it('lets the same admin through on a dashboard session (R2)', async () => {
+    hoisted.mockGetSession.mockResolvedValue({
+      session: { scope: 'dashboard' },
+      user: { id: 'user_001' },
+    })
+    ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
+    ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'principal_1',
+      role: 'admin',
+    })
+
+    await expect(
+      requireWorkspaceRole({ data: { allowedRoles: ['admin', 'member'] } })
+    ).resolves.toBeDefined()
   })
 
   it('redirects wrong-role callers to sign-in dialog with not_team_member error', async () => {

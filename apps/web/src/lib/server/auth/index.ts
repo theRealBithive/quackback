@@ -22,6 +22,7 @@ import { getWorkspaceScope, runWithWorkspaceScope } from '@/lib/server/workspace
 import { WorkspaceKeyedCache } from '@/lib/server/workspaces/workspace-keyed'
 import type { GenericOAuthConfig } from './build-oauth-configs'
 import { guardBetterAuthUserCreation } from './signup-policy'
+import { stampSessionAudience } from './session-scope'
 import { isSignInMethodEnabled } from '@/lib/shared/signin-methods'
 import { workspaceAuthTrustedOrigins } from './trusted-origins'
 import { ensureMcpOauthResource } from './ensure-mcp-oauth-resource'
@@ -550,6 +551,9 @@ async function createAuth() {
       storeSessionInDatabase: true,
       expiresIn: 60 * 60 * 24 * 7, // 7 days
       updateAge: 60 * 60 * 24, // Update session every 24 hours
+      additionalFields: {
+        scope: { type: 'string', required: false, input: false, defaultValue: 'dashboard' },
+      },
     },
 
     advanced: {
@@ -628,6 +632,12 @@ async function createAuth() {
               }
             }
           },
+        },
+      },
+      session: {
+        create: {
+          // Only the widget's lazy anonymous mint; everything else is a dashboard sign-in.
+          before: stampSessionAudience,
         },
       },
     },

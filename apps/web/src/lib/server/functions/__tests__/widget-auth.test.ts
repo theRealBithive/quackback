@@ -171,6 +171,7 @@ describe('getWidgetSession', () => {
     mockGet.mockReturnValue('Bearer valid-token-123')
     mockSessionFindFirst.mockResolvedValue({
       userId: 'user_1',
+      scope: 'dashboard',
       user: { id: 'user_1', email: 'test@test.com', name: 'Test', image: null },
     })
     mockPrincipalFindFirst.mockResolvedValue({
@@ -184,6 +185,53 @@ describe('getWidgetSession', () => {
     expect(result?.user.image).toBeNull()
     expect(result?.principal.role).toBe('member')
     expect(result?.principal.type).toBe('user')
+  })
+
+  it('presents a promoted principal as an ordinary user on a widget session (R2, R3)', async () => {
+    // The session record is the widget's own, and the principal behind it has
+    // since been made a teammate. The bearer path must not hand that role back:
+    // the audience decides, not the principal row. Contract R2 and R3; the
+    // confirmed list is in functions/__tests__/auth-scope.test.ts.
+    mockGet.mockReturnValue('Bearer valid-token-123')
+    mockSessionFindFirst.mockResolvedValue({
+      userId: 'user_1',
+      scope: 'widget',
+      user: { id: 'user_1', email: 'test@test.com', name: 'Test', image: null },
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_1', role: 'member', type: 'user' })
+
+    const result = await getWidgetSession()
+
+    expect(result?.principal.role).toBe('user')
+  })
+
+  it('presents the same principal as an ordinary user on a portal session (R2)', async () => {
+    mockGet.mockReturnValue('Bearer valid-token-123')
+    mockSessionFindFirst.mockResolvedValue({
+      userId: 'user_1',
+      scope: 'portal',
+      user: { id: 'user_1', email: 'test@test.com', name: 'Test', image: null },
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_1', role: 'admin', type: 'user' })
+
+    const result = await getWidgetSession()
+
+    expect(result?.principal.role).toBe('user')
+  })
+
+  it('refuses a team role to a session record carrying no audience at all (R12)', async () => {
+    // A row written by something that does not know about the column. Upstream
+    // reads it as a dashboard session and hands back 'admin'.
+    mockGet.mockReturnValue('Bearer valid-token-123')
+    mockSessionFindFirst.mockResolvedValue({
+      userId: 'user_1',
+      user: { id: 'user_1', email: 'test@test.com', name: 'Test', image: null },
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_1', role: 'admin', type: 'user' })
+
+    const result = await getWidgetSession()
+
+    expect(result?.principal.role).toBe('user')
   })
 
   it('resolves an uploaded imageKey when user.image is null', async () => {

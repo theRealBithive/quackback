@@ -60,6 +60,25 @@
       ]
     },
     {
+      "file": "apps/web/src/lib/shared/roles.ts",
+      "suites": [
+        "apps/web/src/lib/shared/__tests__/roles.test.ts",
+        "apps/web/src/lib/server/functions/__tests__/auth-scope.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/src/lib/server/auth/session-scope.ts",
+      "suites": ["apps/web/src/lib/server/auth/__tests__/session-scope-on-create.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/realtime/stream-token.ts",
+      "suites": ["apps/web/src/lib/server/realtime/__tests__/stream-token.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/workspace.ts",
+      "suites": ["apps/web/src/lib/server/functions/__tests__/workspace-api-access.test.ts"]
+    },
+    {
       "file": "apps/web/src/lib/client/mutations/inbox-list-cache.ts",
       "suites": [
         "apps/web/src/lib/client/mutations/__tests__/inbox-list-cache.test.ts",
@@ -674,6 +693,97 @@
       "line": "if (aRecent !== -1 || bRecent !== -1) {",
       "replacement": "+1",
       "why": "The -1 in the second comparison is reachable only when the first one is false, so changing it swings the entry only where aRecent === -1, and there the block answers 1 against the 0 of skipping it. Measured rather than assumed, because the mutant also makes the comparator inconsistent: 540,000 arrangements (60,000 each at lengths 2, 3, 4, 5, 8, 16, 40, 80 and 200) sorted identically under V8. Its sibling on this line, aRecent !== +1, shares the address and is a different matter: with aRecent a real index and bRecent === -1 the block reaches if (bRecent === -1) return -1, and -1 against 0 does move an element. It is caught by \"a remembered exact match wins even when it is not the most recently used glyph (G5)\", and by the property test beside it."
+    },
+    {
+      "file": "apps/web/src/lib/shared/roles.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (value === 'dashboard' || value === 'widget' || value === 'portal') return value",
+      "replacement": "false",
+      "why": "The mutant drops the third operand, so a stored 'portal' falls through to the line below — which returns 'portal'. The clause is deliberately redundant with the fallback: it keeps all three audiences named where a reader looks for them, rather than leaving 'portal' to be inferred from the default. No value can tell the two apart, because the two answers are the same string."
+    },
+    {
+      "file": "apps/web/src/lib/server/realtime/stream-token.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (dot <= 0) return null",
+      "replacement": "false",
+      "why": "Skipping the guard only matters for a token whose last '.' is at index 0 or absent, and neither reaches a non-null answer. With no dot the signature compared is the whole token against the HMAC of its own first n-1 characters, which is a fixed point of HMAC-SHA256 and not constructible. With the dot at index 0 the payload is the empty string, whose signature is computable, but that payload then carries no separator and `if (sep <= 0) return null` two lines down refuses it. Both paths end in null, as the guard intended."
+    },
+    {
+      "file": "apps/web/src/lib/server/realtime/stream-token.ts",
+      "mutator": "EqualityOperator",
+      "line": "if (dot <= 0) return null",
+      "replacement": "dot < 0",
+      "why": "The two differ only when the last '.' sits at index 0. That token can be built — the payload is the empty string and this key signs it — but an empty payload carries no separator, so `if (sep <= 0) return null` refuses it on the next branch. The answer is null either way."
+    },
+    {
+      "file": "apps/web/src/lib/server/realtime/stream-token.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (sep <= 0) return null",
+      "replacement": "false",
+      "why": "A signed payload with no separator, or one starting with it, is the only thing this guard answers. Past it, `withoutExpiry` is either the payload minus its last character or the empty string, and neither holds a separator either — so `if (scopeSep <= 0) return null` refuses it. Reaching that far at all needs a payload that parses as a future timestamp, and it still ends in null."
+    },
+    {
+      "file": "apps/web/src/lib/server/realtime/stream-token.ts",
+      "mutator": "EqualityOperator",
+      "line": "if (sep <= 0) return null",
+      "replacement": "sep < 0",
+      "why": "The two differ only for a payload whose last separator is at index 0, which leaves `withoutExpiry` empty; `scopeSep` is then -1 and the audience guard below refuses it. Null either way."
+    },
+    {
+      "file": "apps/web/src/lib/server/realtime/stream-token.ts",
+      "mutator": "BlockStatement",
+      "line": "} catch {",
+      "replacement": "{}",
+      "why": "`Buffer.from(string, 'base64url')` does not throw: characters outside the alphabet are ignored rather than rejected, and `toString('utf8')` does not throw either. So no token reaches the catch, which is why it reports as never executed rather than as a survivor. The guard is upstream's and it is kept, because those two calls are the attacker-controlled part of this function."
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/workspace.ts",
+      "mutator": "ObjectLiteral",
+      "line": "const log = logger.child({ component: 'workspace' })",
+      "replacement": "{}",
+      "why": "The component name is metadata on a log line. It reaches no branch, no return value and no query, and nothing a caller or an operator reads is built from it, so no input tells the two apart. A test could only assert the string back from the logger it just configured."
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/workspace.ts",
+      "mutator": "StringLiteral",
+      "line": "const log = logger.child({ component: 'workspace' })",
+      "replacement": "\"\"",
+      "why": "The component name is metadata on a log line. It reaches no branch, no return value and no query, and nothing a caller or an operator reads is built from it, so no input tells the two apart. A test could only assert the string back from the logger it just configured."
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/workspace.ts",
+      "mutator": "StringLiteral",
+      "line": "log.debug('get current user role')",
+      "replacement": "\"\"",
+      "why": "The message is metadata on a log line. It reaches no branch, no return value and no query, and nothing a caller or an operator reads is built from it, so no input tells the two apart."
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/workspace.ts",
+      "mutator": "StringLiteral",
+      "line": "log.debug('no session')",
+      "replacement": "\"\"",
+      "why": "The message is metadata on a log line. It reaches no branch, no return value and no query, and nothing a caller or an operator reads is built from it, so no input tells the two apart."
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/workspace.ts",
+      "mutator": "StringLiteral",
+      "line": "log.debug('no principal')",
+      "replacement": "\"\"",
+      "why": "The message is metadata on a log line. It reaches no branch, no return value and no query, and nothing a caller or an operator reads is built from it, so no input tells the two apart."
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/workspace.ts",
+      "mutator": "ObjectLiteral",
+      "line": "log.debug({ role: principalRecord.role }, 'current user role')",
+      "replacement": "{}",
+      "why": "The field set is metadata on a log line. It reaches no branch, no return value and no query, and nothing a caller or an operator reads is built from it, so no input tells the two apart."
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/workspace.ts",
+      "mutator": "StringLiteral",
+      "line": "log.debug({ role: principalRecord.role }, 'current user role')",
+      "replacement": "\"\"",
+      "why": "The message is metadata on a log line. It reaches no branch, no return value and no query, and nothing a caller or an operator reads is built from it, so no input tells the two apart."
     }
   ]
 }
