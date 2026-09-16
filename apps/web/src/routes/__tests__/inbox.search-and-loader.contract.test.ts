@@ -26,6 +26,7 @@ import { describe, it, expect, vi } from 'vitest'
 import fc from 'fast-check'
 import { generateId } from '@quackback/ids'
 import { agentEventChangesInboxList } from '@/components/conversation/events-reducer'
+import { conversationKeys } from '@/lib/client/queries/conversation-keys'
 import type { ConversationDTO, ConversationStreamEvent } from '@/lib/shared/conversation/types'
 import { Route } from '../admin/inbox'
 
@@ -146,6 +147,20 @@ function warmedKeyText(warmed: unknown[][]): string {
   return JSON.stringify(warmed)
 }
 
+/** The keys the loader warms for one URL, with nothing actually fetched. */
+async function warmedKeysFor(search: Search): Promise<unknown[][]> {
+  const { warmed, queryClient } = recordingQueryClient()
+  await options.loader({ context: flagsContext(queryClient), location: { search } })
+  return warmed
+}
+
+/** The warmed keys that address a thread rather than a list or a count scope. */
+function threadKeysIn(warmed: unknown[][]): unknown[][] {
+  const anyThreadKey = conversationKeys.agentThread(generateId('conversation'))
+  const threadScope = JSON.stringify(anyThreadKey.slice(0, -1)).slice(0, -1)
+  return warmed.filter((key) => JSON.stringify(key).startsWith(threadScope))
+}
+
 describe('the inbox loader (E1, E9)', () => {
   it('has no loaderDeps, so selecting a row cannot re-run it (E1)', () => {
     expect(options.loaderDeps).toBeUndefined()
@@ -157,7 +172,27 @@ describe('the inbox loader (E1, E9)', () => {
 
     await options.loader({ context: flagsContext(queryClient), location: { search: { c: id } } })
 
-    expect(warmedKeyText(warmed)).toContain(id)
+    // The thread's own key, not merely the id somewhere: the list key packs
+    // every facet into one string and carries the id too, so a substring
+    // check here would pass whether or not the thread was warmed at all.
+    expect(warmed).toContainEqual([...conversationKeys.agentThread(id)])
+  })
+
+  it('warms no thread when the URL names no open item, and none for junk (E9)', async () => {
+    const scopesAlone = await warmedKeysFor({})
+
+    expect(threadKeysIn(scopesAlone)).toEqual([])
+    // The scopes the page always needs are warmed regardless, so the emptiness
+    // above is about the thread rather than about a loader that did nothing.
+    expect(scopesAlone.length).toBeGreaterThan(0)
+    // Exactly one more key once a real id is there: the thread the reader opened.
+    const withAnOpenItem = await warmedKeysFor({ c: generateId('conversation') })
+    expect(withAnOpenItem.length).toBe(scopesAlone.length + 1)
+    // And an id of the wrong kind, or none at all, leaves the loader where it
+    // was — a stale deep link costs no query.
+    expect(await warmedKeysFor({ c: 'conversation_not_a_real_id' })).toHaveLength(
+      scopesAlone.length
+    )
   })
 
   it('never forwards a facet the normalizer rejected (E9)', async () => {
