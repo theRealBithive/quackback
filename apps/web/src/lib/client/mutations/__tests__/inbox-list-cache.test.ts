@@ -67,6 +67,28 @@ describe('a cache that is not a post list (V2, V4)', () => {
 
   it('hands an empty cache back as empty', () => {
     expect(patchInboxListCache(undefined, refuse)).toBeUndefined()
+    // `null` as well as `undefined`: `typeof null` is 'object', so it is the
+    // one empty value that reaches the property read below the guard.
+    expect(patchInboxListCache(null as never, refuse)).toBeNull()
+  })
+
+  it('hands back a callable that happens to carry pages', () => {
+    // Contrived on purpose, and the only shape that tells the two halves of
+    // the guard apart: a function is truthy and `typeof` says 'function', so
+    // dropping the type half would let this through and patch it.
+    const impostor = Object.assign(() => undefined, {
+      pages: [{ items: rows('post_a'), nextCursor: null, hasMore: false }],
+      pageParams: [undefined],
+    })
+
+    expect(patchInboxListCache(impostor as never, refuse)).toBe(impostor)
+  })
+
+  it('hands back a list whose page is a callable carrying rows', () => {
+    const page = Object.assign(() => undefined, { items: rows('post_a') })
+    const payload = { pages: [page], pageParams: [undefined] }
+
+    expect(patchInboxListCache(payload as never, refuse)).toBe(payload)
   })
 
   it('leaves any payload without pages untouched, whatever it holds', () => {

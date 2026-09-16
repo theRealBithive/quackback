@@ -41,8 +41,22 @@ vi.mock('@/lib/server/db', async (importOriginal) => ({
   },
 }))
 
-import { getCurrentUserRole, validateApiWorkspaceAccess } from '../workspace'
+import { getCurrentUserRole, getSettings, validateApiWorkspaceAccess } from '../workspace'
 import { toSessionScope, type SessionScope } from '@/lib/shared/roles'
+
+/**
+ * Every primitive buried in a drizzle condition.
+ *
+ * A `where` is a nest of SQL objects and column references, and what is claimed
+ * about it here is only that it names the caller. Flattening is how that can be
+ * checked without pinning the shape drizzle happens to build this release.
+ */
+function valuesIn(value: unknown, seen = new Set<unknown>()): unknown[] {
+  if (value === null || typeof value !== 'object') return [value]
+  if (seen.has(value)) return []
+  seen.add(value)
+  return Object.values(value as Record<string, unknown>).flatMap((v) => valuesIn(v, seen))
+}
 
 /** A session as `getSession()` hands it over: the audience already normalised. */
 function sessionScoped(scope: SessionScope) {
@@ -88,6 +102,35 @@ describe('validateApiWorkspaceAccess (R9)', () => {
     expect(mockSettingsFindFirst).not.toHaveBeenCalled()
   })
 
+  it('looks the principal up by the caller own user id', async () => {
+    // Without the condition the first principal row in the workspace would
+    // answer for whoever asked.
+    mockGetSession.mockResolvedValue(sessionScoped('dashboard'))
+
+    await validateApiWorkspaceAccess()
+
+    const args = mockPrincipalFindFirst.mock.calls[0][0] as { where?: unknown }
+    expect(valuesIn(args.where)).toContain('user_1')
+  })
+
+  it('refuses a caller who has no principal in this workspace', async () => {
+    mockGetSession.mockResolvedValue(sessionScoped('dashboard'))
+    mockPrincipalFindFirst.mockResolvedValue(undefined)
+
+    const result = await validateApiWorkspaceAccess()
+
+    expect(result).toEqual({ success: false, error: 'Forbidden', status: 403 })
+  })
+
+  it('refuses when the workspace has no settings row', async () => {
+    mockGetSession.mockResolvedValue(sessionScoped('dashboard'))
+    mockSettingsFindFirst.mockResolvedValue(undefined)
+
+    const result = await validateApiWorkspaceAccess()
+
+    expect(result).toEqual({ success: false, error: 'Settings not found', status: 403 })
+  })
+
   it('still answers 401 when there is no session at all', async () => {
     mockGetSession.mockResolvedValue(null)
 
@@ -128,6 +171,15 @@ describe('getCurrentUserRole (R9)', () => {
     )
   })
 
+  it('looks the principal up by the caller own user id', async () => {
+    mockGetSession.mockResolvedValue(sessionScoped('dashboard'))
+
+    await getCurrentUserRole()
+
+    const args = mockPrincipalFindFirst.mock.calls[0][0] as { where?: unknown }
+    expect(valuesIn(args.where)).toContain('user_1')
+  })
+
   it('reports nothing without a session or a principal', async () => {
     mockGetSession.mockResolvedValue(null)
     expect(await getCurrentUserRole()).toBeNull()
@@ -135,5 +187,22 @@ describe('getCurrentUserRole (R9)', () => {
     mockGetSession.mockResolvedValue(sessionScoped('dashboard'))
     mockPrincipalFindFirst.mockResolvedValue(undefined)
     expect(await getCurrentUserRole()).toBeNull()
+  })
+})
+
+describe('getSettings', () => {
+  it('hands back the workspace row it found', async () => {
+    const row = { id: 'workspace_1', slug: 'main', name: 'Main' }
+    mockSettingsFindFirst.mockResolvedValue(row)
+
+    expect(await getSettings()).toBe(row)
+  })
+
+  it('answers null when no workspace row exists', async () => {
+    // `findFirst` says undefined and every caller checks for null, so the
+    // difference between the two is flattened here rather than at each of them.
+    mockSettingsFindFirst.mockResolvedValue(undefined)
+
+    expect(await getSettings()).toBeNull()
   })
 })

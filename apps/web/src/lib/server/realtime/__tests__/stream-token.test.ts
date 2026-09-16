@@ -26,13 +26,27 @@ vi.mock('../../secret-key', () => ({
   activeSecretKey: () => TEST_KEY,
 }))
 
-/** Pre-scope token shape: `${principalId}.${expiry}`. */
-function legacyStreamToken(principalId: string, ttlMs = 60_000): string {
-  const payload = `${principalId}.${Date.now() + ttlMs}`
+/** The domain-separation tag the module mixes into every signature. */
+const DOMAIN_TAG = 'chat-stream:v1\n'
+
+/**
+ * A token the module would accept, built here rather than minted.
+ *
+ * Minting can only produce payloads `mintStreamToken` is willing to write, and
+ * half of what verification promises is about the ones it is not: a payload
+ * with no audience, a payload naming no principal, a signature made with the
+ * same key for another purpose.
+ */
+function signedToken(payload: string, tag: string = DOMAIN_TAG): string {
   const signature = createHmac('sha256', TEST_KEY)
-    .update(`chat-stream:v1\n${payload}`)
+    .update(tag + payload)
     .digest('base64url')
   return `${Buffer.from(payload).toString('base64url')}.${signature}`
+}
+
+/** Pre-scope token shape: `${principalId}.${expiry}`. */
+function legacyStreamToken(principalId: string, ttlMs = 60_000): string {
+  return signedToken(`${principalId}.${Date.now() + ttlMs}`)
 }
 
 const anyScope = fc.constantFrom('dashboard' as const, 'widget' as const, 'portal' as const)
@@ -75,6 +89,50 @@ describe('stream token audience (R8)', () => {
     // read as a dashboard token: they live two minutes and the client re-mints
     // on reconnect, so failing closed costs a handshake.
     expect(verifyStreamToken(legacyStreamToken('principal_1'))).toBeNull()
+  })
+
+  it('refuses a token signed for something else with the same key', () => {
+    // The domain tag is the whole of that guarantee: without it, a token this
+    // key signed for another purpose with a payload of this shape would be
+    // accepted as a stream credential.
+    const wrongDomain = signedToken(`principal_1.widget.${Date.now() + 60_000}`, '')
+
+    expect(verifyStreamToken(wrongDomain)).toBeNull()
+  })
+
+  it('returns null rather than throwing when the signature is the wrong length', () => {
+    // `timingSafeEqual` throws on buffers of different lengths, which is what
+    // the length comparison in front of it is for. Anything reaching this
+    // function is attacker-controlled, so a throw here is a 500 on a handshake.
+    expect(verifyStreamToken('abc.def')).toBeNull()
+  })
+
+  it('refuses a token that names no principal', () => {
+    const noPrincipal = signedToken(`.widget.${Date.now() + 60_000}`)
+
+    expect(verifyStreamToken(noPrincipal)).toBeNull()
+  })
+
+  it('refuses a token whose life is already over', () => {
+    const expired = mintStreamToken('principal_1' as PrincipalId, 'dashboard', -1_000)
+
+    expect(verifyStreamToken(expired)).toBeNull()
+  })
+
+  it('is still good at the instant it expires, and not one millisecond later', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-09-16T00:00:00.000Z'))
+      const token = mintStreamToken('principal_1' as PrincipalId, 'dashboard', 60_000)
+
+      vi.setSystemTime(new Date('2026-09-16T00:01:00.000Z'))
+      expect(verifyStreamToken(token)).not.toBeNull()
+
+      vi.advanceTimersByTime(1)
+      expect(verifyStreamToken(token)).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not mint a dashboard token for a caller that named no audience', () => {

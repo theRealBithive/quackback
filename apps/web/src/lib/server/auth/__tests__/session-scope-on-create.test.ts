@@ -122,12 +122,17 @@ describe('what the instance declares about the audience column (R1)', () => {
 
 describe('stampSessionAudience (R5)', () => {
   it('stamps the widget audience on the lazy anonymous mint', async () => {
+    // The path is spelled out rather than taken from the constant: the
+    // constant has to be the endpoint Better Auth actually routes the
+    // anonymous plugin to, and a test that reads it back from itself would
+    // hold any spelling at all.
     const stamped = await stampSessionAudience(
       { id: 'sess_1', userId: 'user_1' },
-      { path: ANONYMOUS_SIGN_IN_PATH }
+      { path: '/sign-in/anonymous' }
     )
 
     expect(stamped).toEqual({ data: { id: 'sess_1', userId: 'user_1', scope: 'widget' } })
+    expect(ANONYMOUS_SIGN_IN_PATH).toBe('/sign-in/anonymous')
   })
 
   it('leaves the row untouched on a dashboard sign-in', async () => {

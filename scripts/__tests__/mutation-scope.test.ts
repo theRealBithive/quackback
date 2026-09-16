@@ -87,6 +87,25 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         ],
       },
       {
+        file: 'apps/web/src/lib/shared/roles.ts',
+        suites: [
+          'apps/web/src/lib/shared/__tests__/roles.test.ts',
+          'apps/web/src/lib/server/functions/__tests__/auth-scope.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/auth/session-scope.ts',
+        suites: ['apps/web/src/lib/server/auth/__tests__/session-scope-on-create.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/realtime/stream-token.ts',
+        suites: ['apps/web/src/lib/server/realtime/__tests__/stream-token.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/workspace.ts',
+        suites: ['apps/web/src/lib/server/functions/__tests__/workspace-api-access.test.ts'],
+      },
+      {
         file: 'apps/web/src/lib/client/mutations/inbox-list-cache.ts',
         suites: [
           'apps/web/src/lib/client/mutations/__tests__/inbox-list-cache.test.ts',
@@ -734,6 +753,97 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: 'if (aRecent !== -1 || bRecent !== -1) {',
         replacement: '+1',
         why: expect.stringContaining('The -1 in the second comparison is reach'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/roles.ts',
+        mutator: 'ConditionalExpression',
+        line: "if (value === 'dashboard' || value === 'widget' || value === 'portal') return value",
+        replacement: 'false',
+        why: expect.stringContaining('The mutant drops the third operand, so a stored '),
+      },
+      {
+        file: 'apps/web/src/lib/server/realtime/stream-token.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (dot <= 0) return null',
+        replacement: 'false',
+        why: expect.stringContaining('Skipping the guard only matters for a token whos'),
+      },
+      {
+        file: 'apps/web/src/lib/server/realtime/stream-token.ts',
+        mutator: 'EqualityOperator',
+        line: 'if (dot <= 0) return null',
+        replacement: 'dot < 0',
+        why: expect.stringContaining("The two differ only when the last '.' sits at in"),
+      },
+      {
+        file: 'apps/web/src/lib/server/realtime/stream-token.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (sep <= 0) return null',
+        replacement: 'false',
+        why: expect.stringContaining('A signed payload with no separator, or one start'),
+      },
+      {
+        file: 'apps/web/src/lib/server/realtime/stream-token.ts',
+        mutator: 'EqualityOperator',
+        line: 'if (sep <= 0) return null',
+        replacement: 'sep < 0',
+        why: expect.stringContaining('The two differ only for a payload whose last sep'),
+      },
+      {
+        file: 'apps/web/src/lib/server/realtime/stream-token.ts',
+        mutator: 'BlockStatement',
+        line: '} catch {',
+        replacement: '{}',
+        why: expect.stringContaining("`Buffer.from(string, 'base64url')` does not thro"),
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/workspace.ts',
+        mutator: 'ObjectLiteral',
+        line: "const log = logger.child({ component: 'workspace' })",
+        replacement: '{}',
+        why: expect.stringContaining('The component name is metadata on a log line. It'),
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/workspace.ts',
+        mutator: 'StringLiteral',
+        line: "const log = logger.child({ component: 'workspace' })",
+        replacement: '""',
+        why: expect.stringContaining('The component name is metadata on a log line. It'),
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/workspace.ts',
+        mutator: 'StringLiteral',
+        line: "log.debug('get current user role')",
+        replacement: '""',
+        why: expect.stringContaining('The message is metadata on a log line. It reache'),
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/workspace.ts',
+        mutator: 'StringLiteral',
+        line: "log.debug('no session')",
+        replacement: '""',
+        why: expect.stringContaining('The message is metadata on a log line. It reache'),
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/workspace.ts',
+        mutator: 'StringLiteral',
+        line: "log.debug('no principal')",
+        replacement: '""',
+        why: expect.stringContaining('The message is metadata on a log line. It reache'),
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/workspace.ts',
+        mutator: 'ObjectLiteral',
+        line: "log.debug({ role: principalRecord.role }, 'current user role')",
+        replacement: '{}',
+        why: expect.stringContaining('The field set is metadata on a log line. It reac'),
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/workspace.ts',
+        mutator: 'StringLiteral',
+        line: "log.debug({ role: principalRecord.role }, 'current user role')",
+        replacement: '""',
+        why: expect.stringContaining('The message is metadata on a log line. It reache'),
       },
     ])
   })
