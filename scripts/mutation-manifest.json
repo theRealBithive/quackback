@@ -1,5 +1,5 @@
 {
-  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing — the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
+  "_comment": "The mutation gate's declaration: which files are mutation-graded, and which suites pin them. It is the only source for that pairing \u2014 the per-run Stryker config and the vitest include are both generated from it (`mutation-check.ts`), so there is no second list to keep in step. Entries arrive one at a time and deliberately: adding one asserts that the named suites, on their own, pin that file's behaviour, and the gate will say so in numbers on the next change to it. Asserted in full by `__tests__/mutation-scope.test.ts`, because a shrinking list is how this gate would pass by grading less.",
   "graded": [
     {
       "file": "scripts/audit-policy.ts",
@@ -285,6 +285,13 @@
     {
       "file": "packages/ids/src/drizzle.ts",
       "suites": ["packages/ids/src/__tests__/drizzle.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/client/conversation/reconcile-cached-thread.ts",
+      "suites": [
+        "apps/web/src/lib/client/conversation/reconcile-cached-thread.test.ts",
+        "apps/web/src/lib/client/conversation/__tests__/reconcile-cached-thread.contract.test.ts"
+      ]
     }
   ],
   "equivalents": [
@@ -321,7 +328,7 @@
       "mutator": "StringLiteral",
       "line": "const log = logger.child({ component: 'gitlab-post-source' })",
       "replacement": "\"\"",
-      "why": "Same line, same reason: the component name is log metadata, not behaviour. The line's operator-facing content that does matter — the post id in the warning — is asserted in post-source.db.test.ts."
+      "why": "Same line, same reason: the component name is log metadata, not behaviour. The line's operator-facing content that does matter \u2014 the post id in the warning \u2014 is asserted in post-source.db.test.ts."
     },
     {
       "file": "apps/web/src/integrations/gitlab/server/post-source.ts",
@@ -524,7 +531,7 @@
       "mutator": "ObjectLiteral",
       "line": "const log = logger.child({ component: 'gitlab' })",
       "replacement": "{}",
-      "why": "The component name is metadata on a log line and reaches no branch, no return value and no request. The operator-facing content of the hook's log lines — the project, the status and GitLab's answer — is asserted in hook.test.ts; the child's name is the one field a test could only read back from the logger it just configured."
+      "why": "The component name is metadata on a log line and reaches no branch, no return value and no request. The operator-facing content of the hook's log lines \u2014 the project, the status and GitLab's answer \u2014 is asserted in hook.test.ts; the child's name is the one field a test could only read back from the logger it just configured."
     },
     {
       "file": "apps/web/src/integrations/gitlab/server/hook.ts",
@@ -538,7 +545,7 @@
       "mutator": "StringLiteral",
       "line": "window.history.replaceState({}, '', url.toString())",
       "replacement": "\"Stryker was here!\"",
-      "why": "The second argument of history.replaceState is the entry's title, which the HTML specification tells browsers to ignore and no browser reads. The URL is the third argument and is asserted; nothing observable — not the location, not the history length, not the document title — changes with the second."
+      "why": "The second argument of history.replaceState is the entry's title, which the HTML specification tells browsers to ignore and no browser reads. The URL is the third argument and is asserted; nothing observable \u2014 not the location, not the history length, not the document title \u2014 changes with the second."
     },
     {
       "file": "apps/web/src/routes/api/widget/install-context.ts",
@@ -608,7 +615,7 @@
       "mutator": "OptionalChaining",
       "line": "raw = storage()?.getItem(EMOJI_RECENT_STORAGE_KEY) ?? null",
       "replacement": "storage().getItem",
-      "why": "storage() returns null only when window is missing or localStorage access throws. Without the optional chaining that null becomes a TypeError inside the same try block, whose catch returns [] — the value the original returns for a null storage as well. Both paths yield 'nothing remembered'."
+      "why": "storage() returns null only when window is missing or localStorage access throws. Without the optional chaining that null becomes a TypeError inside the same try block, whose catch returns [] \u2014 the value the original returns for a null storage as well. Both paths yield 'nothing remembered'."
     },
     {
       "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
@@ -643,7 +650,7 @@
       "mutator": "UnaryOperator",
       "line": "const aRecent = a.emoji ? recents.indexOf(a.emoji) : -1",
       "replacement": "+1",
-      "why": "The false arm of a.emoji ? … : -1 is unreachable: matches is filtered on item.emoji two lines above, so every item compared here has a glyph. The comparator never evaluates the constant."
+      "why": "The false arm of a.emoji ? \u2026 : -1 is unreachable: matches is filtered on item.emoji two lines above, so every item compared here has a glyph. The comparator never evaluates the constant."
     },
     {
       "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
@@ -678,7 +685,7 @@
       "mutator": "ConditionalExpression",
       "line": "if (aRecent !== -1 || bRecent !== -1) {",
       "replacement": "false",
-      "why": "The second operand can only decide the entry when the first one is false, that is when aRecent === -1 — and that is exactly the case the block answers with its first statement, return 1. Dropping the operand therefore answers 0 where the original answered 1, which a stable sort reads the same way. Measured rather than assumed, because the mutant also makes the comparator inconsistent: 540,000 arrangements (60,000 each at lengths 2, 3, 4, 5, 8, 16, 40, 80 and 200) sorted identically under V8. Two further mutants share this address, replacing the whole condition and its first operand with false; both are caught by \"orders exact, then remembered by recency, then prefix, then the rest (G5)\", and that test, not this record, is what holds them. A record is only consulted for a mutant that survived, and one matching no survivor fails the run as stale."
+      "why": "The second operand can only decide the entry when the first one is false, that is when aRecent === -1 \u2014 and that is exactly the case the block answers with its first statement, return 1. Dropping the operand therefore answers 0 where the original answered 1, which a stable sort reads the same way. Measured rather than assumed, because the mutant also makes the comparator inconsistent: 540,000 arrangements (60,000 each at lengths 2, 3, 4, 5, 8, 16, 40, 80 and 200) sorted identically under V8. Two further mutants share this address, replacing the whole condition and its first operand with false; both are caught by \"orders exact, then remembered by recency, then prefix, then the rest (G5)\", and that test, not this record, is what holds them. A record is only consulted for a mutant that survived, and one matching no survivor fails the run as stale."
     },
     {
       "file": "apps/web/src/lib/shared/emoji-recommendations.ts",
@@ -699,7 +706,7 @@
       "mutator": "ConditionalExpression",
       "line": "if (value === 'dashboard' || value === 'widget' || value === 'portal') return value",
       "replacement": "false",
-      "why": "The mutant drops the third operand, so a stored 'portal' falls through to the line below — which returns 'portal'. The clause is deliberately redundant with the fallback: it keeps all three audiences named where a reader looks for them, rather than leaving 'portal' to be inferred from the default. No value can tell the two apart, because the two answers are the same string."
+      "why": "The mutant drops the third operand, so a stored 'portal' falls through to the line below \u2014 which returns 'portal'. The clause is deliberately redundant with the fallback: it keeps all three audiences named where a reader looks for them, rather than leaving 'portal' to be inferred from the default. No value can tell the two apart, because the two answers are the same string."
     },
     {
       "file": "apps/web/src/lib/server/realtime/stream-token.ts",
@@ -713,14 +720,14 @@
       "mutator": "EqualityOperator",
       "line": "if (dot <= 0) return null",
       "replacement": "dot < 0",
-      "why": "The two differ only when the last '.' sits at index 0. That token can be built — the payload is the empty string and this key signs it — but an empty payload carries no separator, so `if (sep <= 0) return null` refuses it on the next branch. The answer is null either way."
+      "why": "The two differ only when the last '.' sits at index 0. That token can be built \u2014 the payload is the empty string and this key signs it \u2014 but an empty payload carries no separator, so `if (sep <= 0) return null` refuses it on the next branch. The answer is null either way."
     },
     {
       "file": "apps/web/src/lib/server/realtime/stream-token.ts",
       "mutator": "ConditionalExpression",
       "line": "if (sep <= 0) return null",
       "replacement": "false",
-      "why": "A signed payload with no separator, or one starting with it, is the only thing this guard answers. Past it, `withoutExpiry` is either the payload minus its last character or the empty string, and neither holds a separator either — so `if (scopeSep <= 0) return null` refuses it. Reaching that far at all needs a payload that parses as a future timestamp, and it still ends in null."
+      "why": "A signed payload with no separator, or one starting with it, is the only thing this guard answers. Past it, `withoutExpiry` is either the payload minus its last character or the empty string, and neither holds a separator either \u2014 so `if (scopeSep <= 0) return null` refuses it. Reaching that far at all needs a payload that parses as a future timestamp, and it still ends in null."
     },
     {
       "file": "apps/web/src/lib/server/realtime/stream-token.ts",

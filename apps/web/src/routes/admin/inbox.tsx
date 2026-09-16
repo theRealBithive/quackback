@@ -94,6 +94,7 @@ import {
   type InboxNavItem,
   type InboxSearch,
 } from '@/lib/client/conversation/inbox-scope'
+import { reconcileCachedThread } from '@/lib/client/conversation/reconcile-cached-thread'
 import type { Channel } from '@/lib/shared/channels'
 import { conversationInboxQueries } from '@/lib/client/queries/conversation-inbox'
 import { inboxQueries, inboxKeys, ticketQueries, ticketKeys } from '@/lib/client/queries/inbox'
@@ -174,113 +175,100 @@ function QuinnBucketChips({
   )
 }
 
-export const Route = createFileRoute('/admin/inbox')({
-  // `?i=<id>` deep-links the open item (a conversation OR ticket TypeID,
-  // discriminated by prefix — UNIFIED-INBOX-SPEC.md §2.2). `?c=` is the legacy
-  // alias, accepted forever (existing deep links in notification emails,
-  // conversation.convert.ts, conversation.notify.ts) and normalized to `i` here.
-  // `?view=`/`?tag=` deep-link the left-nav scope so it survives a refresh and is
-  // shareable. Everything that defines the current view lives in the URL so a
-  // refresh restores the exact open item + filters, and links are shareable.
-  validateSearch: (search: Record<string, unknown>): InboxSearch => {
-    const rawI = typeof search.i === 'string' ? search.i : undefined
-    const rawC = typeof search.c === 'string' ? search.c : undefined
-    const i =
-      rawI && inboxItemRefFromId(rawI) ? rawI : rawC && inboxItemRefFromId(rawC) ? rawC : undefined
-    return {
-      i,
-      // Only accept a well-formed conversation-message id — a stray `?m=` is harmless
-      // (the thread just won't find it), but validating keeps it tidy.
-      m:
-        typeof search.m === 'string' && isValidTypeId(search.m, 'conversation_msg')
-          ? search.m
-          : undefined,
-      // Allowlist tracks the nav view lists (incl. 'saved' + the Tickets-section
-      // scopes) so deep-links can't silently drop a real view and fall back to
-      // the conversation list.
-      view: isInboxView(search.view) ? search.view : undefined,
-      // Only accept a well-formed conversation-tag id — a malformed `?tag=` would reach a
-      // uuid-backed query and 500 the conversation list.
-      tag:
-        typeof search.tag === 'string' && isValidTypeId(search.tag, 'conversation_tag')
-          ? search.tag
-          : undefined,
-      // Only accept a well-formed segment id — a malformed `?segment=` would reach
-      // a uuid-backed membership subquery and 500 the conversation list.
-      segment:
-        typeof search.segment === 'string' && isValidTypeId(search.segment, 'segment')
-          ? search.segment
-          : undefined,
-      // Per-team inbox scope — validated to a real team id.
-      team:
-        typeof search.team === 'string' && isValidTypeId(search.team, 'team')
-          ? search.team
-          : undefined,
-      // Custom saved view scope — validated to a real conversation-view id.
-      viewId:
-        typeof search.viewId === 'string' && isValidTypeId(search.viewId, 'conversation_view')
-          ? search.viewId
-          : undefined,
-      // Inbox ordering; only a canonical sort is accepted (else the default).
-      sort: isConversationSort(search.sort) ? search.sort : undefined,
-      // The triage facet (open/waiting/closed/all), accepting the legacy
-      // 'snoozed' value as 'waiting'.
-      status: normalizeTriageFacet(search.status),
-      priority: PRIORITY_VALUES.includes(search.priority as ConversationPriority | 'all')
-        ? (search.priority as ConversationPriority | 'all')
+// URL is the source of truth for open item + filters (refresh-safe, shareable).
+// `?c=` is the legacy alias for `?i=`, accepted forever.
+function validateInboxSearch(search: Record<string, unknown>): InboxSearch {
+  const rawI = typeof search.i === 'string' ? search.i : undefined
+  const rawC = typeof search.c === 'string' ? search.c : undefined
+  const i =
+    rawI && inboxItemRefFromId(rawI) ? rawI : rawC && inboxItemRefFromId(rawC) ? rawC : undefined
+  return {
+    i,
+    // Only accept a well-formed conversation-message id — a stray `?m=` is harmless
+    // (the thread just won't find it), but validating keeps it tidy.
+    m:
+      typeof search.m === 'string' && isValidTypeId(search.m, 'conversation_msg')
+        ? search.m
         : undefined,
-      // The tickets-branch registry-type dropdown — only a well-formed
-      // ticket_type id is accepted (a junk value is dropped, never reaching
-      // the uuid-backed ticket query).
-      ttype: coerceTicketTypeId(typeof search.ttype === 'string' ? search.ttype : undefined),
-      // Quinn-view sub-filter by involvement outcome; only the canonical buckets.
-      ai:
-        search.ai === 'resolved' || search.ai === 'escalated' || search.ai === 'pending'
-          ? search.ai
+    // Allowlist tracks the nav view lists (incl. 'saved' + the Tickets-section
+    // scopes) so deep-links can't silently drop a real view and fall back to
+    // the conversation list.
+    view: isInboxView(search.view) ? search.view : undefined,
+    // Only accept a well-formed conversation-tag id — a malformed `?tag=` would reach a
+    // uuid-backed query and 500 the conversation list.
+    tag:
+      typeof search.tag === 'string' && isValidTypeId(search.tag, 'conversation_tag')
+        ? search.tag
+        : undefined,
+    // Only accept a well-formed segment id — a malformed `?segment=` would reach
+    // a uuid-backed membership subquery and 500 the conversation list.
+    segment:
+      typeof search.segment === 'string' && isValidTypeId(search.segment, 'segment')
+        ? search.segment
+        : undefined,
+    // Per-team inbox scope — validated to a real team id.
+    team:
+      typeof search.team === 'string' && isValidTypeId(search.team, 'team')
+        ? search.team
+        : undefined,
+    // Custom saved view scope — validated to a real conversation-view id.
+    viewId:
+      typeof search.viewId === 'string' && isValidTypeId(search.viewId, 'conversation_view')
+        ? search.viewId
+        : undefined,
+    // Inbox ordering; only a canonical sort is accepted (else the default).
+    sort: isConversationSort(search.sort) ? search.sort : undefined,
+    // The triage facet (open/waiting/closed/all), accepting the legacy
+    // 'snoozed' value as 'waiting'.
+    status: normalizeTriageFacet(search.status),
+    priority: PRIORITY_VALUES.includes(search.priority as ConversationPriority | 'all')
+      ? (search.priority as ConversationPriority | 'all')
+      : undefined,
+    // The tickets-branch registry-type dropdown — only a well-formed
+    // ticket_type id is accepted (a junk value is dropped, never reaching
+    // the uuid-backed ticket query).
+    ttype: coerceTicketTypeId(typeof search.ttype === 'string' ? search.ttype : undefined),
+    // Quinn-view sub-filter by involvement outcome; only the canonical buckets.
+    ai:
+      search.ai === 'resolved' || search.ai === 'escalated' || search.ai === 'pending'
+        ? search.ai
+        : undefined,
+    q:
+      typeof search.q === 'string' && search.q
+        ? search.q
+        : typeof search.q === 'number' && Number.isFinite(search.q)
+          ? String(search.q)
           : undefined,
-      q: typeof search.q === 'string' && search.q ? search.q : undefined,
-      channel: normalizeInboxChannel(search.channel),
-      // Carries the shared `?post=` modal target (the admin layout mounts the
-      // modal) so clicking an embedded post in a conversation opens it without leaving the
-      // inbox. Validated to a real post id; a junk value is dropped.
-      post:
-        typeof search.post === 'string' && isValidTypeId(search.post, 'post')
-          ? search.post
-          : undefined,
-      // Company refinement (deep-linked from the conversation CompanyCard). Only a
-      // well-formed company id is accepted — a malformed `?company=` would reach a
-      // uuid-backed subquery and 500 the conversation list.
-      company:
-        typeof search.company === 'string' && isValidTypeId(search.company, 'company')
-          ? search.company
-          : undefined,
-    }
-  },
+    channel: normalizeInboxChannel(search.channel),
+    // Carries the shared `?post=` modal target (the admin layout mounts the
+    // modal) so clicking an embedded post in a conversation opens it without leaving the
+    // inbox. Validated to a real post id; a junk value is dropped.
+    post:
+      typeof search.post === 'string' && isValidTypeId(search.post, 'post')
+        ? search.post
+        : undefined,
+    // Company refinement (deep-linked from the conversation CompanyCard). Only a
+    // well-formed company id is accepted — a malformed `?company=` would reach a
+    // uuid-backed subquery and 500 the conversation list.
+    company:
+      typeof search.company === 'string' && isValidTypeId(search.company, 'company')
+        ? search.company
+        : undefined,
+  }
+}
+
+export const Route = createFileRoute('/admin/inbox')({
+  validateSearch: validateInboxSearch,
   beforeLoad: ({ context }) => {
     if (!isProductEnabled(context.settings?.featureFlags, 'support')) {
       throw redirect({ to: getFirstEnabledAdminProductPath(context.settings?.featureFlags) })
     }
   },
-  // Re-run the prefetch when the scope / filters / open item change, so
-  // a client-side navigation re-warms the cache too. ensureQueryData is a no-op
-  // when the data is still fresh, so this doesn't double-fetch.
-  loaderDeps: ({ search }) => ({
-    view: search.view,
-    tag: search.tag,
-    segment: search.segment,
-    team: search.team,
-    viewId: search.viewId,
-    sort: search.sort,
-    status: search.status,
-    priority: search.priority,
-    ttype: search.ttype,
-    ai: search.ai,
-    q: search.q,
-    channel: search.channel,
-    i: search.i,
-    company: search.company,
-  }),
-  loader: async ({ deps, context }) => {
+  // No loaderDeps: runs once for SSR. Filter/selection changes are served by
+  // the component's own queries, so switching conversations never blocks the
+  // outlet behind the pending spinner. First load still awaits list + thread
+  // so the document hydrates instead of racing a fire-and-forget prefetch.
+  loader: async ({ context, location }) => {
     // Auth is enforced by the parent `/admin` guard (admin/member wall) plus
     // each inbox server function's own authz — no per-route RPC guard needed.
     const flags = context.settings?.featureFlags as FeatureFlags | undefined
@@ -290,11 +278,17 @@ export const Route = createFileRoute('/admin/inbox')({
     // conversation affordances hidden.
     if (!flags?.supportInbox && !flags?.supportTickets) return {}
     const { queryClient } = context
-    const nav = navFromSearch(deps)
-    const facet: InboxTriageFacet = deps.status ?? 'open'
-    const priority = deps.priority ?? 'all'
-    const search = (deps.q ?? '').trim()
-    const sort = deps.sort ?? defaultConversationSort(!!search)
+    // No loaderDeps (so filter/selection changes do not remount the outlet),
+    // which also means the loader is not given the validateSearch result.
+    // `location.search` is the raw parsed URL — re-run the same normalizer
+    // so `?q=123` is a string, `?c=` maps onto `i`, and rejected facets
+    // never reach the prefetch queries.
+    const search = validateInboxSearch(location.search as Record<string, unknown>)
+    const nav = navFromSearch(search)
+    const facet: InboxTriageFacet = search.status ?? 'open'
+    const priority = search.priority ?? 'all'
+    const searchTerm = (search.q ?? '').trim()
+    const sort = search.sort ?? defaultConversationSort(!!searchTerm)
     const isSaved = nav.kind === 'view' && nav.view === 'saved'
     // A custom view's list depends on its rule set (loaded client-side from the
     // views list), so — like Saved — it hydrates client-side, not here.
@@ -302,16 +296,12 @@ export const Route = createFileRoute('/admin/inbox')({
     const useUnified = usesUnifiedInboxList(nav)
     // A `?company=` deep link SSR-prefetches the FILTERED list under the same
     // factory key the component reads, so the filtered view hydrates too.
-    const company = deps.company as CompanyId | undefined
+    const company = search.company as CompanyId | undefined
     // Best-effort: a failed prefetch (e.g. a stale `?i=`) must never break the
     // page — each is caught independently and the component's useQuery still
-    // fetches client-side, degrading to today's behavior.
+    // fetches client-side.
     const warm = (p: Promise<unknown>) => p.catch(() => undefined)
-    const ref = deps.i ? inboxItemRefFromId(deps.i) : null
-    // Split (rather than a ternary passed straight into ensureQueryData) so
-    // each branch's distinct TData/queryKey types are inferred independently —
-    // a ternary union of the two queryOptions confuses ensureQueryData's
-    // generic inference.
+    const ref = search.i ? inboxItemRefFromId(search.i) : null
     let listPrefetch: Promise<unknown> | undefined
     if (skipListPrefetch) {
       listPrefetch = undefined
@@ -323,12 +313,12 @@ export const Route = createFileRoute('/admin/inbox')({
               nav,
               facet,
               priority,
-              search,
+              searchTerm,
               company,
               sort,
               undefined,
-              deps.ttype,
-              deps.channel
+              search.ttype,
+              search.channel
             )
           )
         )
@@ -340,12 +330,12 @@ export const Route = createFileRoute('/admin/inbox')({
             nav,
             facetToStatusFilter(facet),
             priority,
-            search,
+            searchTerm,
             company,
             sort,
             undefined,
-            deps.ai,
-            deps.channel
+            search.ai,
+            search.channel
           )
         )
       )
@@ -672,6 +662,17 @@ function InboxPage() {
     refreshInboxList()
     refreshInboxCounts()
   }, [refreshInboxList, refreshInboxCounts])
+  // SSE reconnect (and a first open after failed attempts) forgoes
+  // Last-Event-ID replay, so list/count invalidation alone leaves
+  // hover-prefetched threads fresh and missing gap events. Mark those
+  // caches stale; the open pane refetches, inactive prefetches refetch
+  // on select.
+  const refreshInboxAfterReconnect = useCallback(() => {
+    refreshInbox()
+    void queryClient.invalidateQueries({ queryKey: ['admin', 'inbox', 'thread'] })
+    void queryClient.invalidateQueries({ queryKey: [...ticketKeys.all(), 'thread'] })
+    void queryClient.invalidateQueries({ queryKey: [...ticketKeys.all(), 'detail'] })
+  }, [queryClient, refreshInbox])
 
   // Track whether the visitor of the selected conversation is currently typing.
   const {
@@ -690,7 +691,6 @@ function InboxPage() {
   // The open conversation/ticket id, or null when the other kind (or nothing)
   // is selected.
   const activeConversationId = selectedRef?.kind === 'conversation' ? selectedRef.id : null
-  const activeTicketId = selectedRef?.kind === 'ticket' ? selectedRef.id : null
 
   // Hoisted above `useInboxListSource` (below) so its connection state can
   // gate that hook's polling-fallback `refetchInterval`s — while the stream
@@ -700,7 +700,7 @@ function InboxPage() {
   const { connected: streamConnected } = useConversationStream({
     enabled: true,
     buildUrl: async () => '/api/chat/stream?scope=inbox',
-    onReconnect: refreshInbox,
+    onReconnect: refreshInboxAfterReconnect,
     onEvent: (evt) => {
       // A ticket's live properties (status/assignee/priority/stage/type) name
       // their own cache keys precisely, so this patches them directly instead
@@ -712,11 +712,18 @@ function InboxPage() {
       // membership/order invalidation follows for this event — the patch IS
       // the up-to-date row.
       if (evt.kind === 'ticket_updated') {
+        // Seed the event DTO, then reapply after any in-flight detail prefetch
+        // so its older snapshot cannot overwrite this and stay fresh for 60s.
         queryClient.setQueryData(ticketKeys.detail(evt.ticket.id), evt.ticket)
+        reconcileCachedThread<TicketDTO>(
+          queryClient,
+          ticketKeys.detail(evt.ticket.id),
+          () => evt.ticket
+        )
         patchTicketInInboxLists(queryClient, evt.ticket)
       } else if (agentEventChangesInboxList(evt)) {
-        // Every other membership/order/preview-changing event (a new message,
-        // a conversation's status/assignee/tags, an agent-side read move) —
+        // Every membership/order/preview-changing event (a new message, a
+        // conversation's status/assignee/tags, an agent-side read move) —
         // the reducer's own predicate decides, so this can't drift from what
         // the thread-cache reducers already treat as list-affecting.
         refreshInboxList()
@@ -739,19 +746,31 @@ function InboxPage() {
         else if (evt.side === 'agent') onOtherAgentTyping()
       }
 
-      // Everything cache-shaped (message/read/updated/deleted/conversation)
-      // routes through the pure reducer against the open thread's cache — one
-      // branch per kind, since each has its own cache key + reducer.
-      if (activeConversationId) {
-        queryClient.setQueryData(
-          conversationKeys.agentThread(activeConversationId),
-          (prev: AgentThreadCache | undefined) =>
-            applyAgentThreadEvent(prev, evt, activeConversationId)
+      // Thread caches: the open thread and any hover-prefetched (or previously
+      // opened) thread for this event. Unvisited rows stay untouched. Ephemeral
+      // typing / assistant frames have nothing in the cache to patch.
+      const conversationId =
+        evt.kind === 'conversation'
+          ? evt.conversation.id
+          : 'conversationId' in evt
+            ? evt.conversationId
+            : undefined
+      if (
+        conversationId &&
+        evt.kind !== 'typing' &&
+        evt.kind !== 'assistant_activity' &&
+        evt.kind !== 'assistant_delta'
+      ) {
+        reconcileCachedThread<AgentThreadCache>(
+          queryClient,
+          conversationKeys.agentThread(conversationId),
+          (prev) => applyAgentThreadEvent(prev, evt, conversationId)
         )
-      } else if (activeTicketId) {
-        queryClient.setQueryData(
-          ticketKeys.thread(activeTicketId),
-          (prev: TicketThreadCache | undefined) => applyTicketThreadEvent(prev, evt, activeTicketId)
+      } else if (evt.kind === 'ticket_message') {
+        reconcileCachedThread<TicketThreadCache>(
+          queryClient,
+          ticketKeys.thread(evt.ticketId),
+          (prev) => applyTicketThreadEvent(prev, evt, evt.ticketId)
         )
       }
     },

@@ -313,6 +313,13 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'packages/ids/src/drizzle.ts',
         suites: ['packages/ids/src/__tests__/drizzle.test.ts'],
       },
+      {
+        file: 'apps/web/src/lib/client/conversation/reconcile-cached-thread.ts',
+        suites: [
+          'apps/web/src/lib/client/conversation/reconcile-cached-thread.test.ts',
+          'apps/web/src/lib/client/conversation/__tests__/reconcile-cached-thread.contract.test.ts',
+        ],
+      },
     ])
   })
 

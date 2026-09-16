@@ -1,4 +1,5 @@
 import {
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -17,7 +18,8 @@ import { MAX_CONVERSATION_MESSAGE_LENGTH } from '@/lib/shared/conversation/types
 import { startAgentConversationFn } from '@/lib/server/functions/conversation'
 import { realEmail } from '@/lib/shared/anonymous-email'
 import { PortalUserPicker } from '@/components/shared/portal-user-picker'
-import { RichTextEditor } from '@/components/ui/rich-text-editor'
+import { LazyRichTextEditor } from '@/components/ui/lazy-rich-text-editor'
+import { Skeleton } from '@/components/ui/skeleton'
 import { CONVERSATION_EDITOR_FEATURES } from '@/components/conversation/conversation-editor-features'
 import { ComposerAttachmentTray } from '@/components/shared/composer-attachment-tray'
 import { isEmptyTiptapDoc } from '@/lib/shared/utils/is-empty-tiptap-doc'
@@ -206,18 +208,22 @@ export function NewConversationDialog({
               </span>
             </div>
             <div onPaste={handleComposerPaste} onDrop={handleComposerDrop}>
-              <RichTextEditor
-                key={composerKey}
-                value={messageJson ?? ''}
-                onChange={(json, _html, markdown) => {
-                  setMessageJson(json)
-                  setMessageMarkdown(markdown)
-                }}
-                features={CONVERSATION_EDITOR_FEATURES}
-                autofocus
-                minHeight="100px"
-                placeholder="Write your message…"
-              />
+              <Suspense
+                fallback={<Skeleton className="w-full rounded-md" style={{ minHeight: '100px' }} />}
+              >
+                <LazyRichTextEditor
+                  key={composerKey}
+                  value={messageJson ?? ''}
+                  onChange={(json, _html, markdown) => {
+                    setMessageJson(json)
+                    setMessageMarkdown(markdown)
+                  }}
+                  features={CONVERSATION_EDITOR_FEATURES}
+                  autofocus
+                  minHeight="100px"
+                  placeholder="Write your message…"
+                />
+              </Suspense>
               <ComposerAttachmentTray
                 attachments={pendingAttachments}
                 onRemove={removeAttachment}

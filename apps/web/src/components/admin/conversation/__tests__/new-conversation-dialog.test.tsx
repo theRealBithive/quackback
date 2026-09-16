@@ -127,9 +127,18 @@ function renderDialog(open = true) {
   return { ...result, onOpenChange, client }
 }
 
-/** The element carrying the dialog's paste and drop handlers. */
-function composerBox(): HTMLElement {
-  return screen.getByTestId('editor').parentElement as HTMLElement
+/**
+ * The element carrying the dialog's paste and drop handlers.
+ *
+ * Awaited, because the editor now arrives through a `lazy()` boundary
+ * (upstream #553): the handlers' own div renders straight away, but the editor
+ * this reads its parent off does not. Without the await the suite passed only
+ * because the first test in the file resolved the chunk for the rest — run one
+ * of the others alone and it could not find the editor at all.
+ */
+async function composerBox(): Promise<HTMLElement> {
+  const editor = await screen.findByTestId('editor')
+  return editor.parentElement as HTMLElement
 }
 
 /** The thumbnails currently staged in the attachment tray. */
@@ -162,7 +171,7 @@ describe('NewConversationDialog — the attachment tray', () => {
     vi.stubGlobal('fetch', fetchMock)
     renderDialog()
 
-    const handled = fireEvent.paste(composerBox(), {
+    const handled = fireEvent.paste(await composerBox(), {
       clipboardData: { files: [pngFile()], items: [] },
     })
 
@@ -179,7 +188,7 @@ describe('NewConversationDialog — the attachment tray', () => {
     vi.stubGlobal('fetch', fetchMock)
     renderDialog()
 
-    const handled = fireEvent.drop(composerBox(), {
+    const handled = fireEvent.drop(await composerBox(), {
       dataTransfer: { files: [pngFile('dropped.png')], items: [] },
     })
 
@@ -192,10 +201,10 @@ describe('NewConversationDialog — the attachment tray', () => {
     vi.stubGlobal('fetch', fetchMock)
     renderDialog()
 
-    const pasted = fireEvent.paste(composerBox(), {
+    const pasted = fireEvent.paste(await composerBox(), {
       clipboardData: { files: [textFile()], items: [] },
     })
-    const dropped = fireEvent.drop(composerBox(), {
+    const dropped = fireEvent.drop(await composerBox(), {
       dataTransfer: { files: [textFile()], items: [] },
     })
 
@@ -206,13 +215,17 @@ describe('NewConversationDialog — the attachment tray', () => {
     expect(trayThumbnails()).toEqual([])
   })
 
-  it('changes nothing on a paste or drop carrying no files at all (C1)', () => {
+  it('changes nothing on a paste or drop carrying no files at all (C1)', async () => {
     const fetchMock = respondWith('https://cdn.example.com/never.png')
     vi.stubGlobal('fetch', fetchMock)
     renderDialog()
 
-    expect(fireEvent.paste(composerBox(), { clipboardData: { files: [], items: [] } })).toBe(true)
-    expect(fireEvent.drop(composerBox(), { dataTransfer: { files: [], items: [] } })).toBe(true)
+    expect(fireEvent.paste(await composerBox(), { clipboardData: { files: [], items: [] } })).toBe(
+      true
+    )
+    expect(fireEvent.drop(await composerBox(), { dataTransfer: { files: [], items: [] } })).toBe(
+      true
+    )
     expect(fetchMock).not.toHaveBeenCalled()
     expect(trayThumbnails()).toEqual([])
   })
@@ -255,7 +268,9 @@ describe('NewConversationDialog — the attachment tray', () => {
     const send = screen.getByRole('button', { name: /Send message/ })
     expect(send).toBeDisabled()
 
-    fireEvent.paste(composerBox(), { clipboardData: { files: [pngFile('only.png')], items: [] } })
+    fireEvent.paste(await composerBox(), {
+      clipboardData: { files: [pngFile('only.png')], items: [] },
+    })
     await waitFor(() => expect(send).toBeEnabled())
 
     fireEvent.click(send)
@@ -294,10 +309,10 @@ describe('NewConversationDialog — the attachment tray', () => {
     const send = screen.getByRole('button', { name: /Send message/ })
     // Typed text alone would already allow a send; the in-flight upload is what
     // holds it back, so the message is non-empty before the paste.
-    fireEvent.click(screen.getByTestId('type-a-message'))
+    fireEvent.click(await screen.findByTestId('type-a-message'))
     expect(send).toBeEnabled()
 
-    fireEvent.paste(composerBox(), { clipboardData: { files: [pngFile()], items: [] } })
+    fireEvent.paste(await composerBox(), { clipboardData: { files: [pngFile()], items: [] } })
     await waitFor(() => expect(send).toBeDisabled())
 
     finishUpload({
@@ -310,7 +325,7 @@ describe('NewConversationDialog — the attachment tray', () => {
   it('carries the editor’s document and its trimmed markdown into the send (C3)', async () => {
     renderDialog()
 
-    fireEvent.click(screen.getByTestId('type-a-message'))
+    fireEvent.click(await screen.findByTestId('type-a-message'))
     fireEvent.click(screen.getByRole('button', { name: /Send message/ }))
 
     await waitFor(() => expect(mocks.startAgentConversationFn).toHaveBeenCalledOnce())
@@ -331,7 +346,9 @@ describe('NewConversationDialog — the attachment tray', () => {
     vi.stubGlobal('fetch', respondWith('https://cdn.example.com/stale.png'))
     const { rerender, client } = renderDialog()
 
-    fireEvent.paste(composerBox(), { clipboardData: { files: [pngFile('stale.png')], items: [] } })
+    fireEvent.paste(await composerBox(), {
+      clipboardData: { files: [pngFile('stale.png')], items: [] },
+    })
     await waitFor(() => expect(trayThumbnails()).toEqual(['https://cdn.example.com/stale.png']))
 
     const dialog = (open: boolean) => (
@@ -354,7 +371,7 @@ describe('NewConversationDialog — the attachment tray', () => {
     )
     renderDialog()
 
-    fireEvent.paste(composerBox(), { clipboardData: { files: [pngFile()], items: [] } })
+    fireEvent.paste(await composerBox(), { clipboardData: { files: [pngFile()], items: [] } })
 
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('The storage bucket is full'))
     expect(trayThumbnails()).toEqual([])

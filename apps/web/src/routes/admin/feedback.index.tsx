@@ -31,16 +31,11 @@ export const Route = createFileRoute('/admin/feedback/')({
       queryClient: typeof context.queryClient
     }
 
-    // Pre-fetch all data in parallel using React Query. The posts query only
-    // ever prefetches the default/initial (unfiltered) dataset — a filtered
-    // URL on first load falls through to InboxContainer's own client fetch,
-    // same as the portal feed.
+    // The posts query only ever prefetches the default/initial (unfiltered)
+    // dataset — a filtered URL on first load falls through to InboxContainer's
+    // own client fetch, same as the portal feed. Awaited so the document
+    // hydrates instead of racing a fire-and-forget prefetch.
     await Promise.all([
-      // Warm the SAME infinite cache the renderer reads (QC-1): one shared
-      // query definition, so mutations invalidating inboxKeys.lists() reach the
-      // cache the UI actually renders. Only the default/unfiltered dataset is
-      // prefetched; a filtered URL on first load falls through to the client
-      // fetch inside InboxContainer.
       queryClient.ensureInfiniteQueryData(inboxPostsInfiniteOptions(defaultInboxFilters)),
       queryClient.ensureQueryData(inboxFacetCountsOptions(defaultInboxFilters)),
       queryClient.ensureQueryData(adminQueries.boards()),

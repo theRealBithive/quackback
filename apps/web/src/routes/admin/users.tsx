@@ -67,8 +67,6 @@ export const Route = createFileRoute('/admin/users')({
     }
 
     await Promise.all([
-      // Warm the SAME infinite cache the Users list renders (QC-1), so a
-      // segment membership change (invalidating usersKeys.all) reaches it.
       queryClient.ensureInfiniteQueryData(portalUsersInfiniteOptions(defaultUsersFilters)),
       queryClient.ensureQueryData(adminQueries.segments()),
     ])
