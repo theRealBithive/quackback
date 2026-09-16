@@ -2180,3 +2180,44 @@ object-literal cast onto it needs to go through `unknown`.
 
 Fixed in the batch C pull request by adding `bun run --cwd packages/ids
 typecheck` to the `check` job, next to the other package typechecks.
+
+## 1x — A `lazy()` boundary makes a suite pass in file order and fail alone
+
+Upstream #553 put the rich text editor behind `lazy()` in two dialogs. Both
+suites mock `@/components/ui/rich-text-editor`, so the mock still answers — one
+microtask later. Every test that reached for the editor synchronously
+(`screen.getByTestId('editor')`, `screen.getByLabelText('Post body')`) should
+have gone red, and only the **first** one in each file did: by the time the
+second ran, the module cache held the resolved chunk, so the editor was there on
+the first tick. `new-conversation-dialog.test.tsx` failed one test of eleven,
+which reads like a flake and is not; `create-post-dialog.test.tsx` was fully
+green and its second test failed on its own under `-t`.
+
+So a green file proves nothing about a lazy boundary: the ordering makes the
+suite hide exactly the tests that would report it. When a pick moves a component
+behind `Suspense`, run at least one test of every suite that mounts it **on its
+own** — `bun x vitest run <file> -t '<one test>'` — and switch the query to
+`findBy*`. Awaiting the element is not softening the test; the element genuinely
+is not there yet, and the handlers the suite is about (the paste/drop div here)
+render outside the boundary and are unaffected.
+
+## 1x — `gh run view --log` truncates, and the failure summary is what it drops
+
+A shard failed in CI. `gh run view <run> --log-failed --job <job>` returned 1,571
+lines ending mid-run at 07:55:07, for a job that completed at 07:56:23 — no
+`FAIL`, no `Failed Tests`, no `Tests  n failed` line anywhere in it. The same
+`--log` for that job returned the identical truncated 1,571 lines, so a second
+opinion from the CLI is not one. Everything visible was stderr noise the passing
+tests print, which invites the wrong conclusion: that the runner was killed.
+
+The raw archive is complete — 2,072 lines for the same job, with the summary at
+line 1,574:
+
+```bash
+gh api repos/<owner>/<repo>/actions/runs/<run>/logs > run.zip
+unzip -q run.zip -d runlogs && grep -nE "FAIL |Failed Tests" "runlogs/7_test (4_4).txt"
+```
+
+Go to the zip first whenever a job's log ends without a summary line. The job
+step list (`gh api .../actions/jobs/<id>`) says which step failed and is worth
+reading either way, but it cannot say which test.
