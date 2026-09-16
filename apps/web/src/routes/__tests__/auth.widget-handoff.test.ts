@@ -3,6 +3,19 @@
  *
  * The loader is tested by exercising its extracted behavior via mocks —
  * the actual TanStack Start route is not instantiated.
+ *
+ * `runHandoffLoader` below is therefore a hand-kept mirror of the production
+ * handler, and a mirror can agree with a test while disagreeing with the code
+ * it mirrors. That is fine for the branch logic, which is what these cases are
+ * about, and not fine for one claim in this batch's contract:
+ *
+ *   R6 The one-time-token handoff promotes the session to the portal audience
+ *      before the cookie is set, not after.
+ *
+ * "Before, not after" is a fact about the order of two statements in the real
+ * file, and the mirror cannot hold it — so the last describe reads the file.
+ * The confirmed list this number comes from is in
+ * lib/server/functions/__tests__/auth-scope.test.ts.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -280,7 +293,7 @@ describe('widget handoff loader — valid OTT', () => {
     expect(mockDbInsert).toHaveBeenCalled()
   })
 
-  it('promotes the verified session to portal scope', async () => {
+  it('promotes the verified session to portal scope (R6)', async () => {
     mockFetch.mockResolvedValue(makeOkResponse({ id: 'sess_1', userId: 'user_abc' }))
 
     await runHandoffLoader('?ott=valid-token')
@@ -438,5 +451,36 @@ describe('widget handoff loader — invalid/expired/replayed OTT', () => {
 
     await runHandoffLoader('?ott=bad-token')
     expect(mockDbInsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('the production handler, read rather than mirrored (R6)', () => {
+  it('promotes the session to the portal audience before it forwards the cookie', async () => {
+    // The order is the guarantee. Installing the cookie first opens a window —
+    // however short — in which the browser holds a session that still satisfies
+    // every dashboard gate, and a promotion that failed afterwards would leave
+    // it there for good.
+    const { readFileSync } = await import('node:fs')
+    const source = readFileSync('apps/web/src/routes/auth.widget-handoff.tsx', 'utf8')
+
+    const promoted = source.indexOf(".set({ scope: 'portal' })")
+    const cookieForwarded = source.indexOf(
+      'setResponseHeader as (name: string, value: string | string[]) => void'
+    )
+
+    expect(promoted).toBeGreaterThan(-1)
+    expect(cookieForwarded).toBeGreaterThan(-1)
+    expect(promoted).toBeLessThan(cookieForwarded)
+  })
+
+  it('refuses the handoff before either of them when provenance fails', async () => {
+    const { readFileSync } = await import('node:fs')
+    const source = readFileSync('apps/web/src/routes/auth.widget-handoff.tsx', 'utf8')
+
+    const provenanceRefusal = source.indexOf("metadata: { reason: 'unverified_provenance' }")
+    const promoted = source.indexOf(".set({ scope: 'portal' })")
+
+    expect(provenanceRefusal).toBeGreaterThan(-1)
+    expect(provenanceRefusal).toBeLessThan(promoted)
   })
 })

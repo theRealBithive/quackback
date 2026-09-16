@@ -22,6 +22,7 @@ import { getWorkspaceScope, runWithWorkspaceScope } from '@/lib/server/workspace
 import { WorkspaceKeyedCache } from '@/lib/server/workspaces/workspace-keyed'
 import type { GenericOAuthConfig } from './build-oauth-configs'
 import { guardBetterAuthUserCreation } from './signup-policy'
+import { stampSessionAudience } from './session-scope'
 import { isSignInMethodEnabled } from '@/lib/shared/signin-methods'
 import { workspaceAuthTrustedOrigins } from './trusted-origins'
 import { ensureMcpOauthResource } from './ensure-mcp-oauth-resource'
@@ -636,11 +637,7 @@ async function createAuth() {
       session: {
         create: {
           // Only the widget's lazy anonymous mint; everything else is a dashboard sign-in.
-          before: async (sessionData, context) => {
-            if (context?.path === '/sign-in/anonymous') {
-              return { data: { ...sessionData, scope: 'widget' } }
-            }
-          },
+          before: stampSessionAudience,
         },
       },
     },

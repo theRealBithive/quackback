@@ -41,10 +41,17 @@ export interface VerifiedStreamToken {
   scope: SessionScope
 }
 
-/** Mint a stream token for a principal, valid for `ttlMs` (default 2 min). */
+/**
+ * Mint a stream token for a principal, valid for `ttlMs` (default 2 min).
+ *
+ * `scope` has no default on purpose: upstream defaults it to 'dashboard', which
+ * makes a caller that forgets the argument mint the most privileged audience.
+ * There is one caller and it passes the audience it authenticated, so the
+ * compiler can hold that rather than a fallback.
+ */
 export function mintStreamToken(
   principalId: PrincipalId,
-  scope: SessionScope = 'dashboard',
+  scope: SessionScope,
   ttlMs: number = DEFAULT_TTL_MS
 ): string {
   const payload = `${principalId}.${scope}.${Date.now() + ttlMs}`

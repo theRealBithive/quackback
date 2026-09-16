@@ -129,6 +129,7 @@ vi.mock('@/lib/server/db', async (importOriginal) => {
 })
 
 const { saveWorkspaceAndGoalFn, saveCloudOnboardingGoalFn } = await import('../onboarding')
+const { toSessionScope } = await import('@/lib/shared/roles')
 const { DEFAULT_FEATURE_FLAGS, resolveFeatureFlags } =
   await import('@/lib/server/domains/settings/settings.types')
 const { bootstrapAdminLock } = await import('@/lib/server/domains/principals/bootstrap-admin')
@@ -390,6 +391,56 @@ const CLOUD_IDENTITY = {
   customDomains: [],
   updatedAt: '2026-08-14T12:00:00.000Z',
 }
+
+/**
+ * Contract R9, from the confirmed list for this batch — the full list is in
+ * auth-scope.test.ts. Setup is the one surface where an unauthorized caller
+ * does not merely read the wrong thing: it claims the workspace. Both entry
+ * points refuse before they reach the promotion, so the audience matters here
+ * more than anywhere else.
+ */
+describe('the onboarding administrator gates refuse a non-dashboard audience (R9)', () => {
+  it.each(['widget', 'portal'] as const)(
+    'refuses saveWorkspaceAndGoalFn on a %s session',
+    async (scope) => {
+      hoisted.getSession.mockResolvedValue({ session: { scope }, user: { id: 'user_caller' } })
+      hoisted.getSettings.mockResolvedValue(undefined)
+
+      await expect(
+        saveWorkspaceAndGoalFn({ data: { workspaceName: 'Acme Inc', useCase: 'customer_support' } })
+      ).rejects.toThrow(/only admin/i)
+
+      // Nothing was claimed and nothing was promoted on the way to the refusal.
+      expect(hoisted.txExecute).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(['widget', 'portal'] as const)(
+    'refuses saveCloudOnboardingGoalFn on a %s session',
+    async (scope) => {
+      hoisted.getSession.mockResolvedValue({ session: { scope }, user: { id: 'user_caller' } })
+      hoisted.getSettings.mockResolvedValue(undefined)
+
+      await expect(saveCloudOnboardingGoalFn({ data: { useCase: 'help_center' } })).rejects.toThrow(
+        /only admin/i
+      )
+
+      expect(hoisted.flagWrites).toEqual([])
+    }
+  )
+
+  it('refuses a session carrying an audience nobody wrote (R12)', async () => {
+    hoisted.getSession.mockResolvedValue({
+      session: { scope: toSessionScope('something-else') },
+      user: { id: 'user_caller' },
+    })
+    hoisted.getSettings.mockResolvedValue(undefined)
+
+    await expect(
+      saveWorkspaceAndGoalFn({ data: { workspaceName: 'Acme Inc', useCase: 'customer_support' } })
+    ).rejects.toThrow(/only admin/i)
+  })
+})
 
 describe('saveCloudOnboardingGoalFn enables the goal modules', () => {
   function cloudRow(overrides: Record<string, unknown> = {}) {

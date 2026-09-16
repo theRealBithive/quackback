@@ -4,6 +4,11 @@
  * principal resolution (stream token vs session cookie), the conversations
  * feature gate, and the three scopes (inbox / presence / conversationId) -
  * NOT the SSE streaming internals (heartbeats, backfill, buffering).
+ *
+ * Batch D adds the audience half: a stream is authorized from a session or from
+ * a minted token, and both now carry an audience that a promoted team role
+ * cannot talk past. Contract R2 and R8; the confirmed list is in
+ * lib/server/functions/__tests__/auth-scope.test.ts.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -219,14 +224,14 @@ describe('GET /api/chat/stream - inbox scope', () => {
     expect(mockSubscribe).toHaveBeenCalledWith(['conversation:inbox'], expect.any(Function))
   })
 
-  it('403s a promoted team role carried on a non-dashboard token', async () => {
+  it('403s a promoted team role carried on a non-dashboard token (R2, R8)', async () => {
     tokenPrincipal('admin', 'user', 'widget')
     const res = await GET({ request: req('?scope=inbox&token=t') })
     expect(res.status).toBe(403)
     expect(mockSubscribe).not.toHaveBeenCalled()
   })
 
-  it('403s a promoted team role carried on a non-dashboard session', async () => {
+  it('403s a promoted team role carried on a non-dashboard session (R2)', async () => {
     sessionPrincipal('admin', 'user', 'widget')
     const res = await GET({ request: req('?scope=inbox') })
     expect(res.status).toBe(403)
@@ -237,6 +242,12 @@ describe('GET /api/chat/stream - inbox scope', () => {
 describe('GET /api/chat/stream - presence scope', () => {
   it('403s a non-team principal', async () => {
     sessionPrincipal('user')
+    const res = await GET({ request: req('?scope=presence') })
+    expect(res.status).toBe(403)
+  })
+
+  it('403s a promoted team role carried on a non-dashboard session (R2)', async () => {
+    sessionPrincipal('admin', 'user', 'portal')
     const res = await GET({ request: req('?scope=presence') })
     expect(res.status).toBe(403)
   })
@@ -335,6 +346,14 @@ describe('GET /api/chat/stream - ticketId scope (unified inbox §3.2, M3)', () =
     expect(res.status).toBe(403)
     expect(mockSubscribe).not.toHaveBeenCalled()
     // Rejected on role alone — never even queries the ticket.
+    expect(mockTicketSelect).not.toHaveBeenCalled()
+  })
+
+  it('403s a promoted team role carried on a non-dashboard token (R2, R8)', async () => {
+    tokenPrincipal('admin', 'user', 'widget')
+    const res = await GET({ request: req('?ticketId=ticket_1&token=t') })
+    expect(res.status).toBe(403)
+    // Refused on the audience alone — the ticket is never looked up.
     expect(mockTicketSelect).not.toHaveBeenCalled()
   })
 

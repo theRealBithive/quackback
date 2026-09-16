@@ -232,6 +232,29 @@ describe('resolvePortalAccessForRequest — private portal', () => {
     expect(result).toEqual({ granted: true, reason: 'team' })
   })
 
+  it.each(['widget', 'portal'] as const)(
+    'refuses the team branch to that same admin on a %s session (R7)',
+    async (scope) => {
+      // The evaluator has a branch for teammates, and it is reached from the
+      // role on the principal row. On a non-dashboard audience that role is
+      // not a teammate's, so the caller is judged as the ordinary user they
+      // are here — refused, because their domain is not allowed. Contract R7;
+      // the confirmed list is in auth-scope.test.ts.
+      mockGetSession.mockResolvedValue({
+        session: { id: 'sess_1', scope },
+        user: { id: 'user_admin', email: 'admin@evil.com', emailVerified: true },
+      })
+      mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'admin' })
+      mockGetPortalConfig.mockResolvedValue({
+        access: { visibility: 'private', allowedDomains: [] },
+      })
+
+      const result = await resolvePortalAccessForRequest()
+
+      expect(result.granted).toBe(false)
+    }
+  )
+
   it('grants a verified caller whose email domain is on the allowlist', async () => {
     mockGetSession.mockResolvedValue({
       session: { id: 'sess_1', scope: 'dashboard' },
