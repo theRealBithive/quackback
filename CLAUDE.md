@@ -481,20 +481,49 @@ commits are attributed and the `Co-Authored-By` trailer does not trigger it
 (checked). A patch adopted from someone else, or a commit with an author email
 that belongs to no account, will.
 
-**Dependency updates.** The Renovate GitHub App is installed and reads
-`.github/renovate.json5`; because that config exists, Renovate skips its
-onboarding pull request. Renovate is the choice because Dependabot supports bun
-for version updates only — bun security updates are unsupported — and because
-only Renovate's `lockFileMaintenance` moves transitive dependencies, where most
-advisories live. The config's header comment carries the reasoning and the one
-knob worth touching. Nothing automerges, and pull requests arrive Mondays before
-6am Europe/Berlin, so a quiet week is expected rather than a symptom.
+**Dependency updates.** The Renovate GitHub App has access to this repository
+and reads `.github/renovate.json5`; because that config exists, Renovate skips
+its onboarding pull request. Renovate is the choice because Dependabot supports
+bun for version updates only — bun security updates are unsupported — and
+because only Renovate's `lockFileMaintenance` moves transitive dependencies,
+where most advisories live. The config's header comment carries the reasoning
+and the one knob worth touching. Nothing automerges, and pull requests arrive
+Mondays before 6am Europe/Berlin, so a quiet week is expected rather than a
+symptom.
 
-**Issues are disabled on this repository** (the default for a fork), and
-Renovate's dependency dashboard is an issue. Without it there is no surface
-showing what Renovate is holding back and no checkbox to force a run off
-schedule — it still works, you just cannot see it think. Enabling Issues under
-Settings > General > Features is the whole fix.
+**A silent Renovate is not the same as a working one, and this section used to
+claim the first was the second.** Measured 2026-09-16: the app had access, the
+config was on `main` and validated clean, two scheduled Mondays had passed, and
+Renovate had opened nothing — no pull request, no dependency dashboard, no
+config warning. Nothing distinguishes that from a healthy quiet week except
+looking. The two settings that were silently doing the distinguishing are now
+written out in the config rather than inherited: `forkProcessing: 'enabled'`,
+because this repository is a fork and Renovate's `'auto'` default decides for
+itself whether to process one, and `dependencyDashboard: true`, because the
+dashboard is the only thing that makes a running Renovate visible on a
+non-Monday.
+
+So when the dependency stream is quiet, check in this order, and stop at the
+first one that is false: a dependency dashboard issue exists (if not, Renovate
+has never completed a run here); `bunx --package renovate
+renovate-config-validator .github/renovate.json5` passes; the config is on the
+default branch. What cannot be checked from a shell is the installation itself
+— `gh api user/installations` needs an app-authorized token, and GitHub Apps do
+not appear under `repos/.../hooks` — so that one is a look at Settings >
+GitHub Apps.
+
+What the quiet has cost so far is measurable: `bun scripts/audit-check.ts`
+passes because nothing is high or critical, while 20 advisories sit open in the
+tree, ten of them in `hono` and several of those cross-request leaks. Every one
+is transitive, which is the class `lockFileMaintenance` exists for and the class
+GitHub's dependency graph cannot see.
+
+**Issues are enabled on this repository** (checked 2026-09-16; they are off by
+default for a fork, and were off when this section was first written).
+Renovate's dependency dashboard is an issue, so this is what it needs to appear
+— the surface showing what Renovate is holding back, and the checkbox that
+forces a run off schedule. Without it Renovate still works, you just cannot see
+it think, which is the failure described above.
 
 The **dependency graph and Dependabot alerts are enabled**, and they see less
 than they look like they see: the graph reads the `package.json` manifests, not
