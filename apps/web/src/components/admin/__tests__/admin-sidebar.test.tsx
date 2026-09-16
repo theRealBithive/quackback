@@ -9,9 +9,12 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 vi.stubGlobal('__APP_VERSION__', '0.0.0-test')
 
 // vi.hoisted so the mock is ready when the hoisted vi.mock factory runs.
-const { mockGetRouteContext, mockRole } = vi.hoisted(() => ({
+const { mockGetRouteContext, mockRole, onboardingQueryOptions } = vi.hoisted(() => ({
   mockGetRouteContext: vi.fn(),
   mockRole: { current: 'admin' as 'admin' | 'member' },
+  // The options the sidebar builds for the onboarding poll, kept so its
+  // refetch cadence can be exercised without a real query client.
+  onboardingQueryOptions: { current: null as { refetchInterval?: unknown } | null },
 }))
 
 vi.mock('@/lib/client/hooks/use-permission', () => ({
@@ -40,9 +43,13 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ mutate: vi.fn() }),
-  useQuery: ({ queryKey }: { queryKey?: unknown[] }) => {
+  useQuery: (options: { queryKey?: unknown[] }) => {
+    const { queryKey } = options
     if (Array.isArray(queryKey) && queryKey.includes('owner-workspaces')) {
       return { data: mockBillingEnabled.current ? mockSiblings.current : undefined }
+    }
+    if (Array.isArray(queryKey) && queryKey.includes('onboarding')) {
+      onboardingQueryOptions.current = options
     }
     return { data: undefined }
   },
@@ -175,5 +182,35 @@ describe('AdminSidebar — AI & Automation visibility', () => {
   it('hides AI & Automation from non-admin team members', () => {
     const { container } = renderSidebar('member')
     expect(container.querySelectorAll('a[href="/admin/automation/agent"]').length).toBe(0)
+  })
+})
+
+/**
+ * The launch checklist's poll. The cadence itself (30 seconds) is a tuning
+ * constant and carries no contract number — what is worth holding is that the
+ * sidebar keeps asking while the launch plan is still live and stops asking
+ * once it is done, so a finished workspace is not polled forever.
+ */
+describe('AdminSidebar — the launch checklist poll', () => {
+  afterEach(() => {
+    onboardingQueryOptions.current = null
+    cleanup()
+  })
+
+  function refetchInterval(data: unknown): number | false {
+    renderSidebar('admin')
+    const options = onboardingQueryOptions.current
+    if (!options || typeof options.refetchInterval !== 'function') {
+      throw new Error('the sidebar did not build an onboarding query with a refetch interval')
+    }
+    return (options.refetchInterval as (query: unknown) => number | false)({ state: { data } })
+  }
+
+  it('keeps asking while nothing is known yet', () => {
+    expect(refetchInterval(undefined)).toBeGreaterThan(0)
+  })
+
+  it('keeps asking while the launch plan is still live', () => {
+    expect(refetchInterval({ steps: [], completedSteps: [] })).toBeGreaterThan(0)
   })
 })
