@@ -58,14 +58,7 @@ import { LinkPreviews } from '@/components/shared/link-preview-card'
 import type { ConversationMessageDTO } from '@/lib/shared/conversation/types'
 import { CSAT_FACES } from '@/lib/shared/db-types'
 import type { BlockReplyMetadata } from '@/lib/shared/db-types'
-import {
-  getMyConversationFn,
-  sendConversationMessageFn,
-  listConversationMessagesFn,
-  mintConversationStreamTokenFn,
-  submitCsatFn,
-} from '@/lib/server/functions/conversation'
-import { getConversationLinkedTicketFn } from '@/lib/server/functions/tickets'
+import { useVisitorSurfaceRpc } from '@/lib/client/visitor-surface-rpc'
 import { getWidgetCapabilitiesFn } from '@/lib/server/functions/widget-capabilities'
 import { TicketHeaderCard } from './ticket-header-card'
 import { useLocalDateFormatter } from '@/components/ui/local-date'
@@ -199,6 +192,7 @@ export function VisitorConversationThread({
   const intl = useIntl()
   const formatDate = useLocalDateFormatter()
   const queryClient = useQueryClient()
+  const rpc = useVisitorSurfaceRpc()
   const firstName = firstNameOf(currentUser?.name)
 
   const [loading, setLoading] = useState(true)
@@ -389,7 +383,7 @@ export function VisitorConversationThread({
           conversationTarget === 'new'
             ? (createdConversationIdRef.current ?? null)
             : (conversationTarget ?? undefined)
-        const res = await getMyConversationFn({
+        const res = await rpc.getMyConversation({
           data: { conversationId: effectiveTarget, locale: intl.locale },
           headers: getAuthHeaders(),
         })
@@ -434,7 +428,7 @@ export function VisitorConversationThread({
   const refreshMessages = useCallback(async () => {
     if (!conversationId) return
     try {
-      const page = await listConversationMessagesFn({
+      const page = await rpc.listConversationMessages({
         data: { conversationId },
         headers: getAuthHeaders(),
       })
@@ -461,10 +455,11 @@ export function VisitorConversationThread({
   // narration. Fire-and-forget: a failed refresh keeps the current header.
   const refreshLinkedTicket = useCallback(() => {
     if (!conversationId) return
-    void getConversationLinkedTicketFn({
-      data: { conversationId },
-      headers: getAuthHeaders(),
-    })
+    void rpc
+      .getConversationLinkedTicket({
+        data: { conversationId },
+        headers: getAuthHeaders(),
+      })
       .then((ticket) => setLinkedTicket(ticket ?? null))
       .catch(() => {})
   }, [conversationId, getAuthHeaders])
@@ -494,7 +489,7 @@ export function VisitorConversationThread({
     buildUrl: async () => {
       if (!conversationId) return null
       try {
-        const { token } = await mintConversationStreamTokenFn({ headers: getAuthHeaders() })
+        const { token } = await rpc.mintConversationStreamToken({ headers: getAuthHeaders() })
         if (!token) return null
         return `/api/chat/stream?conversationId=${encodeURIComponent(
           conversationId
@@ -554,17 +549,19 @@ export function VisitorConversationThread({
         )
       setRating(rating)
       setCsatJustRated(true)
-      void submitCsatFn({
-        data: { conversationId, rating },
-        headers: getAuthHeaders(),
-      }).catch(() => {
-        // Roll back so the stars reappear for a retry — unless a later CSAT
-        // submit (e.g. the comment) already superseded this request.
-        if (csatSubmitGenRef.current === gen) {
-          setRating(null)
-          setCsatJustRated(false)
-        }
-      })
+      void rpc
+        .submitCsat({
+          data: { conversationId, rating },
+          headers: getAuthHeaders(),
+        })
+        .catch(() => {
+          // Roll back so the stars reappear for a retry — unless a later CSAT
+          // submit (e.g. the comment) already superseded this request.
+          if (csatSubmitGenRef.current === gen) {
+            setRating(null)
+            setCsatJustRated(false)
+          }
+        })
     },
     [conversationId, getAuthHeaders, queryClient]
   )
@@ -575,10 +572,12 @@ export function VisitorConversationThread({
     csatSubmitGenRef.current++ // supersede any in-flight rating-submit rollback
     setCsatCommentDone(true)
     const trimmed = csatComment.trim()
-    void submitCsatFn({
-      data: { conversationId, rating: csatRating, comment: trimmed || undefined },
-      headers: getAuthHeaders(),
-    }).catch(() => setCsatCommentDone(false)) // reopen the box for a retry on failure
+    void rpc
+      .submitCsat({
+        data: { conversationId, rating: csatRating, comment: trimmed || undefined },
+        headers: getAuthHeaders(),
+      })
+      .catch(() => setCsatCommentDone(false)) // reopen the box for a retry on failure
   }, [conversationId, csatRating, csatComment, getAuthHeaders])
 
   // Phase C conversational block layer: a structured reply (button tap /
@@ -593,7 +592,7 @@ export function VisitorConversationThread({
       if (!conversationId || submittingBlockId) return
       setSubmittingBlockId(blockReply.inReplyToMessageId)
       try {
-        const res = await sendConversationMessageFn({
+        const res = await rpc.sendConversationMessage({
           data: { conversationId, content: displayText, blockReply },
           headers: getAuthHeaders(),
         })
@@ -641,7 +640,7 @@ export function VisitorConversationThread({
   const handleCsatComment = useCallback(
     (rating: number, comment: string) => {
       if (!conversationId) return
-      void submitCsatFn({
+      void rpc.submitCsat({
         data: { conversationId, rating, comment: comment || undefined },
         headers: getAuthHeaders(),
       })
@@ -854,7 +853,7 @@ export function VisitorConversationThread({
               value: text,
             } as const)
           : undefined
-      const res = await sendConversationMessageFn({
+      const res = await rpc.sendConversationMessage({
         data: {
           conversationId: conversationId ?? undefined,
           content: text,
