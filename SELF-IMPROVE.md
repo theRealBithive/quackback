@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 11x — Test suites are flaky under parallel load
+## 12x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -123,6 +123,15 @@ six green when re-run alone — `seat-usage.db.test.ts` (three of its cases),
 same shards pass in CI without it. The practical cost is that a local full run
 can no longer be read as a verdict at all — every red line has to be re-run
 alone before it means anything, which is four extra minutes on top of fourteen.
+
+Eleventh run, batch E's four shards: fourteen failures across three shards, and
+the two named ones were `module-state.test.ts` again and
+`help-center-article.service.test.ts` again — both green alone in seconds. The
+new cost this time was self-inflicted and worth naming on its own: the shard
+loop piped each run through `tail -25`, which keeps the summary and throws away
+the `FAIL` lines above it, so the list of what to re-run had to be reconstructed
+from a truncated log. Pipe a shard run through `tee` to a file, or grep `^ FAIL`
+out of it — the summary alone cannot tell you what to re-run.
 
 ## 6x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -520,38 +529,7 @@ minutes. Both fixes are still unmade, and the sharded case adds a third
 observation: a partial set of reports is worse than none, because the gate reads
 it as a complete measurement.
 
-## 3x — Coverage had to be re-installed for every measurement
-
-The tooling for non-trivial logic is half-present. `fast-check` is a
-devDependency and is used by a handful of suites; a mutation runner was missing,
-so every mutation number in this repo up to the audit-gate change was produced by
-a throwaway script that applies mutants textually one at a time and re-runs the
-suite by hand.
-
-Second run: the infrastructure gate on the DB fixture needed 25 mutants written
-out by hand to find the four that mattered (three unasserted lines of the
-remediation message, and — the one that counted — no end-to-end test that an
-unreachable database _without_ `REQUIRE_TEST_DB` still skips instead of throwing,
-which is the regression that would have turned every laptop run red). A real
-runner would have listed those in one command instead of one bespoke script per
-change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
-transiently and `package.json`/`bun.lock` restored afterwards, every time.
-
-Third run closed the mutation half — Stryker landed with the dependency-audit
-gate — and left the coverage half exactly as it was. `@vitest/coverage-v8` still
-has to be added, used, and then unpicked from `package.json` and `bun.lock`
-before anything can be committed, and the whole-file percentage it prints is not
-the number the discipline asks for: the lines a change touches have to be
-intersected with the JSON reporter's uncovered list by hand. Installing it as a
-devDependency the way Stryker now is would remove one install, one restore and
-one chance to commit a stray manifest per change.
-
-**Closed** by the diff-coverage gate: `@vitest/coverage-v8` is a devDependency,
-the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
-does the intersection with the diff that used to be done by hand. Three runs
-paid for it.
-
-## 3x — Mounting a real route in a test: three traps, none of which say so
+## 4x — Mounting a real route in a test: four traps, none of which say so
 
 `routes/__tests__/document-lang.test.tsx` puts a memory router around the real
 `__root` to read the `lang` and `dir` a document ends up with. It cost four
@@ -624,6 +602,56 @@ knowing that the widget SDK guards `event.source !== window.parent`, so a test
 has to dispatch `new MessageEvent('message', { data, source: window })` — a bare
 `postMessage` never reaches the handler and reads as "the effect did not run".
 
+**Fourth occurrence, a cheaper way in, and a fourth trap.** Batch E needed the
+inbox route's own `onEvent` handler driven, which is module-private inside a
+2,000-line route component. What worked was not mounting a router at all:
+`vi.mock('@tanstack/react-router', …)` with a `createFileRoute` that just hands
+its options straight back, plus `useNavigate`/`useRouterState`/`useRouteContext`
+stubs, and then rendering `Route.options.component` under a `QueryClientProvider`
+and `IntlWrapper`. The page's data hooks land in their loading state and the
+component renders. Mock the one hook whose callbacks you want (here
+`use-conversation-stream`, capturing `onEvent` on a `vi.hoisted` holder) and call
+them directly.
+
+The trap that cost two rounds: **`await import('../admin')` inside the test body
+spends the test's own 20-second timeout on the module graph, and an admin route
+graph does not fit in it.** The failure is a bare `Test timed out in 20000ms`
+pointing at the `it`, which reads as a hung render. `vi.mock` is hoisted above
+static imports, so a top-level `import { Route } from '../admin'` still gets the
+mocks and moves the cost into the file's import phase where there is no timeout.
+Import route modules statically, always.
+
+## 3x — Coverage had to be re-installed for every measurement
+
+The tooling for non-trivial logic is half-present. `fast-check` is a
+devDependency and is used by a handful of suites; a mutation runner was missing,
+so every mutation number in this repo up to the audit-gate change was produced by
+a throwaway script that applies mutants textually one at a time and re-runs the
+suite by hand.
+
+Second run: the infrastructure gate on the DB fixture needed 25 mutants written
+out by hand to find the four that mattered (three unasserted lines of the
+remediation message, and — the one that counted — no end-to-end test that an
+unreachable database _without_ `REQUIRE_TEST_DB` still skips instead of throwing,
+which is the regression that would have turned every laptop run red). A real
+runner would have listed those in one command instead of one bespoke script per
+change. Coverage has the same shape: `@vitest/coverage-v8` has to be installed
+transiently and `package.json`/`bun.lock` restored afterwards, every time.
+
+Third run closed the mutation half — Stryker landed with the dependency-audit
+gate — and left the coverage half exactly as it was. `@vitest/coverage-v8` still
+has to be added, used, and then unpicked from `package.json` and `bun.lock`
+before anything can be committed, and the whole-file percentage it prints is not
+the number the discipline asks for: the lines a change touches have to be
+intersected with the JSON reporter's uncovered list by hand. Installing it as a
+devDependency the way Stryker now is would remove one install, one restore and
+one chance to commit a stray manifest per change.
+
+**Closed** by the diff-coverage gate: `@vitest/coverage-v8` is a devDependency,
+the scope lives in `vitest.config.ts`, and `scripts/diff-coverage-check.ts`
+does the intersection with the diff that used to be done by hand. Three runs
+paid for it.
+
 ## 3x — A mutation survivor is reported by line, and a line can hold several mutants
 
 The gate's summary lists survivors as `file.ts:54 ObjectLiteral -> {}`. On a line that
@@ -691,6 +719,36 @@ currently killing — it can only start covering for one later, if the test that
 kills it is broken. That is a real hole and it is the argument for the fix this
 entry already asks for: match on the column, or refuse a record that matches
 more than one mutant.
+
+## 3x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
+
+`changeBoard('post_01jqzz000000000000000000', ...)` does not reach the not-found branch: the
+suffix is 24 characters, the TypeID parser wants 26, and it throws `Invalid length` long
+before the lookup. Two tests named `raises nothing when the post does not exist` and
+`raises nothing when the target board does not exist` were asserting a bare
+`.rejects.toThrow()`, so both passed on the parser's complaint and neither had ever
+executed the code they were named for.
+
+Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and absent,
+and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
+that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
+read as untested until proven otherwise.
+
+Seen again in batch C's form suites: a fixture id like `'board_1'` passes the
+type cast, fails schema parsing at submit, and surfaces as "the form never
+submitted" rather than as a validation error. Build fixture ids with
+`generateId(prefix)`.
+
+Third occurrence, and the quietest yet, because this time nothing threw. A hover
+test for the inbox list used `'conversation_01JLISTPREFETCH'` as a row id. The
+row's hover handler resolves the id back to a kind before it warms anything, so
+an unparseable id warms nothing — and three of the five tests were assertions
+that nothing was warmed. They passed. Only the positive assertion failed, and it
+failed as "expected '[]' to contain …", which reads like a wiring problem in the
+event plumbing rather than a bad fixture. The rule generalises past `toThrow()`:
+**in any suite where an id is parsed before the behaviour happens, a fabricated
+id turns every negative assertion into a tautology.** Build them with
+`generateId(prefix)`.
 
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
@@ -822,25 +880,6 @@ scratch with it. Fixed the same way as the first hit: every measurement after
 that pointed at its own path under the scratchpad
 (`coverage/local-<name>` or a scratchpad `cov/<name>` directory), and no
 further collision happened once that was consistent.
-
-## 2x — A hand-typed TypeID fails the parser, and `.rejects.toThrow()` reads that as success
-
-`changeBoard('post_01jqzz000000000000000000', ...)` does not reach the not-found branch: the
-suffix is 24 characters, the TypeID parser wants 26, and it throws `Invalid length` long
-before the lookup. Two tests named `raises nothing when the post does not exist` and
-`raises nothing when the target board does not exist` were asserting a bare
-`.rejects.toThrow()`, so both passed on the parser's complaint and neither had ever
-executed the code they were named for.
-
-Use `generateId('post')` from `@quackback/ids` for an id that is well-formed and absent,
-and assert the id itself is in the message (`.rejects.toThrow(missingPost)`) rather than
-that something threw. A bare `toThrow()` in a suite that constructs ids by hand should be
-read as untested until proven otherwise.
-
-Seen again in batch C's form suites: a fixture id like `'board_1'` passes the
-type cast, fails schema parsing at submit, and surfaces as "the form never
-submitted" rather than as a validation error. Build fixture ids with
-`generateId(prefix)`.
 
 ## 2x — Calling an exported `createServerFn(...).validator(...).handler(...)` const directly resolves to `undefined`
 
@@ -2086,6 +2125,40 @@ fails during the dry run, and the gate reports that it graded nothing. The
 error names the test but not the cause; finding it meant running a probe inside
 the surviving sandbox and diffing the two strings. The gate now sets
 `disableTypeChecks: false` (no checker runs under it), pinned in the B10 tests.
+
+## 1x — A composite query key hides both halves of a key assertion
+
+The inbox list packs every facet into one pipe-delimited segment, so its key
+reads `['admin','inbox','unified','items','open|conversation||||4711||||||']`.
+A test that collected the key arrays' string elements and asserted
+`toContain('4711')` therefore failed for an accepted value — which is how this
+was noticed at all. The half that was not noticed is the dangerous one: the
+same suite asserted `not.toContain(poison)` for a rejected facet, and **that
+assertion had been passing on the same flaw**, vacuously, because a rejected
+value would not have appeared as its own element either.
+
+A negative assertion over a structured key has to match the way the key is
+actually written. `JSON.stringify(keys)` and a substring check is blunt and
+correct; walking the structure and comparing leaves is precise and wrong the
+moment a key concatenates. Whenever a test says "this value must not reach the
+query", pair it with the value that must — on the same URL, through the same
+matcher. Here that companion assertion is the only reason the flaw surfaced.
+
+## 1x — A source-text check for an absent word spans lines, because a negated character class matches newlines
+
+`expect(source).not.toMatch(/['"`][^'"`]*billing/i)` was meant to say "no string
+literal in this route names a billing destination". It failed against a file
+whose only mention of billing is a comment explaining why the billing gate was
+dropped — because `[^'"`]`matches`\n`like any other character, so the match
+started at some quote hundreds of lines earlier and ran through the comment.
+Every negated class in a source-text rule needs`\n` in it unless spanning lines
+is the point.
+
+The first version of the same check was `not.toMatch(/billing/i)`, which is the
+other half of the lesson: an absent-word rule states the contract wrongly when
+the word is allowed to appear in prose. What must not appear is a _string_ — an
+import path or a route path — and the comment saying why the gate is gone is
+exactly what stops the next sync putting it back silently.
 
 ## Resolved
 
