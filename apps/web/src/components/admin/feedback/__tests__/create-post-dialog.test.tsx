@@ -91,6 +91,12 @@ function renderDialog() {
   )
 }
 
+/**
+ * The post body arrives through a `lazy()` boundary (upstream #553), so it is
+ * awaited rather than read straight after the render. Before the await this
+ * file passed only in order: the second test found the editor because the
+ * first had already resolved the chunk, and on its own it found nothing.
+ */
 describe('CreatePostDialog content editor', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -101,7 +107,7 @@ describe('CreatePostDialog content editor', () => {
     renderDialog()
 
     await userEvent.type(screen.getByRole('textbox', { name: /feedback about/i }), 'Dark mode')
-    await userEvent.type(screen.getByLabelText('Post body'), 'Please add **dark mode**')
+    await userEvent.type(await screen.findByLabelText('Post body'), 'Please add **dark mode**')
 
     await userEvent.click(screen.getByRole('button', { name: 'Create post' }))
 
@@ -117,7 +123,7 @@ describe('CreatePostDialog content editor', () => {
 
     // Every keystroke goes through the same setValue; none of them may raise
     // the title rule that a submit would.
-    await userEvent.type(screen.getByLabelText('Post body'), 'Draft')
+    await userEvent.type(await screen.findByLabelText('Post body'), 'Draft')
 
     expect(screen.queryByText('Title is required')).toBeNull()
     expect(createPost.mutate).not.toHaveBeenCalled()
