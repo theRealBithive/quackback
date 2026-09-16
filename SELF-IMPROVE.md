@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 10x — Test suites are flaky under parallel load
+## 11x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -841,6 +841,69 @@ Seen again in batch C's form suites: a fixture id like `'board_1'` passes the
 type cast, fails schema parsing at submit, and surfaces as "the form never
 submitted" rather than as a validation error. Build fixture ids with
 `generateId(prefix)`.
+
+## 1x — `afterAll(fixture.close)` inside a `describe` shuts the connection for every later `describe` in the file
+
+The DB fixture's three hooks read as a set, and every suite in the repository
+writes them together:
+
+```ts
+beforeEach(fixture.begin)
+afterEach(fixture.rollback)
+afterAll(fixture.close)
+```
+
+Written inside a `describe`, `afterAll` fires when **that** describe ends, not
+when the file does — so a second `describe` in the same file opens with the pool
+already closed, and every one of its tests fails with
+`db-test-fixture: no reachable test database — guard the suite with
+describe.skipIf(!fixture.available)`. The message names the guard the suite
+already has, which sends you looking at `fixture.available` rather than at the
+hook that ran two lines earlier. `begin` and `rollback` genuinely are per-test
+and belong in the describe; `close` is per-file and belongs at file scope.
+
+A `close` that refused to run while another describe in the file still holds
+tests, or an error text that said "this file already closed its fixture", would
+cost nothing and save the detour.
+
+## 1x — A rule inlined in the Better Auth options object is reachable by no test, and the diff-coverage gate counts it anyway
+
+Upstream's session-audience hook arrived as an arrow function inside the
+`betterAuth({ … })` literal. Nothing in the repository executes it: measured over
+all 43 suites in `lib/server/auth/__tests__`, not one statement between lines 540
+and 660 of `auth/index.ts` is covered, because `createAuth()` builds the options
+and the hook bodies only run inside a live auth instance. The lines are still
+`apps/web/src/**/*.ts`, so the diff-coverage gate grades them, and a pick that
+adds thirteen lines there adds thirteen holes.
+
+The repository already has the shape that fixes it —
+`databaseHooks.user.create.before` is `guardBetterAuthUserCreation`, imported
+from `signup-policy.ts` — and the reason it works is worth stating, because the
+obvious half-measure does not: delegating from an inline arrow
+(`before: async (d, c) => rule(d, c?.path)`) leaves an arrow body behind, and an
+arrow body is a statement the gate counts. Only passing the function **by
+reference** puts zero statements in the config. Whether the reference is
+actually wired in is then its own claim, and it takes standing the instance up
+with `betterAuth` doubled (see `mcp-resource-bootstrap.test.ts`) to assert it.
+
+## 1x — A column with a permissive default turns every shared test fixture into a caller of that default
+
+Migration 0280 added `session.scope` with `DEFAULT 'dashboard'`, and the
+normaliser in front of it read anything unrecognised as `dashboard` too. Every
+session fixture in the repository predates the column, so every one of them was
+silently a dashboard session, and the suites passed. Flipping the default to the
+least-privileged audience turned nine tests in
+`routes/api/upload/__tests__/image.test.ts` red at once — all of them through a
+single shared `mockSession` in `routes/api/__tests__/upload-fixtures.ts`.
+
+The red is the useful part, and it is worth reading before fixing: each fixture
+has to be asked what it _meant_, and the answer differed. The upload fixtures
+meant a dashboard session and got `scope: 'dashboard'` as a named parameter. One
+assertion in `widget-auth.test.ts` expected `role: 'member'` from a session the
+widget had minted, which the contract says is impossible — the fixture had been
+passing on the permissive default, and the expectation was wrong rather than the
+code. A fixture that omits the field is not a dashboard session; it is a session
+nobody stamped, and only a default hides the difference.
 
 ## 1x — A manifest entry can name a subset of a file's suites, and the gap reads as survivors
 
