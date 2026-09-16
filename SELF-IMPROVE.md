@@ -842,6 +842,41 @@ type cast, fails schema parsing at submit, and surfaces as "the form never
 submitted" rather than as a validation error. Build fixture ids with
 `generateId(prefix)`.
 
+## 2x — Calling an exported `createServerFn(...).validator(...).handler(...)` const directly resolves to `undefined`
+
+Testing a TanStack Start server function by importing the exported const and
+calling it (`await someServerFn({ data: ... })`) — the pattern one existing
+suite in this repo happens to use — silently loses the success path in this
+vitest setup: `result` comes back `undefined` even when the handler resolves a
+real value, because there is no live Start request context to run the wrapper
+against. Confirmed with a throwaway probe: a bare `createServerFn(...)
+.validator(z.object({ name: z.string().optional().default('DEFAULTED') }))
+.handler(...)` called directly also returned `undefined`, and the handler's
+argument showed the validator never ran either (`color: undefined` reached the
+service instead of a defaulted value). The handler still executes for its side
+effects, and a thrown error still propagates through `.rejects.toThrow()` — so
+a suite that only checks a thrown error or a downstream mock's call args can
+pass while silently asserting nothing about the resolved value or defaulting.
+
+The reliable pattern, already in use in `admin-reset-two-factor.test.ts`: mock
+`@tanstack/react-start` so `createServerFn` returns a chain object whose
+`.validator()` is a no-op and whose `.handler(fn)` pushes `fn` into a
+module-level array, then `await import(...)` the module under test once and
+index into the array by the handlers' declaration order. That runs the actual
+handler body directly, with real arguments, and its real return value.
+
+Two refinements, from filling the last three diff-coverage holes of the session
+(`conversation.ts`'s stream-token mint, and the handoff route's promotion). The
+array-and-index form is not the only shape: making `.handler(fn)` return
+`Object.assign((args) => fn(args ?? {}), chain)` leaves the module's **exported**
+const callable as itself, so a suite reaches one server function by name without
+depending on the declaration order of the other forty in the file. And when the
+server fn is **not** exported — a route file's `consumeWidgetHandoffFn`, reached
+in production only through the route loader — the same mock can stash `fn` on a
+`vi.hoisted` holder, which is the only way to drive that handler at all. Mock
+`createServerOnlyFn` as an identity function in the same factory, or the route's
+other exports disappear.
+
 ## 1x — `afterAll(fixture.close)` inside a `describe` shuts the connection for every later `describe` in the file
 
 The DB fixture's three hooks read as a set, and every suite in the repository
@@ -951,29 +986,6 @@ Two cheap habits, in order of value. Diff the test _names_ across the edit —
 trusting that a block boundary was read correctly. And prefer appending a new
 `describe` to rewriting an existing one: the merge is then additive and a
 deletion has to be deliberate.
-
-## 1x — Calling an exported `createServerFn(...).validator(...).handler(...)` const directly resolves to `undefined`
-
-Testing a TanStack Start server function by importing the exported const and
-calling it (`await someServerFn({ data: ... })`) — the pattern one existing
-suite in this repo happens to use — silently loses the success path in this
-vitest setup: `result` comes back `undefined` even when the handler resolves a
-real value, because there is no live Start request context to run the wrapper
-against. Confirmed with a throwaway probe: a bare `createServerFn(...)
-.validator(z.object({ name: z.string().optional().default('DEFAULTED') }))
-.handler(...)` called directly also returned `undefined`, and the handler's
-argument showed the validator never ran either (`color: undefined` reached the
-service instead of a defaulted value). The handler still executes for its side
-effects, and a thrown error still propagates through `.rejects.toThrow()` — so
-a suite that only checks a thrown error or a downstream mock's call args can
-pass while silently asserting nothing about the resolved value or defaulting.
-
-The reliable pattern, already in use in `admin-reset-two-factor.test.ts`: mock
-`@tanstack/react-start` so `createServerFn` returns a chain object whose
-`.validator()` is a no-op and whose `.handler(fn)` pushes `fn` into a
-module-level array, then `await import(...)` the module under test once and
-index into the array by the handlers' declaration order. That runs the actual
-handler body directly, with real arguments, and its real return value.
 
 ## 1x — A line that is only an arrow function passed as a JSX prop reads as uncovered until the handler actually fires
 

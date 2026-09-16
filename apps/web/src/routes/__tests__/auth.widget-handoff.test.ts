@@ -12,8 +12,12 @@
  *   R6 The one-time-token handoff promotes the session to the portal audience
  *      before the cookie is set, not after.
  *
- * "Before, not after" is a fact about the order of two statements in the real
- * file, and the mirror cannot hold it — so the last describe reads the file.
+ * "Before, not after" is a fact about the real handler, and the mirror cannot
+ * hold it — so the last describe reads the file instead. The handler itself is
+ * driven, and the same order asserted over what it actually writes, in
+ * auth.widget-handoff-promotion.test.ts; the two checks are independent on
+ * purpose, because a source-text check survives a refactor of the test double
+ * and a behavioural one survives a rewording of the source.
  * The confirmed list this number comes from is in
  * lib/server/functions/__tests__/auth-scope.test.ts.
  */
