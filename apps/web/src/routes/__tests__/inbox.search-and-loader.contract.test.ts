@@ -206,7 +206,11 @@ describe('list ordering (E8)', () => {
 
     expect(agentEventChangesInboxList(conversationChanged({ priority: 'urgent' }))).toBe(true)
     expect(
-      agentEventChangesInboxList(conversationChanged({ slaDueAt: '2026-01-01T00:00:00Z' }))
+      agentEventChangesInboxList(
+        conversationChanged({
+          sla: { firstResponseDueAt: '2026-01-01T00:00:00Z' } as ConversationDTO['sla'],
+        })
+      )
     ).toBe(true)
     // A typing signal moves nothing, so the assertion above is about the event
     // kind rather than about the predicate answering true to everything.

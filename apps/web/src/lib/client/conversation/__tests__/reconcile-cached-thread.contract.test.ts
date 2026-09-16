@@ -195,6 +195,57 @@ describe('reconcileCachedThread (E2, E3, E4, E5)', () => {
     )
   })
 
+  it('looks at the row it was told about, not at a neighbour of it (E5)', () => {
+    const queryClient = makeClient()
+    const neighbour = [...key, 'page-2']
+    queryClient.setQueryData<Row>(neighbour, { n: 1 })
+
+    reconcileCachedThread<Row>(queryClient, key, applyEvent)
+
+    // Nothing was opened at this key, so nothing may appear at it — and the
+    // row that WAS cached is not this row's business either.
+    expect(queryClient.getQueryData(key)).toBeUndefined()
+    expect(queryClient.getQueryData(neighbour)).toEqual({ n: 1 })
+    queryClient.clear()
+  })
+
+  it('patches a settled thread in place instead of putting it back on the network (E2)', async () => {
+    const queryClient = makeClient()
+    const askServer = vi.fn(async () => ({ n: 1 }) as Row)
+    await queryClient.fetchQuery({ queryKey: key, queryFn: askServer })
+    expect(askServer).toHaveBeenCalledTimes(1)
+
+    reconcileCachedThread<Row>(queryClient, key, applyEvent)
+    await drain()
+
+    // A thread nothing is fetching is already as current as the event; asking
+    // again would cost a request per event per cached row.
+    expect(askServer).toHaveBeenCalledTimes(1)
+    expect(outcomeOf(queryClient.getQueryData<Row>(key))).toBe('holds-the-event')
+    queryClient.clear()
+  })
+
+  it('abandons the one prefetch it came for, and no other (E3)', async () => {
+    const queryClient = makeClient()
+    const pending = () => new Promise<Row>(() => {})
+    const neighbour = [...key, 'page-2']
+    const elsewhere = ['admin', 'inbox', 'list'] as const
+
+    void queryClient.prefetchQuery({ queryKey: key, queryFn: pending })
+    void queryClient.prefetchQuery({ queryKey: neighbour, queryFn: pending })
+    void queryClient.prefetchQuery({ queryKey: elsewhere, queryFn: pending })
+
+    reconcileCachedThread<Row>(queryClient, key, applyEvent)
+    await drain()
+
+    const cache = queryClient.getQueryCache()
+    expect(cache.find({ queryKey: key, exact: true })?.state.fetchStatus).not.toBe('fetching')
+    // The rest of the inbox's work is not this event's to cancel.
+    expect(cache.find({ queryKey: neighbour, exact: true })?.state.fetchStatus).toBe('fetching')
+    expect(cache.find({ queryKey: elsewhere, exact: true })?.state.fetchStatus).toBe('fetching')
+    queryClient.clear()
+  })
+
   it('keeps the event when the fetch it waited on fails (E4)', async () => {
     const queryClient = makeClient()
     let fail!: (reason: Error) => void

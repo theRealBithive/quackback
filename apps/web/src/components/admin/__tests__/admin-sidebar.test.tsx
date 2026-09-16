@@ -14,7 +14,7 @@ const { mockGetRouteContext, mockRole, onboardingQueryOptions } = vi.hoisted(() 
   mockRole: { current: 'admin' as 'admin' | 'member' },
   // The options the sidebar builds for the onboarding poll, kept so its
   // refetch cadence can be exercised without a real query client.
-  onboardingQueryOptions: { current: null as { refetchInterval?: unknown } | null },
+  onboardingQueryOptions: { current: null as Record<string, unknown> | null },
 }))
 
 vi.mock('@/lib/client/hooks/use-permission', () => ({

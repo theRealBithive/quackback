@@ -79,8 +79,8 @@ vi.mock('@tanstack/react-router', () => ({
  */
 function renderInboxWithNothingSelected(): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const InboxRoute = (Route as unknown as { options: { component: () => JSX.Element } }).options
-    .component
+  const InboxRoute = (Route as unknown as { options: { component: () => React.ReactElement } })
+    .options.component
   render(
     <QueryClientProvider client={queryClient}>
       <IntlWrapper>

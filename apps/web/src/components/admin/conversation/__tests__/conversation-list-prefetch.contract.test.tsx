@@ -136,9 +136,9 @@ function rowButton(name: string): HTMLElement {
 }
 
 /** Every query key the list asked to have warmed. */
-function warmedKeys(prefetch: ReturnType<typeof vi.spyOn>): string {
+function warmedKeys(prefetch: { mock: { calls: unknown[][] } }): string {
   return JSON.stringify(
-    prefetch.mock.calls.map(([options]) => (options as { queryKey: unknown }).queryKey)
+    prefetch.mock.calls.map((call) => (call[0] as { queryKey: unknown }).queryKey)
   )
 }
 

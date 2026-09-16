@@ -99,8 +99,8 @@ describe('the feedback post modal (E13)', () => {
   it('holds the modal’s place with a skeleton until the chunk arrives', async () => {
     router.postId = 'post_01JDEFERRED'
     const { Route } = await import('../admin')
-    const AdminLayout = (Route as unknown as { options: { component: () => JSX.Element } }).options
-      .component
+    const AdminLayout = (Route as unknown as { options: { component: () => React.ReactElement } })
+      .options.component
 
     render(<AdminLayout />)
 
@@ -124,8 +124,9 @@ describe('the feedback post modal (E13)', () => {
 describe('the workflow builder (E13)', () => {
   it('holds the builder’s place with a skeleton until the chunk arrives', async () => {
     const { Route } = await import('../admin/automation_.workflows.$workflowId')
-    const WorkflowBuilderPage = (Route as unknown as { options: { component: () => JSX.Element } })
-      .options.component
+    const WorkflowBuilderPage = (
+      Route as unknown as { options: { component: () => React.ReactElement } }
+    ).options.component
 
     const { container } = render(<WorkflowBuilderPage />)
 
