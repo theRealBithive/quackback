@@ -67,7 +67,7 @@ import {
   RichTextEditor,
   getSlashMenuItems,
   SlashMenuList,
-  handleImageDrop,
+  handleMediaDrop,
 } from '../rich-text-editor'
 import { MentionPicker, type MentionItem } from '../mention-picker'
 import { DateTimePicker } from '../datetime-picker'
@@ -599,7 +599,7 @@ describe('the list the slash popup mounts (U1)', () => {
 describe('an image dropped into the editor (U1)', () => {
   it('says an upload failed in the reader’s language', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const drop = handleImageDrop(createIntl({ locale: 'de', messages: german }), () =>
+    const drop = handleMediaDrop(createIntl({ locale: 'de', messages: german }), () =>
       Promise.reject(new Error('no'))
     )
     // Enough of a view for the handler to reach the upload: the failing path

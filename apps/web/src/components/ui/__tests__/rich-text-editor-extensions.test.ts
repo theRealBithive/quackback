@@ -78,10 +78,11 @@ import {
   createEmojiExtension,
   generateContentHTML,
   getSlashMenuItems,
-  handleImageDrop,
+  handleMediaDrop,
   hasActiveSuggestion,
   markdownFromEditor,
   plaintextFromTiptapJson,
+  resolveEditorMediaKind,
   seedMarkdownFallback,
   stopEnterFromReachingParentForm,
 } from '../rich-text-editor'
@@ -138,10 +139,42 @@ const WIDGET_FEATURES: EditorFeatures = {
   dividers: true,
   tables: true,
   images: true,
+  videos: true,
   embeds: true,
   bubbleMenu: true,
   slashMenu: true,
 }
+
+describe('resolveEditorMediaKind', () => {
+  it('accepts screenshots as images when image uploads are enabled', () => {
+    expect(resolveEditorMediaKind({ name: 'Screenshot.png', type: 'image/png' }, true, true)).toBe(
+      'image'
+    )
+  })
+
+  it('accepts MOV and M4V drops when the browser omits a useful MIME type', () => {
+    expect(resolveEditorMediaKind({ name: 'recording.mov', type: '' }, true, true)).toBe('video')
+    expect(
+      resolveEditorMediaKind(
+        { name: 'recording.m4v', type: 'application/octet-stream' },
+        true,
+        true
+      )
+    ).toBe('video')
+  })
+
+  it('rejects unsupported video containers and disabled media kinds', () => {
+    expect(
+      resolveEditorMediaKind({ name: 'recording.avi', type: 'video/x-msvideo' }, true, true)
+    ).toBe(null)
+    expect(
+      resolveEditorMediaKind({ name: 'recording.mov', type: 'video/quicktime' }, true, false)
+    ).toBe(null)
+    expect(resolveEditorMediaKind({ name: 'Screenshot.png', type: 'image/png' }, false, true)).toBe(
+      null
+    )
+  })
+})
 
 describe('buildExtensions', () => {
   it('contains no duplicate extension names (full widget feature set)', () => {
@@ -195,6 +228,13 @@ describe('buildExtensions', () => {
     const withoutNames = without.map((e) => (e as { name: string }).name)
     expect(withNames).toContain('image')
     expect(withoutNames).toContain('image')
+  })
+
+  it('always includes the native video node for saved-content compatibility', () => {
+    const names = buildExtensions({ videos: false }, { placeholder: '' }).map(
+      (extension) => (extension as { name: string }).name
+    )
+    expect(names).toContain('video')
   })
 
   it('does not materialize 0×0 or 500×500 on a stored image that omitted dimensions', () => {
@@ -918,7 +958,7 @@ describe('an image dropped into the editor', () => {
   it('creates the node at the file’s natural size, scaled to the editor’s bound (C6)', async () => {
     const restore = stubImageLoading({ naturalWidth: 1920, naturalHeight: 1080 })
     const { view, created, dispatched } = fakeView()
-    const drop = handleImageDrop(englishIntl(), async () => 'https://cdn.example.com/shot.png')
+    const drop = handleMediaDrop(englishIntl(), async () => 'https://cdn.example.com/shot.png')
 
     expect(drop(view as never, dropEvent(screenshotFile()) as never, null, false)).toBe(true)
     await vi.waitFor(() => expect(created).toHaveLength(1))
@@ -936,7 +976,7 @@ describe('an image dropped into the editor', () => {
   it('creates the node with src and keep-ratio alone when the size cannot be read (C6)', async () => {
     const restore = stubImageLoading('error')
     const { view, created } = fakeView()
-    const drop = handleImageDrop(englishIntl(), async () => 'https://cdn.example.com/broken.png')
+    const drop = handleMediaDrop(englishIntl(), async () => 'https://cdn.example.com/broken.png')
 
     expect(drop(view as never, dropEvent(screenshotFile()) as never, null, false)).toBe(true)
     await vi.waitFor(() => expect(created).toHaveLength(1))
