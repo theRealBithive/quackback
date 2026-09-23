@@ -17,10 +17,8 @@ vi.mock('@tanstack/react-start/server', async (importOriginal) => ({
   getRequestIP: mockGetRequestIP,
 }))
 
-const { isRegistrationRateLimited } = await import('../$')
+const { isRegistrationRateLimited, REG_MAX } = await import('../$')
 const { withWorkspace } = await import('@/lib/server/__tests__/workspace-scope')
-
-const REG_MAX = 10
 
 /** A registration from socket peer `ip`, carrying whatever headers the client chose. */
 function request(ip: string, headers: Record<string, string> = {}): Request {
