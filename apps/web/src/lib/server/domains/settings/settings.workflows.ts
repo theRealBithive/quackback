@@ -79,10 +79,10 @@ export async function updateWorkflowAbandonedAutoCloseSettings(
   log.info(input, 'update workflow abandoned auto-close settings')
   try {
     const validated = workflowAbandonedAutoCloseSchema.parse(input)
-    const existing = await getWorkflowAbandonedAutoCloseSettings()
-    const merged = { ...existing, ...validated }
-    await writeMetadataKey(METADATA_KEY, merged)
-    return merged
+    return await writeMetadataKey(METADATA_KEY, (stored) => ({
+      ...resolveWorkflowAbandonedAutoClose(stored),
+      ...validated,
+    }))
   } catch (error) {
     log.error({ err: error }, 'update workflow abandoned auto-close settings failed')
     wrapDbError('update workflow abandoned auto-close settings', error)
@@ -119,10 +119,10 @@ export async function updateWorkflowCloseSpamSettings(
   log.info(input, 'update workflow close-spam settings')
   try {
     const validated = workflowCloseSpamSchema.parse(input)
-    const existing = await getWorkflowCloseSpamSettings()
-    const merged = { ...existing, ...validated }
-    await writeMetadataKey(CLOSE_SPAM_KEY, merged)
-    return merged
+    return await writeMetadataKey(CLOSE_SPAM_KEY, (stored) => ({
+      ...resolveWorkflowCloseSpam(stored),
+      ...validated,
+    }))
   } catch (error) {
     log.error({ err: error }, 'update workflow close-spam settings failed')
     wrapDbError('update workflow close-spam settings', error)

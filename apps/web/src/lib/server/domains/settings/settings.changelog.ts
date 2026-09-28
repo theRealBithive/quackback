@@ -53,10 +53,10 @@ export async function updateChangelogSettings(
   log.info(input, 'update changelog settings')
   try {
     const validated = changelogSettingsSchema.parse(input)
-    const existing = await getChangelogSettings()
-    const merged = { ...existing, ...validated }
-    await writeMetadataKey(METADATA_KEY, merged)
-    return merged
+    return await writeMetadataKey(METADATA_KEY, (stored) => ({
+      ...resolveChangelogSettings(stored),
+      ...validated,
+    }))
   } catch (error) {
     log.error({ err: error }, 'update changelog settings failed')
     wrapDbError('update changelog settings', error)

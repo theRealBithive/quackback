@@ -53,6 +53,7 @@ import { resolveStatusSettings } from './settings.status'
 import {
   parseJsonConfig,
   parseJsonOrNull,
+  parseMetadataBag,
   parsePortalConfig,
   parseWidgetConfig,
   deepMerge,
@@ -1026,7 +1027,21 @@ export async function isCopilotCapabilityEnabled(
  * Update feature flags (partial update, merges with existing)
  */
 export async function updateFeatureFlags(input: Partial<FeatureFlags>): Promise<FeatureFlags> {
-  const org = await requireSettings()
+  // The patch rewrites columns it was computed from (flags, metadata, widget
+  // and portal config), so the row is read under its lock: a concurrent write
+  // to any of them is read here rather than overwritten.
+  const flags = await db.transaction(async (tx) => {
+    const [org] = await tx.select().from(settings).limit(1).for('update')
+    if (!org) throw new NotFoundError('SETTINGS_NOT_FOUND', 'Settings not found')
+    const { updated, patch } = featureFlagsWrite(org, input)
+    await tx.update(settings).set(patch).where(eq(settings.id, org.id))
+    return updated
+  })
+  await invalidateSettingsCache()
+  return flags
+}
+
+function featureFlagsWrite(org: SettingsRecord, input: Partial<FeatureFlags>) {
   // Unknown stored keys (retired Labs flags) drop here; the next write
   // persists a clean shape.
   const current = resolveFeatureFlags(org.featureFlags)
@@ -1048,7 +1063,7 @@ export async function updateFeatureFlags(input: Partial<FeatureFlags>): Promise<
   }
   if (input.statusPage === true) {
     const existing = resolveStatusSettings(org.metadata)
-    const meta = parseJsonOrNull<Record<string, unknown>>(org.metadata) ?? {}
+    const meta = parseMetadataBag(org.metadata, { settingsId: org.id, key: 'statusSettings' })
     meta.statusSettings = { ...existing, enabled: true }
     patch.metadata = JSON.stringify(meta)
   }
@@ -1065,7 +1080,5 @@ export async function updateFeatureFlags(input: Partial<FeatureFlags>): Promise<
       support: { ...portal.support, enabled: true },
     })
   }
-  await db.update(settings).set(patch).where(eq(settings.id, org.id))
-  await invalidateSettingsCache()
-  return updated
+  return { updated, patch }
 }
