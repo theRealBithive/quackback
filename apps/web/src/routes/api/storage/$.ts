@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { readBodyWithLimit } from '@/lib/server/utils/read-body'
 import { logger } from '@/lib/server/logger'
 import { currentWorkspaceNamespace } from '@/lib/server/workspaces/workspace-keyed'
+import { redirectPolicy, servedFileHeaders } from '@/lib/server/storage/serve-policy'
 
 const log = logger.child({ component: 'storage' })
 
@@ -244,6 +245,8 @@ export async function handleStorageGet({ request }: { request: Request }): Promi
             // Stored Content-Types originate from upload requests — never
             // let a browser second-guess them on a same-origin response.
             'X-Content-Type-Options': 'nosniff',
+            // Anything a browser could run is a download here, never a page.
+            ...servedFileHeaders(key, cached.contentType),
           },
         })
       }
@@ -262,11 +265,19 @@ export async function handleStorageGet({ request }: { request: Request }): Promi
             : 'private, max-age=3600, immutable',
           Vary: 'Host',
           'X-Content-Type-Options': 'nosniff',
+          ...servedFileHeaders(key, contentType),
         },
       })
     }
 
-    const presignedUrl = await generatePresignedGetUrl(key)
+    // The redirect does not see the stored type, so the presigned URL either
+    // forces the type its extension names (raster image, audio, video, PDF) or
+    // makes the file a download.
+    const policy = redirectPolicy(key)
+    const presignedUrl =
+      'inlineType' in policy
+        ? await generatePresignedGetUrl(key, undefined, undefined, policy.inlineType)
+        : await generatePresignedGetUrl(key, undefined, policy.downloadName, undefined)
 
     return new Response(null, {
       status: 302,
