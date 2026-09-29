@@ -19,6 +19,7 @@ const hoisted = vi.hoisted(() => ({
   markSsoTestSucceeded: vi.fn(),
   listIdentityProviders: vi.fn(),
   persistTestResult: vi.fn(),
+  recordAuditEvent: vi.fn(),
 }))
 
 vi.mock('@/lib/server/cache', () => ({
@@ -54,6 +55,10 @@ vi.mock('@/lib/server/domains/settings/settings.service', () => ({
 vi.mock('@/lib/server/domains/settings/identity-providers.service', () => ({
   listIdentityProviders: hoisted.listIdentityProviders,
   persistTestResult: hoisted.persistTestResult,
+}))
+
+vi.mock('@/lib/server/audit/log', () => ({
+  recordAuditEvent: hoisted.recordAuditEvent,
 }))
 
 import { handleSsoTestCallback, renderSsoTestCallbackHtml } from '../sso-test-callback'
@@ -578,6 +583,87 @@ describe('handleSsoTestCallback', () => {
       expect.objectContaining({ outcome: 'mapping_failed', capture: failedCapture })
     )
     expect(hoisted.markSsoTestSucceeded).not.toHaveBeenCalled()
+  })
+
+  describe('ID token nonce finding', () => {
+    const nonceStep = {
+      ok: true,
+      stage: 'claim-check',
+      label: 'Provider does not return the nonce',
+      detail: "Sign-in won't send one. The signature, issuer and audience are still checked.",
+      severity: 'info',
+    }
+    const passingWith = (idTokenNonce: 'check' | 'off' | undefined) => ({
+      ok: true,
+      steps: idTokenNonce === 'off' ? [{ ...nonceStep }] : [],
+      claims: { iss: 'https://idp', sub: 'u2', aud: 'cid' },
+      tokenInfo: { idTokenAlg: 'RS256', hasAccessToken: true, hasRefreshToken: false },
+      capture: v2Capture({ registrationId: 'oidc_custom', identity: { id: 'u2', sources: {} } }),
+      ...(idTokenNonce ? { idTokenNonce } : {}),
+    })
+    const run = () =>
+      handleSsoTestCallback({
+        state: 'state-xyz',
+        code: 'authcode',
+        error: null,
+        errorDescription: null,
+      })
+
+    beforeEach(() => {
+      hoisted.cacheGet.mockResolvedValueOnce(customProviderSession)
+      hoisted.listIdentityProviders.mockResolvedValueOnce([
+        { id: 'idp_custom', registrationId: 'oidc_custom', domains: [] },
+      ])
+    })
+
+    it('saves what the test found with the passing result, on behalf of the admin', async () => {
+      hoisted.runHandshake.mockResolvedValueOnce(passingWith('off'))
+
+      await run()
+
+      // The service audits the change inside the same transaction, so the
+      // callback hands it the admin rather than writing an audit row itself.
+      expect(hoisted.persistTestResult).toHaveBeenCalledWith(
+        'idp_custom',
+        expect.objectContaining({
+          outcome: 'success',
+          idTokenNonce: 'off',
+          auditActorUserId: 'user_admin',
+        })
+      )
+      expect(hoisted.recordAuditEvent).not.toHaveBeenCalled()
+    })
+
+    it('leaves the setting alone when the test learned nothing about the nonce', async () => {
+      hoisted.runHandshake.mockResolvedValueOnce(passingWith(undefined))
+
+      await run()
+
+      const persist = hoisted.persistTestResult.mock.calls[0]![1] as Record<string, unknown>
+      expect(persist.idTokenNonce).toBeUndefined()
+    })
+
+    it('says the finding was not saved when the provider changed mid-test', async () => {
+      // A passing result must not claim sign-in will stop sending a nonce when
+      // the guarded write was refused.
+      hoisted.persistTestResult.mockResolvedValueOnce('stale')
+      hoisted.runHandshake.mockResolvedValueOnce(passingWith('off'))
+
+      const handled = await run()
+
+      const step = handled?.result.steps.find((s) => s.stage === 'claim-check')
+      expect(step?.detail).toMatch(/not saved/i)
+      expect(step?.detail).toMatch(/test again/i)
+    })
+
+    it('keeps the saved finding as reported when the write lands', async () => {
+      hoisted.runHandshake.mockResolvedValueOnce(passingWith('off'))
+
+      const handled = await run()
+
+      const step = handled?.result.steps.find((s) => s.stage === 'claim-check')
+      expect(step?.detail).toMatch(/won't send one/i)
+    })
   })
 
   it('forwards IdP-side error params to the handshake', async () => {
