@@ -108,6 +108,7 @@ the deploy tag where there is one.
 | `615e4da2b`      | 2026-09-13 | fix(inbox): skip non-list cache entries when patching posts                                     | skipped, fixed here first in #14 (`d20bda577`) and more completely; its extra check, that every page holds rows, adopted here                                                                       | #34, `v0.13.3-exkulpa.31` |
 | `344bcaf62` #554 | 2026-09-13 | chore(deps): update all dependencies to latest                                                  | skipped, a Renovate-shaped bump left to Renovate: 1,447 lockfile lines and two majors in one commit, against per-package pull requests; its zod pin taken by hand, because better-auth 1.7 needs it | `fix/zod-for-better-auth` |
 | `f8062929a` #553 | 2026-09-14 | perf(inbox): stop blocking navigation on selection, defer heavy chunks                          | picked, three conflicts: the lazy-image attributes join our `aspect-ratio: auto`, and upstream's billing lock-out is dropped as out of scope                                                        | #36, `v0.13.3-exkulpa.33` |
+| `34ca4023b` #607 | 2026-09-29 | test(assistant): date guidance-stats turns relative to now                                      | picked ahead of the next batch: the fixed July dates aged out of the 90-day window and failed shard 3 on every run                                                                                  | `fix/zod-for-better-auth` |
 
 ## Open upstream pull requests we track
 
