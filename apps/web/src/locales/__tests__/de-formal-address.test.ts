@@ -7,7 +7,10 @@
  * and not a one-off cleanup.
  *
  *   D1 No entry in de.json addresses the reader with an informal pronoun
- *      (du, dich, dir, dein…, ihr as "you all", euch, euer…).
+ *      (du, dich, dir, dein…, euch, euer…).
+ *
+ * "ihr" is left out of the word list on purpose: as a word it cannot be told
+ * from the formal possessive "Ihr" without reading the sentence.
  *   D2 The entries that were informal when this was decided read formally.
  *
  * D1 can only see pronouns. An informal imperative with no pronoun in it
