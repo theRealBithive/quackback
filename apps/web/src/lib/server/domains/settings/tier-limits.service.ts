@@ -26,6 +26,8 @@ type StoredTierLimits = Partial<Omit<TierLimits, 'features'>> & {
  */
 function parseStoredTierLimits(raw: string | null | undefined): StoredTierLimits | null {
   if (!raw) return null
+  const trimmed = raw.trim()
+  if (trimmed === '' || trimmed === 'null') return null
 
   let parsed: unknown
   try {
