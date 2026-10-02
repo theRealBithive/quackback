@@ -344,7 +344,11 @@ export function WidgetHomeAnimated({
     if (sessionVersion === INITIAL_SESSION_VERSION) return
     if (!shouldResetComposeBoard(selectedBoardId, boards, confirmedBoardSlugs)) return
     const requestedSlug = composeBoardDirtyRef.current ? undefined : composeRequest?.boardSlug
-    setSelectedBoardId(resolveComposeBoardId(boards, requestedSlug, defaultBoard))
+    // Only boards this session's list confirmed may win: `boards` can still
+    // hold one the visitor just lost, and re-picking it would undo the reset.
+    const confirmedSlugs = confirmedBoardSlugs ?? []
+    const confirmedBoards = boards.filter((board) => confirmedSlugs.includes(board.slug))
+    setSelectedBoardId(resolveComposeBoardId(confirmedBoards, requestedSlug, defaultBoard))
   }, [
     sessionVersion,
     selectedBoardId,

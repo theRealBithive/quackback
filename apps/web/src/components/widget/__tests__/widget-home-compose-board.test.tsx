@@ -38,7 +38,7 @@ vi.mock('@/lib/client/widget-auth', () => ({
 }))
 vi.mock('@/lib/client/widget-bridge', () => ({ sendToHost: vi.fn() }))
 vi.mock('../use-widget-image-upload', () => ({
-  useWidgetMediaUpload: () => ({ upload: vi.fn() }),
+  useWidgetImageUpload: () => ({ upload: vi.fn() }),
   WidgetSessionError: class WidgetSessionError extends Error {},
 }))
 vi.mock('../widget-vote-button', () => ({ WidgetVoteButton: () => null }))
@@ -78,9 +78,9 @@ vi.mock('@/components/ui/rich-text-editor', () => ({
   RichTextEditor: () => <div data-testid="editor" />,
 }))
 vi.mock('@/components/ui/select', async () => import('@/test/radix-select'))
-vi.mock('@/lib/server/functions/widget/posts', () => ({
-  widgetListPublicPostsFn: vi.fn(async () => ({ items: [], hasMore: false, total: 0 })),
-  widgetCreatePublicPostFn: (...args: unknown[]) => createPost(...args),
+vi.mock('@/lib/server/functions/public-posts', () => ({
+  listPublicPostsFn: vi.fn(async () => ({ items: [], hasMore: false, total: 0 })),
+  createPublicPostFn: (...args: unknown[]) => createPost(...args),
 }))
 
 import { WidgetHomeAnimated } from '../widget-home-animated'
