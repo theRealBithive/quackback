@@ -8,6 +8,7 @@
 import { act } from 'react'
 import { createRoot, hydrateRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
+import { IntlProvider } from 'react-intl'
 import { afterEach, describe, expect, it } from 'vitest'
 import { formatIn, restoreRuntimeLocale, setRuntimeLocale } from '@/test/runtime-locale'
 import { LocalDate, NUMERIC_DATE_TIME, useLocalDateFormatter } from '../local-date'
@@ -18,6 +19,15 @@ const DAY: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 
 const VIEWER = { locale: 'de-DE', timeZone: 'Pacific/Kiritimati' }
 
 afterEach(restoreRuntimeLocale)
+afterEach(() => {
+  // Drop the stand-in so the environment's own getter shows through again.
+  delete (navigator as { languages?: readonly string[] }).languages
+})
+
+/** Stand in for the browser's preferred languages. */
+function setPreferredLanguages(languages: readonly string[]) {
+  Object.defineProperty(navigator, 'languages', { configurable: true, get: () => languages })
+}
 
 /** Server-render `ui` as one runtime, then hydrate it as the viewer's browser. */
 async function serverThenHydrate(ui: React.ReactElement) {
@@ -118,5 +128,51 @@ describe('useLocalDateFormatter', () => {
     })
 
     expect(seen[0]).toBe(formatIn(VIEWER.locale, VIEWER.timeZone, AT, NUMERIC_DATE_TIME))
+  })
+})
+
+describe('LocalDate inside an IntlProvider', () => {
+  const inApp = (locale: string, ui: React.ReactElement) => (
+    <IntlProvider locale={locale}>{ui}</IntlProvider>
+  )
+
+  it("server-renders the app's language in UTC, whatever the server runtime", () => {
+    setRuntimeLocale('en-US', 'Asia/Tokyo')
+    expect(renderToString(inApp('pl', <LocalDate date={AT} options={DAY} />))).toContain(
+      `>${formatIn('pl', 'UTC', AT, DAY)}</time>`
+    )
+  })
+
+  it("hydrates without error, then keeps the app's language in the viewer's zone", async () => {
+    // The browser prefers German, but the page is in Polish: dates follow the page.
+    setPreferredLanguages(['de-DE', 'de'])
+    const { container, serverHtml, errors } = await serverThenHydrate(
+      inApp('pl', <LocalDate date={AT} options={DAY} />)
+    )
+
+    expect(errors).toEqual([])
+    expect(serverHtml).toContain(formatIn('pl', 'UTC', AT, DAY))
+    expect(container.textContent).toBe(formatIn('pl', VIEWER.timeZone, AT, DAY))
+  })
+
+  it('passes over a preferred language Intl cannot read', async () => {
+    setPreferredLanguages(['en-US@posix'])
+    const { container, errors } = await serverThenHydrate(
+      inApp('en', <LocalDate date={AT} options={DAY} />)
+    )
+
+    expect(errors).toEqual([])
+    expect(container.textContent).toBe(formatIn('en', VIEWER.timeZone, AT, DAY))
+  })
+
+  it('keeps a locale it is given over the app language', async () => {
+    setPreferredLanguages(['pl-PL'])
+    const { container, serverHtml, errors } = await serverThenHydrate(
+      inApp('pl', <LocalDate date={AT} options={DAY} locale="en-US" />)
+    )
+
+    expect(errors).toEqual([])
+    expect(serverHtml).toContain('Oct 1, 2026')
+    expect(container.textContent).toBe('Oct 2, 2026')
   })
 })

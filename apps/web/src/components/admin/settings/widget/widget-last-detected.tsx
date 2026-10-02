@@ -9,7 +9,7 @@ export function WidgetLastDetected({ at }: { at?: string | null }) {
   if (Number.isNaN(parsed.getTime())) return null
   return (
     <p className="text-xs text-muted-foreground" title={formatDate(parsed, NUMERIC_DATE_TIME)}>
-      Last detected <TimeAgo date={at} />
+      Last detected <TimeAgo date={at} locale="en" />
     </p>
   )
 }

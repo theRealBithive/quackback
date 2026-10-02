@@ -338,7 +338,7 @@ function DeletedItemsView() {
                   <p className="text-sm font-medium text-foreground truncate">{cat.name}</p>
                   {cat.deletedAt && (
                     <p className="text-xs text-muted-foreground">
-                      Deleted <TimeAgo date={cat.deletedAt as string} />
+                      Deleted <TimeAgo date={cat.deletedAt as string} locale="en" />
                     </p>
                   )}
                 </div>
@@ -378,7 +378,7 @@ function DeletedItemsView() {
                     <span className="mr-2">{article.category.name}</span>
                     {article.deletedAt && (
                       <>
-                        &middot; Deleted <TimeAgo date={article.deletedAt} />
+                        &middot; Deleted <TimeAgo date={article.deletedAt} locale="en" />
                       </>
                     )}
                   </p>
