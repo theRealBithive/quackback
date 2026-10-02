@@ -9,10 +9,10 @@
 import type { ConversationMessage } from '@/lib/server/db'
 import type { ConversationId, TicketId } from '@quackback/ids'
 import type { Actor } from '@/lib/server/policy/types'
+import { NotFoundError } from '@/lib/shared/errors'
 
 export type MessageParent =
-  | { kind: 'ticket'; ticketId: TicketId }
-  | { kind: 'conversation'; conversationId: ConversationId }
+  { kind: 'ticket'; ticketId: TicketId } | { kind: 'conversation'; conversationId: ConversationId }
 
 /**
  * Resolve `message`'s parent. For a ticket-parented message, authorizes the
@@ -36,4 +36,24 @@ export async function resolveMessageParent(
   }
   // A message has exactly one parent, so conversationId is guaranteed here.
   return { kind: 'conversation', conversationId: message.conversationId as ConversationId }
+}
+
+/**
+ * `resolveMessageParent` for edit and delete: a teammate who cannot see the
+ * ticket is told the *message* does not exist, in the very words used for an
+ * id that was never issued. Naming the ticket would tell them the message is
+ * real.
+ */
+export async function resolveVisibleMessageParent(
+  message: ConversationMessage,
+  actor: Actor
+): Promise<MessageParent> {
+  try {
+    return await resolveMessageParent(message, actor)
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw new NotFoundError('MESSAGE_NOT_FOUND', 'Message not found')
+    }
+    throw error
+  }
 }

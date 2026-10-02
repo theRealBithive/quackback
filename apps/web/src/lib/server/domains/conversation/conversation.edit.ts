@@ -44,7 +44,7 @@ import {
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import { extractMentions } from '@/lib/server/domains/posts/extract-mentions'
 import { assistantPrincipalIdOnce } from '@/lib/server/messages/assistant-principal'
-import { resolveMessageParent } from './message-parent'
+import { resolveVisibleMessageParent } from './message-parent'
 import { syncConversationMessageMentions } from './sync-conversation-mentions'
 import {
   conversationToDTO,
@@ -160,7 +160,7 @@ export async function editConversationMessage(
 
   if (!message.conversationId) {
     if (!message.ticketId) throw new NotFoundError('MESSAGE_NOT_FOUND', 'Message not found')
-    await resolveMessageParent(message, actor)
+    await resolveVisibleMessageParent(message, actor)
   } else {
     const [conversation] = await db
       .select()

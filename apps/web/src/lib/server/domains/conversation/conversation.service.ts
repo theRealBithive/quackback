@@ -94,7 +94,7 @@ import {
   notifyConversationStarted,
 } from './conversation.notify'
 import { resolveReplyRecipient } from './conversation.recipient'
-import { resolveMessageParent } from './message-parent'
+import { resolveVisibleMessageParent } from './message-parent'
 import { realEmail } from '@/lib/shared/anonymous-email'
 import {
   conversationToDTO,
@@ -1749,7 +1749,7 @@ export async function deleteConversationMessage(
     if (!message.ticketId) throw new NotFoundError('MESSAGE_NOT_FOUND', 'Message not found')
     // Resolves the parent + authorizes ticket visibility (§2.5) — shared with
     // message.actions.ts's identical resolve-then-authorize step.
-    await resolveMessageParent(message, actor)
+    await resolveVisibleMessageParent(message, actor)
     const decision = canDeleteMessage(actor, authored, null)
     if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
 
@@ -1772,14 +1772,14 @@ export async function deleteConversationMessage(
   const conversationId = message.conversationId
   const conversation = await loadConversationOr404(conversationId)
 
-  const decision = canDeleteMessage(actor, authored, conversation)
-  if (!decision.allowed) {
-    // Hide existence from anyone who can't even view the conversation.
-    if (!canViewConversation(actor, conversation).allowed) {
-      throw new NotFoundError('MESSAGE_NOT_FOUND', 'Message not found')
-    }
-    throw new ForbiddenError('FORBIDDEN', decision.reason)
+  // Hide existence from anyone who can't even view the conversation, whatever
+  // else they hold: the author of a message loses sight of it with the view
+  // permission.
+  if (!canViewConversation(actor, conversation).allowed) {
+    throw new NotFoundError('MESSAGE_NOT_FOUND', 'Message not found')
   }
+  const decision = canDeleteMessage(actor, authored, conversation)
+  if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
 
   if (
     conversation.channel === 'github' &&

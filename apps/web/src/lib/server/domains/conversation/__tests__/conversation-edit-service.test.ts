@@ -54,7 +54,7 @@ vi.mock('./sync-conversation-mentions', () => ({
 }))
 
 vi.mock('../message-parent', () => ({
-  resolveMessageParent: vi.fn(async () => ({ kind: 'ticket', ticketId: 'ticket_1' })),
+  resolveVisibleMessageParent: vi.fn(async () => ({ kind: 'ticket', ticketId: 'ticket_1' })),
 }))
 
 vi.mock('@/lib/server/domains/channels/github-deliver', () => ({
