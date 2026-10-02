@@ -269,3 +269,100 @@ describe('canEditMessage', () => {
     expect(canEditMessage(adminActor, { ...reply, authorPrincipalId: null }).allowed).toBe(false)
   })
 })
+
+/**
+ * A refusal travels to the caller as the error message (a ForbiddenError's
+ * text), so the reason is part of what each rule promises: it says which
+ * condition failed, and two different refusals must not read the same.
+ */
+describe('the reason a refusal gives', () => {
+  type Refused = { allowed: false; reason: string }
+
+  function reasonOf(decision: { allowed: boolean; reason?: string }): string {
+    expect(decision.allowed).toBe(false)
+    return (decision as Refused).reason
+  }
+
+  const agentReply = {
+    senderType: 'agent' as const,
+    authorPrincipalId: 'principal_member' as PrincipalId,
+    parent: 'conversation' as const,
+    isInternal: false,
+  }
+  const plainTeammate: Actor = { ...memberActor, permissions: new Set<PermissionKey>() }
+
+  it('names the missing conversation access', () => {
+    expect(reasonOf(canViewConversation(otherVisitorActor, openConv))).toBe(
+      'You do not have access to this conversation'
+    )
+    expect(reasonOf(canSendVisitorMessage(otherVisitorActor, openConv))).toBe(
+      'You do not have access to this conversation'
+    )
+  })
+
+  it('names a missing session and a service principal when sending or starting', () => {
+    expect(reasonOf(canSendVisitorMessage(ANONYMOUS_ACTOR, openConv))).toBe(
+      'A session is required to send a message'
+    )
+    expect(reasonOf(canSendVisitorMessage(serviceActor, openConv))).toBe(
+      'Service principals cannot send messages'
+    )
+    expect(reasonOf(canStartConversation(ANONYMOUS_ACTOR))).toBe(
+      'A session is required to start a conversation'
+    )
+    expect(reasonOf(canStartConversation(serviceActor))).toBe(
+      'Service principals cannot start a conversation'
+    )
+  })
+
+  it('names the support-agent requirement', () => {
+    expect(reasonOf(canActAsAgent(plainTeammate))).toBe(
+      'Only team members can act as a support agent'
+    )
+  })
+
+  it('names why a message cannot be deleted', () => {
+    const systemRow = { ...agentReply, senderType: 'system' as const }
+    expect(reasonOf(canDeleteMessage(memberActor, systemRow, openConv))).toBe(
+      'System messages cannot be deleted'
+    )
+    const someoneElses = { ...agentReply, authorPrincipalId: OTHER }
+    expect(reasonOf(canDeleteMessage(plainTeammate, someoneElses, openConv))).toBe(
+      'You can only delete your own messages'
+    )
+    const visitorRow = {
+      ...agentReply,
+      senderType: 'visitor' as const,
+      authorPrincipalId: OTHER,
+    }
+    expect(reasonOf(canDeleteMessage(visitorActor, visitorRow, openConv))).toBe(
+      'You can only delete your own messages'
+    )
+    expect(reasonOf(canDeleteMessage(ANONYMOUS_ACTOR, agentReply, openConv))).toBe(
+      'A session is required to delete a message'
+    )
+    // Without moderator rights, so the own-message rule is the one that answers.
+    const plainService: Actor = { ...serviceActor, permissions: new Set<PermissionKey>() }
+    const writtenByTheService = { ...agentReply, authorPrincipalId: serviceActor.principalId }
+    expect(reasonOf(canDeleteMessage(plainService, writtenByTheService, openConv))).toBe(
+      'Service principals cannot delete messages'
+    )
+  })
+
+  it('names why a message cannot be edited', () => {
+    const visitorRow = { ...agentReply, senderType: 'visitor' as const }
+    expect(reasonOf(canEditMessage(memberActor, visitorRow))).toBe(
+      'Only agent messages can be edited'
+    )
+    expect(reasonOf(canEditMessage(ANONYMOUS_ACTOR, agentReply))).toBe(
+      'A session is required to edit a message'
+    )
+    expect(reasonOf(canEditMessage(serviceActor, agentReply))).toBe(
+      'Service principals cannot edit messages'
+    )
+    const someoneElses = { ...agentReply, authorPrincipalId: OTHER }
+    expect(reasonOf(canEditMessage(memberActor, someoneElses))).toBe(
+      'You can only edit your own messages'
+    )
+  })
+})

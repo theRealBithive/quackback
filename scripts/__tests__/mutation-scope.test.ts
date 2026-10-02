@@ -969,6 +969,13 @@ describe('the mutations excused as equivalent (B6)', () => {
         replacement: 'false',
         why: expect.stringContaining('With the length test removed, an empty children ar'),
       },
+      {
+        file: 'apps/web/src/components/conversation/message-edit.ts',
+        mutator: 'StringLiteral',
+        line: "const parent = message.ticketId ? 'ticket' : 'conversation'",
+        replacement: '""',
+        why: expect.stringContaining('writePermissionFor asks only whether the parent is'),
+      },
     ])
   })
 

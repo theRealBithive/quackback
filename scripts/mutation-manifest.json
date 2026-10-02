@@ -908,6 +908,13 @@
       "line": "if (!children || children.length === 0) return true",
       "replacement": "false",
       "why": "With the length test removed, an empty children array falls through to children.every(...), which is true for an empty array, so the node is still reported empty. A missing `content` is still caught by the first operand."
+    },
+    {
+      "file": "apps/web/src/components/conversation/message-edit.ts",
+      "mutator": "StringLiteral",
+      "line": "const parent = message.ticketId ? 'ticket' : 'conversation'",
+      "replacement": "\"\"",
+      "why": "writePermissionFor asks only whether the parent is 'ticket' and treats every other value as a conversation, so '' and 'conversation' select the same permission for every message. The type forbids '' at compile time only; at run time no input can tell the two apart."
     }
   ]
 }
