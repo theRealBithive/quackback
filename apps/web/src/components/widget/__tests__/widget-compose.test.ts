@@ -172,7 +172,14 @@ describe('shouldResetComposeBoard', () => {
     expect(shouldResetComposeBoard('board_secret', boards, ['ideas', 'bug-reports'])).toBe(true)
     expect(shouldResetComposeBoard('board_ideas', boards, ['ideas', 'bug-reports'])).toBe(false)
     expect(shouldResetComposeBoard('board_ideas', boards, null)).toBe(false)
-    expect(shouldResetComposeBoard('', boards, ['ideas'])).toBe(false)
+  })
+
+  it('fills an empty selection once the live list is known', () => {
+    expect(shouldResetComposeBoard('', boards, ['ideas'])).toBe(true)
+    expect(shouldResetComposeBoard('', [{ id: 'board_ideas', slug: 'ideas' }], ['ideas'])).toBe(
+      true
+    )
+    expect(shouldResetComposeBoard('', boards, null)).toBe(false)
   })
 })
 
@@ -282,5 +289,84 @@ describe('resolveOpenCommand — views the workspace cannot serve', () => {
         }
       )
     )
+  })
+})
+
+describe('resolveComposeBoardId — an empty slug means no slug (W1)', () => {
+  const boardsWithBlankSlug = [
+    { id: 'board_blank', slug: '' },
+    { id: 'board_ideas', slug: 'ideas' },
+  ]
+
+  it('does not let an empty requested slug pick a board', () => {
+    expect(resolveComposeBoardId(boardsWithBlankSlug, '', 'ideas')).toBe('board_ideas')
+  })
+
+  it('does not let an empty default slug pick a board', () => {
+    expect(resolveComposeBoardId(boardsWithBlankSlug, undefined, '')).toBe('')
+  })
+})
+
+describe('shouldResetComposeBoard — an empty selection is always filled', () => {
+  it('fills it even when the list holds a board with a blank id that is confirmed', () => {
+    const boardsWithBlankId = [{ id: '', slug: 'ideas' }]
+    expect(shouldResetComposeBoard('', boardsWithBlankId, ['ideas'])).toBe(true)
+  })
+})
+
+describe('resolveOpenCommand — a view the workspace switched off', () => {
+  it('ignores a changelog command when Changelog is off', () => {
+    expect(
+      resolveOpenCommand({ view: 'changelog', entryId: 'x' }, { ...allTabs, changelog: false })
+    ).toBeNull()
+  })
+
+  it('ignores a help command when Help is off', () => {
+    expect(resolveOpenCommand({ view: 'help', query: 'x' }, { ...allTabs, help: false })).toBeNull()
+  })
+})
+
+describe('resolveOpenCommand — an empty field is an absent field (W1)', () => {
+  it('drops an empty title, body and board from a new-post command', () => {
+    const command = resolveOpenCommand(
+      { view: 'new-post', title: '', body: '', board: '' },
+      allTabs
+    )
+    expect(command).toStrictEqual({
+      type: 'new-post',
+      title: undefined,
+      body: undefined,
+      boardSlug: undefined,
+    })
+  })
+
+  it('drops an empty entry id and an empty help query', () => {
+    expect(resolveOpenCommand({ view: 'changelog', entryId: '' }, allTabs)).toStrictEqual({
+      type: 'changelog',
+      entryId: undefined,
+    })
+    expect(resolveOpenCommand({ view: 'help', query: '' }, allTabs)).toStrictEqual({
+      type: 'help',
+      query: undefined,
+    })
+  })
+})
+
+describe('composeBodyFromPlainText — line breaks', () => {
+  it('reads a Windows line break as one break, not none', () => {
+    const { json } = composeBodyFromPlainText('one\r\ntwo')
+    expect(json.content).toEqual([
+      { type: 'paragraph', content: [{ type: 'text', text: 'one' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'two' }] },
+    ])
+  })
+
+  it('turns an empty line into an empty paragraph', () => {
+    const { json } = composeBodyFromPlainText('one\n\ntwo')
+    expect(json.content).toEqual([
+      { type: 'paragraph', content: [{ type: 'text', text: 'one' }] },
+      { type: 'paragraph' },
+      { type: 'paragraph', content: [{ type: 'text', text: 'two' }] },
+    ])
   })
 })

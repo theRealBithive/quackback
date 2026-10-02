@@ -36,6 +36,7 @@ function makeProvider(over: Partial<IdentityProvider>): IdentityProvider {
   return {
     id: 'idp_x' as IdentityProviderId,
     registrationId: 'oidc_x',
+    idTokenNonce: null,
     label: 'Acme SSO',
     kind: 'okta',
     discoveryUrl: 'https://acme.okta.com/.well-known/openid-configuration',

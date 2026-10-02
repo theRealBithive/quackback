@@ -425,6 +425,76 @@ export function withLiveEditor(editor: Editor | null, run: (editor: Editor) => v
   if (editor && !editor.isDestroyed) run(editor)
 }
 
+/**
+ * Markdown for onChange's 3rd argument. Skip the serializer when the caller
+ * only declared json+html (arity < 3). Catch serializer failures so a custom
+ * node can't prevent JSON from reaching the form — otherwise changelog create
+ * submits an empty `content` string and the server rejects with
+ * "Content is required" while the editor still shows a body.
+ *
+ * On throw, project plaintext from the current JSON (so the markdown
+ * mirror matches this edit) and only then fall back to the last successful
+ * serialization so comment composers that gate send on trim() don't go empty.
+ */
+export function markdownFromEditor(
+  editor: { getMarkdown?: () => string },
+  onChangeArity: number,
+  fallback = '',
+  json?: unknown
+): string {
+  if (onChangeArity < 3) return ''
+  try {
+    return editor.getMarkdown?.() ?? ''
+  } catch {
+    return plaintextFromTiptapJson(json) || fallback
+  }
+}
+
+const PLAINTEXT_BLOCKS = new Set(['paragraph', 'heading', 'codeBlock'])
+
+/** Text from a TipTap JSON doc, with newlines between blocks. Used when
+ *  getMarkdown() throws so the markdown mirror still matches this edit. */
+export function plaintextFromTiptapJson(doc: unknown): string {
+  if (!doc || typeof doc !== 'object') return ''
+
+  const inlineText = (node: { type?: string; text?: string; content?: unknown[] }): string => {
+    if (node.type === 'text') return node.text ?? ''
+    if (node.type === 'hardBreak') return '\n'
+    if (!Array.isArray(node.content)) return ''
+    return node.content
+      .map((child) => (child && typeof child === 'object' ? inlineText(child as typeof node) : ''))
+      .join('')
+  }
+
+  const blocks: string[] = []
+  const walk = (node: { type?: string; content?: unknown[] }) => {
+    if (node.type && PLAINTEXT_BLOCKS.has(node.type)) {
+      const text = inlineText(node).trim()
+      if (text) blocks.push(text)
+      return
+    }
+    if (!Array.isArray(node.content)) return
+    for (const child of node.content) {
+      if (child && typeof child === 'object') walk(child as typeof node)
+    }
+  }
+  walk(doc as { type?: string; content?: unknown[] })
+  return blocks.join('\n')
+}
+
+export function seedMarkdownFallback(
+  value: string | JSONContent | undefined | null,
+  editor?: { getMarkdown?: () => string }
+): string {
+  const fromValue = typeof value === 'string' ? value : plaintextFromTiptapJson(value)
+  if (!editor) return fromValue
+  try {
+    return editor.getMarkdown?.() || fromValue
+  } catch {
+    return fromValue
+  }
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -1501,6 +1571,10 @@ function RichTextEditorBase({
   // markdown serialization is "", which without this guard would round-trip
   // back through clearContent() and erase the heading they just created.
   const lastEmittedMarkdownRef = useRef<string | null>(null)
+  // Last markdown that actually serialized. Distinct from the sync sentinel
+  // above, which is cleared after a controlled-value round trip; comment
+  // composers need this if a later getMarkdown() throw would otherwise emit ''.
+  const lastSuccessfulMarkdownRef = useRef(seedMarkdownFallback(value))
 
   // Stable initial content reference — passed once to useEditor so TipTap v3's
   // compareOptions never sees a reference change on `content` and never calls
@@ -1518,6 +1592,9 @@ function RichTextEditorBase({
     content: initialContentRef.current,
     autofocus,
     editable: !disabled,
+    onCreate: ({ editor }) => {
+      lastSuccessfulMarkdownRef.current = seedMarkdownFallback(initialContentRef.current, editor)
+    },
     onUpdate: ({ editor }) => {
       if (!onChange) return
       const json = editor.getJSON()
@@ -1526,8 +1603,14 @@ function RichTextEditorBase({
       // Only serialize to markdown when the caller declares a 3rd parameter.
       // Callers that only need json+html (widget, portal) skip the expensive
       // recursive tree-walk that @tiptap/markdown does on every keystroke.
-      const markdown = onChange.length >= 3 ? (editor.getMarkdown?.() ?? '') : ''
+      const markdown = markdownFromEditor(
+        editor,
+        onChange.length,
+        lastSuccessfulMarkdownRef.current,
+        json
+      )
       lastEmittedMarkdownRef.current = markdown
+      if (onChange.length >= 3) lastSuccessfulMarkdownRef.current = markdown
       onChange(json, html, markdown)
     },
     editorProps,

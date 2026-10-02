@@ -144,22 +144,86 @@ export async function invalidateSettingsCache(): Promise<void> {
 }
 
 /**
- * Read-modify-write one key in the `settings.metadata` JSON bag, preserving
- * sibling keys, then bust the settings cache. Non-atomic (last write wins) —
- * acceptable for the admin-driven settings families (office hours, tickets) that
- * ride in this generic bag rather than a dedicated column.
+ * The `settings.metadata` bag as an object to change one key of.
+ *
+ * The bag is one text column that many writers keep a key in, including
+ * writers that are not settings pages, so a write must carry every key it
+ * found. An absent bag (NULL, blank or JSON `null`) holds nothing and starts
+ * empty. A bag that is present but is not a JSON object cannot be carried, and
+ * writing a fresh object over it would erase every key in it, so this throws
+ * instead and the write is abandoned with the stored text untouched.
  *
  * @internal
  */
-export async function writeMetadataKey(key: string, value: unknown): Promise<void> {
-  const org = await requireSettings()
-  const meta = parseJsonOrNull<Record<string, unknown>>(org.metadata) ?? {}
-  meta[key] = value
-  await db
-    .update(settings)
-    .set({ metadata: JSON.stringify(meta) })
-    .where(eq(settings.id, org.id))
+export function parseMetadataBag(
+  stored: string | null,
+  context: { settingsId: string; key: string }
+): Record<string, unknown> {
+  if (storedJsonIsBlank(stored)) return {}
+  let bag: unknown = null
+  let parseError: unknown
+  try {
+    bag = JSON.parse(stored as string)
+  } catch (error) {
+    parseError = error
+  }
+  if (typeof bag === 'object' && bag !== null && !Array.isArray(bag)) {
+    return bag as Record<string, unknown>
+  }
+  const err = new InternalError(
+    'SETTINGS_METADATA_INVALID',
+    'Stored workspace metadata is not a JSON object, so it was left unchanged',
+    parseError
+  )
+  log.error(
+    { err, settingsId: context.settingsId, key: context.key, storedLength: stored?.length },
+    'settings metadata is not a JSON object; refusing to overwrite it'
+  )
+  throw err
+}
+
+/**
+ * Write one key in the `settings.metadata` JSON bag, keeping every sibling
+ * key, then bust the settings cache once the write has committed.
+ *
+ * The read, the change and the write happen under the settings row lock, so
+ * two writers of different keys cannot lose each other's key. A bag that is
+ * present but unreadable is refused rather than replaced (see
+ * {@link parseMetadataBag}).
+ *
+ * `value` may be a function of the stored bag, for a partial update that
+ * merges over what is stored: it is called with the locked row's text, the
+ * text this write replaces, never an earlier or cached read. Returns the value
+ * written.
+ *
+ * @internal
+ */
+export async function writeMetadataKey<T>(
+  key: string,
+  value: T | ((storedMetadata: string | null) => T)
+): Promise<T> {
+  const next = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ id: settings.id, metadata: settings.metadata })
+      .from(settings)
+      .limit(1)
+      .for('update')
+    if (!row) throw new NotFoundError('SETTINGS_NOT_FOUND', 'Settings not found')
+
+    const bag = parseMetadataBag(row.metadata, { settingsId: row.id, key })
+    const computed =
+      typeof value === 'function'
+        ? (value as (storedMetadata: string | null) => T)(row.metadata)
+        : value
+    bag[key] = computed
+    await tx
+      .update(settings)
+      .set({ metadata: JSON.stringify(bag) })
+      .where(eq(settings.id, row.id))
+    return computed
+  })
   await invalidateSettingsCache()
+  return next
 }
 
 /**
