@@ -143,6 +143,21 @@ const get = (key: string) =>
     request: new Request(`https://app.example.com/api/storage/${encodeURIComponent(key)}`),
   })
 
+/**
+ * The Content-Type a response carries for a stored type, as HTTP delivers it.
+ *
+ * The Fetch standard normalises a header value by stripping its leading and
+ * trailing whitespace, so a stored type of " image/jpeg " reaches the browser
+ * as "image/jpeg". "With its own type" means that value, not the raw column.
+ * Whether the normalisation has already happened depends on the Headers
+ * implementation (CI's trims, happy-dom here does not), so both sides are
+ * compared normalised: the first CI run drew the padded case and failed on
+ * exactly this, which was the property misstating HTTP, not the route.
+ */
+function asHeaderValue(storedType: string): string {
+  return storedType.trim()
+}
+
 beforeEach(() => {
   mockConfig.s3Proxy = true
   storedObject.contentType = 'image/gif'
@@ -159,7 +174,7 @@ describe('a proxied file opens only if its stored type is safe (F23)', () => {
         const response = await get(uniqueKey(id, `${stem}.bin`))
 
         expect(response.status).toBe(200)
-        expect(response.headers.get('Content-Type')).toBe(type)
+        expect(asHeaderValue(response.headers.get('Content-Type') ?? '')).toBe(asHeaderValue(type))
         expect(response.headers.get('Content-Disposition')).toBeNull()
         expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
       }),
@@ -286,9 +301,17 @@ describe('a redirect follows the same rule, from the extension (F25)', () => {
       fc.asyncProperty(uuid, fc.stringMatching(/^[A-Za-z0-9_.-]{1,24}$/), async (id, name) => {
         generatePresignedGetUrl.mockClear()
 
-        await get(`logos/2026/09/${id}-${name.replace('..', '_')}`)
+        const response = await get(`logos/2026/09/${id}-${name}`)
+        const presignCalls = generatePresignedGetUrl.mock.calls
 
-        const [, , downloadName, forcedType] = generatePresignedGetUrl.mock.calls[0]!
+        // A key the route refuses (a name holding "..") is never presigned at
+        // all; every key it serves is presigned exactly one of the two ways.
+        if (response.status !== 302) {
+          expect(presignCalls).toHaveLength(0)
+          return
+        }
+        expect(presignCalls).toHaveLength(1)
+        const [, , downloadName, forcedType] = presignCalls[0]!
         expect((downloadName === undefined) !== (forcedType === undefined)).toBe(true)
       })
     )
@@ -309,7 +332,9 @@ describe('embedded images and videos keep rendering (F26)', () => {
           const response = await get(uniqueKey(id, `${stem}.png`))
 
           expect(response.status).toBe(200)
-          expect(response.headers.get('Content-Type')).toBe(type)
+          expect(asHeaderValue(response.headers.get('Content-Type') ?? '')).toBe(
+            asHeaderValue(type)
+          )
           expect(response.headers.get('Content-Disposition')).toBeNull()
           expect(response.headers.get('Content-Security-Policy')).toBeNull()
         }
