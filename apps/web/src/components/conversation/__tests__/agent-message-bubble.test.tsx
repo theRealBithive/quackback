@@ -12,6 +12,7 @@ import { AgentMessageBubble, VisitorMessageBubble } from '../message-bubble'
 import { canDeleteAgentMessage, canEditAgentMessage } from '../message-edit'
 import { PERMISSIONS, type PermissionKey } from '@/lib/shared/permissions'
 import type { AgentConversationMessageDTO } from '@/lib/shared/conversation/types'
+import { renderWithIntl } from '@/test/render-with-intl'
 
 afterEach(cleanup)
 
@@ -70,7 +71,8 @@ describe('AgentMessageBubble — edited mark', () => {
 
   it('opens an inline editor from the message menu', () => {
     const onEdit = vi.fn(async () => {})
-    render(
+    // The inline editor is the rich text editor, which renders localized text.
+    renderWithIntl(
       <AgentMessageBubble
         canEdit
         onEdit={onEdit}
