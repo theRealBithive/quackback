@@ -428,61 +428,6 @@ no-op would quietly restore the number. CI cannot catch that rot on its own —
 the `check` job builds before it typechecks, and the build writes the same file
 — which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
 
-## 4x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
-
-Three wasted turns diagnosing an env-leakage question, all of them spent on the
-test runner rather than the question:
-
-- `--reporter=basic` is gone in vitest 4 and fails as
-  `Failed to load custom Reporter from basic`, which reads like a missing file.
-- `--poolOptions.forks.singleFork` is gone too — `Unknown option --poolOptions`.
-  Sequential-in-one-worker is now `--maxWorkers=1 --fileParallelism=false`.
-- `console.log` inside a test never reaches the terminal, even with
-  `--silent=false`. A throwaway probe has to _assert_ what it wants to report
-  and read the value out of the assertion diff.
-
-Worth knowing while writing such a probe: the `forks` pool leaves `isolate` at
-its default, so every test file gets a fresh process and **no** `process.env`
-write crosses files — not even a raw one. Measured, not assumed: a control file
-that stubbed the env and never restored it left the next file untouched, and the
-two files reported different pids. Env hygiene between files is therefore not a
-real hazard here, and `vi.stubEnv` is worth using for the day someone sets
-`isolate: false`, not for today.
-
-Second run, a different corner of the same tool. A `globalSetup` file resolves
-its own imports **from its own location**, not from the config that registers
-it — and bun workspaces do not hoist third-party dependencies to the repo root,
-so a setup file at the root cannot import `drizzle-orm` at all
-(`ERR_MODULE_NOT_FOUND`, raised before the setup body runs, which breaks every
-suite in the repo at once). The workspace packages are worse: `node_modules/@quackback/`
-does not exist, and `@quackback/db/client` resolves **only** through the `alias`
-block in `vitest.config.ts`, which applies to test modules and not to
-globalSetup. A file shared by both configs therefore has to live inside
-`apps/web` and import `../../packages/db/src/client` by path. Three turns.
-
-Third run, the coverage options. **Setting `coverage.exclude` replaces vitest's
-default exclude list rather than adding to it**, and the defaults are what keep
-test files, config files and build output out of the report. On the command
-line there is no way to spread `coverageConfigDefaults.exclude`, so a
-`--coverage.exclude=...` flag silently pulls every test file into scope — and
-for a gate that grades coverage, test files counting as source is exactly the
-kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
-whole coverage block in `vitest.config.ts`, where the defaults can be spread.
-
-Fourth run, and this one is destructive. **`-u` takes the next positional argument
-as its value.** `vitest run -u a.test.ts b.test.ts` runs `b` only, and
-`vitest run -u a.test.ts` runs the **entire suite** in update mode — every failing
-snapshot assertion in 1400 files rewritten to whatever the code does now. It read
-as "the filter matched nothing" for two turns before the runaway run was killed
-(nothing had been written yet; check `git status` after any `-u` run regardless).
-Put `-u` **after** the file list, always: `vitest run a.test.ts -u`.
-
-Same family, shell side: **a filter list that expands to nothing is no filter.**
-`bun x vitest run $(grep -rl someName …)` with zero matches runs the entire
-suite — twice today, once with `--coverage` (ten minutes, killed). Guard the
-expansion (`[ -s list ] || exit`) or `mapfile` the list and check its length
-before the call. The `$param` route files need the array form anyway.
-
 ## 5x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
 `lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
@@ -548,6 +493,61 @@ a forbidden request header; not verified. It cost a checkout of `main` and a
 second run to rule the batch out. Until it is fixed, treat these two failures
 as known on this machine and keep them out of any run whose coverage report
 matters.
+
+## 4x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
+
+Three wasted turns diagnosing an env-leakage question, all of them spent on the
+test runner rather than the question:
+
+- `--reporter=basic` is gone in vitest 4 and fails as
+  `Failed to load custom Reporter from basic`, which reads like a missing file.
+- `--poolOptions.forks.singleFork` is gone too — `Unknown option --poolOptions`.
+  Sequential-in-one-worker is now `--maxWorkers=1 --fileParallelism=false`.
+- `console.log` inside a test never reaches the terminal, even with
+  `--silent=false`. A throwaway probe has to _assert_ what it wants to report
+  and read the value out of the assertion diff.
+
+Worth knowing while writing such a probe: the `forks` pool leaves `isolate` at
+its default, so every test file gets a fresh process and **no** `process.env`
+write crosses files — not even a raw one. Measured, not assumed: a control file
+that stubbed the env and never restored it left the next file untouched, and the
+two files reported different pids. Env hygiene between files is therefore not a
+real hazard here, and `vi.stubEnv` is worth using for the day someone sets
+`isolate: false`, not for today.
+
+Second run, a different corner of the same tool. A `globalSetup` file resolves
+its own imports **from its own location**, not from the config that registers
+it — and bun workspaces do not hoist third-party dependencies to the repo root,
+so a setup file at the root cannot import `drizzle-orm` at all
+(`ERR_MODULE_NOT_FOUND`, raised before the setup body runs, which breaks every
+suite in the repo at once). The workspace packages are worse: `node_modules/@quackback/`
+does not exist, and `@quackback/db/client` resolves **only** through the `alias`
+block in `vitest.config.ts`, which applies to test modules and not to
+globalSetup. A file shared by both configs therefore has to live inside
+`apps/web` and import `../../packages/db/src/client` by path. Three turns.
+
+Third run, the coverage options. **Setting `coverage.exclude` replaces vitest's
+default exclude list rather than adding to it**, and the defaults are what keep
+test files, config files and build output out of the report. On the command
+line there is no way to spread `coverageConfigDefaults.exclude`, so a
+`--coverage.exclude=...` flag silently pulls every test file into scope — and
+for a gate that grades coverage, test files counting as source is exactly the
+kind of quiet wrongness that reads as a stricter gate. The fix is to keep the
+whole coverage block in `vitest.config.ts`, where the defaults can be spread.
+
+Fourth run, and this one is destructive. **`-u` takes the next positional argument
+as its value.** `vitest run -u a.test.ts b.test.ts` runs `b` only, and
+`vitest run -u a.test.ts` runs the **entire suite** in update mode — every failing
+snapshot assertion in 1400 files rewritten to whatever the code does now. It read
+as "the filter matched nothing" for two turns before the runaway run was killed
+(nothing had been written yet; check `git status` after any `-u` run regardless).
+Put `-u` **after** the file list, always: `vitest run a.test.ts -u`.
+
+Same family, shell side: **a filter list that expands to nothing is no filter.**
+`bun x vitest run $(grep -rl someName …)` with zero matches runs the entire
+suite — twice today, once with `--coverage` (ten minutes, killed). Guard the
+expansion (`[ -s list ] || exit`) or `mapfile` the list and check its length
+before the call. The `$param` route files need the array form anyway.
 
 ## 4x — Mounting a real route in a test: four traps, none of which say so
 

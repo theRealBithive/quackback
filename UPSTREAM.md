@@ -184,6 +184,12 @@ the deploy tag where there is one.
 Found by the contract tests and the mutation gate run over the picks; each
 carries a test that fails without it, or a survivor list that names the line.
 
+- `parseStoredTierLimits` (#598) logged a whitespace-only or `null` tier_limits
+  value as corrupt on every tier-limit check, where feature flags already read
+  both as absent. Batch F.
+- `startSsoTestFn` (#586) stripped one trailing slash from `BASE_URL` where the
+  admin page and Better Auth strip all of them, so a base URL ending in `//`
+  made the connection test send a redirect_uri the IdP did not hold. Batch F.
 - `resolvePrefix` (`packages/ids/src/prefixes.ts`) answered `__proto__` with
   `Object.prototype` and `valueOf` with a function: the alias table is a plain
   object and the lookup had no own-key guard. Fork #31.
