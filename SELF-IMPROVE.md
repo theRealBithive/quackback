@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 13x — Test suites are flaky under parallel load
+## 14x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -144,6 +144,12 @@ which then passed twice in a row. Grep `^ FAIL` out of the wide run and re-run
 those files one by one; that took four minutes and was the only way to tell
 the batch apart from the machine.
 
+Batch G added a variant that survives a re-run alone and therefore looks like a
+real failure: `events/__tests__/process-integration.test.ts` counts the jobs in
+the queue database-wide, and a full parallel run leaves about 100 behind. After
+that run it fails alone too, on `main` as well (`expected 100 to be 1`). Check
+it against `main` on the same database before you read it as yours.
+
 ## 6x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
 An entry declares a whole file, and the gate fails on any survivor in it. A change that
@@ -255,6 +261,72 @@ both files came back out of the manifest and the kills sit in the suites
 unmeasured. Rule of thumb for a component: if a third of its mutable lines are
 `className` literals, do not declare it; grade the hook or helper the logic can
 be lifted into instead.
+
+## 6x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+
+`lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
+`error:03000098:digital envelope routines::invalid digest`. It is not the repo:
+the same `createSign('RSA-SHA1')` throws in a bare `node -e` outside the
+checkout, because the system OpenSSL refuses to _produce_ a SHA-1 signature
+under the DEFAULT crypto policy. Verification is not blocked — measured, a
+`createVerify('RSA-SHA1')` runs and returns `false` — so it is only the fixture
+the test signs for itself that cannot be made here. The production path is fine
+and CI signs it happily, which is why nobody had noticed.
+
+The red line is not the cost. `coverage.reportOnFailure` defaults to **false**,
+so a full run with _any_ failing test writes no `coverage-final.json` at all, and
+`diff-coverage-check.ts` then reads an empty `coverage/` and grades nothing. Ten
+minutes of full-suite wall clock produced no number, quietly, under a log that
+opens with `Coverage enabled with v8`. Locally the flag is not optional:
+
+```bash
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportOnFailure=true --coverage.reportsDirectory=coverage/local
+```
+
+Two fixes, both small: sign the SignatureVersion 1 fixture once and check it in,
+so the test verifies instead of signing; and put `reportOnFailure: true` in the
+root config's `coverage` block, so a red suite still yields the report that says
+which lines the change left uncovered — which is exactly when it is wanted.
+
+Second run, and it cost the same ten minutes again — while measuring an
+unrelated i18n change. Neither fix has been made, so the trap is intact: the
+run opens with `Coverage enabled with v8`, ends `2 failed | 866 passed`, and
+`diff-coverage-check.ts` then reports `FAIL: the diff-coverage gate graded
+nothing` — a message about _its_ inputs, which reads as a problem with the
+change rather than with the run that fed it. Two observations worth adding.
+The gate names the missing report but not the likely cause, and it is
+one-line-fixable: a red suite with `reportOnFailure` off is the only way to
+reach that state locally, so the message should say so. And the failure is
+environmental rather than repo-specific, which means it hits every Fedora
+checkout on the first full local run and every one after it, until the fixture
+is checked in. The fixture fix is the cheaper of the two and retires the entry
+outright; `reportOnFailure: true` only makes the loss visible.
+
+Third run, on a branch that touches nine message catalogues. This time the
+coverage report was taken from a narrow run instead, so nothing was lost but
+the minute spent working out whether the red line was mine. It was not: the
+same test is red on `origin/main`. Checking the fixture in would have made
+that answer free.
+
+Fourth run, and this one paid the full price because the run was sharded. Four
+shards, fourteen minutes, and three of them ended red — one on this same SHA-1
+fixture, two on the flakes above. `coverage/` afterwards held exactly one
+directory, `local4`, the only shard that had passed, and the gate happily graded
+that quarter of the repository without saying it was a quarter. The missing
+three had to be re-run with `--coverage.reportOnFailure`, another eleven
+minutes. Both fixes are still unmade, and the sharded case adds a third
+observation: a partial set of reports is worse than none, because the gate reads
+it as a complete measurement.
+
+Fifth case, met during upstream batch F: `lib/server/functions/__tests__/open-handoff.test.ts`
+fails two tests on an unmodified `main` here, both on
+`request.headers.get('origin')` returning `null` where the suite expects the
+workspace origin. Likely the local `Request` implementation drops `Origin` as
+a forbidden request header; not verified. It cost a checkout of `main` and a
+second run to rule the batch out. Until it is fixed, treat these two failures
+as known on this machine and keep them out of any run whose coverage report
+matters.
 
 ## 5x — Stryker runs the whole suite first, and scores a crashed suite as a survivor
 
@@ -427,72 +499,6 @@ seconds); and the script fails loudly if no file appeared, because a silent
 no-op would quietly restore the number. CI cannot catch that rot on its own —
 the `check` job builds before it typechecks, and the build writes the same file
 — which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
-
-## 5x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
-
-`lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
-`error:03000098:digital envelope routines::invalid digest`. It is not the repo:
-the same `createSign('RSA-SHA1')` throws in a bare `node -e` outside the
-checkout, because the system OpenSSL refuses to _produce_ a SHA-1 signature
-under the DEFAULT crypto policy. Verification is not blocked — measured, a
-`createVerify('RSA-SHA1')` runs and returns `false` — so it is only the fixture
-the test signs for itself that cannot be made here. The production path is fine
-and CI signs it happily, which is why nobody had noticed.
-
-The red line is not the cost. `coverage.reportOnFailure` defaults to **false**,
-so a full run with _any_ failing test writes no `coverage-final.json` at all, and
-`diff-coverage-check.ts` then reads an empty `coverage/` and grades nothing. Ten
-minutes of full-suite wall clock produced no number, quietly, under a log that
-opens with `Coverage enabled with v8`. Locally the flag is not optional:
-
-```bash
-bun x vitest run --coverage.enabled --coverage.reporter=json \
-  --coverage.reportOnFailure=true --coverage.reportsDirectory=coverage/local
-```
-
-Two fixes, both small: sign the SignatureVersion 1 fixture once and check it in,
-so the test verifies instead of signing; and put `reportOnFailure: true` in the
-root config's `coverage` block, so a red suite still yields the report that says
-which lines the change left uncovered — which is exactly when it is wanted.
-
-Second run, and it cost the same ten minutes again — while measuring an
-unrelated i18n change. Neither fix has been made, so the trap is intact: the
-run opens with `Coverage enabled with v8`, ends `2 failed | 866 passed`, and
-`diff-coverage-check.ts` then reports `FAIL: the diff-coverage gate graded
-nothing` — a message about _its_ inputs, which reads as a problem with the
-change rather than with the run that fed it. Two observations worth adding.
-The gate names the missing report but not the likely cause, and it is
-one-line-fixable: a red suite with `reportOnFailure` off is the only way to
-reach that state locally, so the message should say so. And the failure is
-environmental rather than repo-specific, which means it hits every Fedora
-checkout on the first full local run and every one after it, until the fixture
-is checked in. The fixture fix is the cheaper of the two and retires the entry
-outright; `reportOnFailure: true` only makes the loss visible.
-
-Third run, on a branch that touches nine message catalogues. This time the
-coverage report was taken from a narrow run instead, so nothing was lost but
-the minute spent working out whether the red line was mine. It was not: the
-same test is red on `origin/main`. Checking the fixture in would have made
-that answer free.
-
-Fourth run, and this one paid the full price because the run was sharded. Four
-shards, fourteen minutes, and three of them ended red — one on this same SHA-1
-fixture, two on the flakes above. `coverage/` afterwards held exactly one
-directory, `local4`, the only shard that had passed, and the gate happily graded
-that quarter of the repository without saying it was a quarter. The missing
-three had to be re-run with `--coverage.reportOnFailure`, another eleven
-minutes. Both fixes are still unmade, and the sharded case adds a third
-observation: a partial set of reports is worse than none, because the gate reads
-it as a complete measurement.
-
-Fifth case, met during upstream batch F: `lib/server/functions/__tests__/open-handoff.test.ts`
-fails two tests on an unmodified `main` here, both on
-`request.headers.get('origin')` returning `null` where the suite expects the
-workspace origin. Likely the local `Request` implementation drops `Origin` as
-a forbidden request header; not verified. It cost a checkout of `main` and a
-second run to rule the batch out. Until it is fixed, treat these two failures
-as known on this machine and keep them out of any run whose coverage report
-matters.
 
 ## 4x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
 

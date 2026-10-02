@@ -349,6 +349,24 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'apps/web/src/lib/shared/utils/is-empty-tiptap-doc.ts',
         suites: ['apps/web/src/lib/shared/utils/__tests__/is-empty-tiptap-doc.test.ts'],
       },
+      {
+        file: 'apps/web/src/lib/shared/conversation/message-permissions.ts',
+        suites: ['apps/web/src/lib/server/policy/__tests__/message-edit-delete.contract.test.ts'],
+      },
+      {
+        file: 'apps/web/src/components/conversation/message-edit.ts',
+        suites: [
+          'apps/web/src/components/conversation/__tests__/agent-message-bubble.test.tsx',
+          'apps/web/src/components/conversation/__tests__/agent-thread-message-edit.contract.test.tsx',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/policy/conversation.ts',
+        suites: [
+          'apps/web/src/lib/server/policy/__tests__/conversation.test.ts',
+          'apps/web/src/lib/server/policy/__tests__/message-edit-delete.contract.test.ts',
+        ],
+      },
     ])
   })
 
@@ -950,6 +968,13 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: 'if (!children || children.length === 0) return true',
         replacement: 'false',
         why: expect.stringContaining('With the length test removed, an empty children ar'),
+      },
+      {
+        file: 'apps/web/src/components/conversation/message-edit.ts',
+        mutator: 'StringLiteral',
+        line: "const parent = message.ticketId ? 'ticket' : 'conversation'",
+        replacement: '""',
+        why: expect.stringContaining('writePermissionFor asks only whether the parent is'),
       },
     ])
   })
