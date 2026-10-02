@@ -15,6 +15,7 @@ import {
   ChevronRightIcon,
 } from '@heroicons/react/24/solid'
 import { cn } from '@/lib/shared/utils'
+import { formatCalendarDate } from '@/lib/shared/utils/date'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { FilterChip, type FilterOption } from '@/components/shared/filter-chip'
 import {
@@ -364,13 +365,9 @@ function getFilterIcon(type: ActiveFilter['type']): IconComponent {
   return icons[type]
 }
 
+/** A date filter ("2026-10-01") as the calendar day it names, for every viewer. */
 function formatDate(dateStr: string): string {
-  try {
-    const date = new Date(dateStr)
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  } catch {
-    return dateStr
-  }
+  return formatCalendarDate(dateStr) ?? dateStr
 }
 
 function computeActiveFilters(

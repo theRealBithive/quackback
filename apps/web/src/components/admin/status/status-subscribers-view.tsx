@@ -9,6 +9,7 @@ import {
   UsersIcon,
 } from '@heroicons/react/24/outline'
 import { Badge } from '@/components/ui/badge'
+import { useFormatNumber } from '@/components/ui/format-number'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -105,9 +106,10 @@ function downloadCsv(rows: ExportRow[]): void {
 }
 
 function CountTile({ label, value }: { label: string; value: number }) {
+  const formatNumber = useFormatNumber()
   return (
     <div className="flex-1 rounded-xl border border-border/50 bg-card px-4 py-3">
-      <div className="text-2xl font-semibold tabular-nums">{value.toLocaleString()}</div>
+      <div className="text-2xl font-semibold tabular-nums">{formatNumber(value)}</div>
       <div className="text-xs text-muted-foreground">{label}</div>
     </div>
   )

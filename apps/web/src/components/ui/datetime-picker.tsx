@@ -1,13 +1,14 @@
 'use client'
 
 import * as React from 'react'
-import { format, isSameDay, parseISO, startOfDay } from 'date-fns'
+import { isSameDay, startOfDay } from 'date-fns'
 import { CalendarIcon, ClockIcon, XMarkIcon } from '@heroicons/react/24/outline'
 
 import { cn } from '@/lib/shared/utils'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
+import { LocalDate } from '@/components/ui/local-date'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { FormattedMessage, useIntl } from 'react-intl'
 
@@ -19,7 +20,7 @@ interface DateTimePickerProps {
   /** Maximum selectable date */
   maxDate?: Date
   /** Placeholder text when no date selected */
-  placeholder?: string
+  placeholder?: React.ReactNode
   /** Whether the picker is disabled */
   disabled?: boolean
   /** Date-only mode: calendar without time input */
@@ -28,6 +29,44 @@ interface DateTimePickerProps {
   onClear?: () => void
   /** Additional class names for trigger button */
   className?: string
+}
+
+const PICKED_DAY: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' }
+const PICKED_TIME: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' }
+
+/**
+ * The picked value, as the reader's language writes it rather than as one
+ * pattern does.
+ *
+ * `MMM d, yyyy` is a pattern in a language: it puts the month first and uses
+ * a comma, which is English and wrong in most of the nine we ship. Handing
+ * `Intl` the fields instead lets the locale decide the order, the separators
+ * and the month's own abbreviation -- `Sep 7, 2026` against `7. Sept. 2026`.
+ * The `·` between date and time stays, because it is the design rather than
+ * language, and each half is formatted on its own so it survives.
+ *
+ * A date-only pick (noon UTC on its day) shows as that calendar day, formatted
+ * in UTC so every viewer sees it; a date and time follows the viewer's zone
+ * once hydrated. `locale` is the app's, from the surrounding IntlProvider.
+ */
+function PickedValue({
+  value,
+  dateOnly,
+  locale,
+}: {
+  value: Date
+  dateOnly: boolean
+  locale: string
+}) {
+  if (dateOnly) {
+    return <LocalDate date={value} options={{ ...PICKED_DAY, timeZone: 'UTC' }} locale={locale} />
+  }
+  return (
+    <>
+      <LocalDate date={value} options={PICKED_DAY} locale={locale} /> ·{' '}
+      <LocalDate date={value} options={PICKED_TIME} locale={locale} />
+    </>
+  )
 }
 
 function clampToBounds(date: Date, minDate?: Date, maxDate?: Date): Date {
@@ -66,27 +105,6 @@ export function DateTimePicker({
       })
   const resolvedPlaceholder = placeholder ?? defaultPlaceholder
 
-  /**
-   * The date as the reader's language writes it, not as one pattern does.
-   *
-   * `MMM d, yyyy` is a pattern in a language: it puts the month first and uses
-   * a comma, which is English and wrong in most of the nine we ship. Handing
-   * `Intl` the fields instead lets the locale decide the order, the separators
-   * and the month's own abbreviation -- `Sep 7, 2026` against `7. Sept. 2026`.
-   *
-   * The `·` between date and time stays, because it is the design rather than
-   * language, and each half is formatted on its own so it survives.
-   *
-   * `date-fns` keeps the machine formats below untouched: `yyyy-MM-dd` and the
-   * `HH:mm` the time input takes are wire values, and formatting those for a
-   * reader would break them.
-   */
-  const readableDate = (date: Date) => {
-    const day = intl.formatDate(date, { day: 'numeric', month: 'short', year: 'numeric' })
-    if (dateOnly) return day
-    return `${day} · ${intl.formatTime(date, { hour: '2-digit', minute: '2-digit' })}`
-  }
-
   const applyBounds = React.useCallback(
     (date: Date) => clampToBounds(date, minDate, maxDate),
     [minDate, maxDate]
@@ -101,7 +119,10 @@ export function DateTimePicker({
     if (!date) return
 
     if (dateOnly) {
-      onChange(applyBounds(parseISO(`${format(date, 'yyyy-MM-dd')}T12:00:00.000Z`)))
+      // Noon UTC on the picked day names that day in every zone from UTC-12 to UTC+11.
+      onChange(
+        applyBounds(new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12)))
+      )
       setOpen(false)
       return
     }
@@ -138,7 +159,11 @@ export function DateTimePicker({
     <>
       <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">
-        {value ? readableDate(value) : resolvedPlaceholder}
+        {value ? (
+          <PickedValue value={value} dateOnly={dateOnly} locale={intl.locale} />
+        ) : (
+          resolvedPlaceholder
+        )}
       </span>
     </>
   )

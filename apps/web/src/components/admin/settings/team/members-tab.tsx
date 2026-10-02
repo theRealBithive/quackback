@@ -35,7 +35,7 @@ import { AddSeatsDialog } from '@/components/admin/settings/billing/add-seats-di
 import {
   type PendingInvitation,
   getExpiryText,
-  formatInviteDate,
+  InviteDate,
   InvitationActions,
   InviteLinkRow,
 } from '@/components/admin/settings/team/pending-invitations'
@@ -280,7 +280,7 @@ export function MembersTab({ workspaceName, currentMember }: MembersTabProps) {
                 </p>
                 {r.name && <p className="text-sm text-muted-foreground truncate">{r.email}</p>}
                 <p className="text-xs text-muted-foreground">
-                  Sent {formatInviteDate(r.lastSentAt || r.createdAt)}
+                  Sent <InviteDate date={r.lastSentAt || r.createdAt} />
                   <span className="mx-1">&middot;</span>
                   <span className={expiry.className}>{expiry.text}</span>
                 </p>
@@ -506,7 +506,7 @@ export function MembersTab({ workspaceName, currentMember }: MembersTabProps) {
                     )}
                     {r.type === 'invitation' && (
                       <p className="text-xs text-muted-foreground">
-                        Sent {formatInviteDate(r.lastSentAt || r.createdAt)}
+                        Sent <InviteDate date={r.lastSentAt || r.createdAt} />
                         <span className="mx-1">&middot;</span>
                         <span className={getExpiryText(r.expiresAt).className}>
                           {getExpiryText(r.expiresAt).text}

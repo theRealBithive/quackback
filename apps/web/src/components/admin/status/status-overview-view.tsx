@@ -13,6 +13,7 @@ import { ArrowTopRightOnSquareIcon, CheckCircleIcon, PencilIcon } from '@heroico
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useFormatNumber } from '@/components/ui/format-number'
 import { TimeAgo } from '@/components/ui/time-ago'
 import { useLocalDateFormatter, type LocalDateFormatter } from '@/components/ui/local-date'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
@@ -374,6 +375,7 @@ function UpcomingMaintenanceCard({ windows }: { windows: OverviewIncident[] }) {
 }
 
 function StatTiles({ data }: { data: StatusOverview }) {
+  const formatNumber = useFormatNumber()
   return (
     <div className="rounded-xl border border-border/50 bg-card shadow-sm grid grid-cols-3 divide-x divide-border/40">
       <div className="px-4 py-3">
@@ -384,7 +386,7 @@ function StatTiles({ data }: { data: StatusOverview }) {
       </div>
       <div className="px-4 py-3">
         <p className="text-lg font-semibold tabular-nums">
-          {data.subscribers.active.toLocaleString()}
+          {formatNumber(data.subscribers.active)}
         </p>
         <p className="text-[11px] text-muted-foreground mt-0.5">Subscribers</p>
         {data.subscribers.newLast7d > 0 && (
