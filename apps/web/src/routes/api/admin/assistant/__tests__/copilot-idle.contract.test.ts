@@ -128,7 +128,9 @@ function quietTurn(ending: 'finishes' | 'fails') {
       yield { type: 'RUN_STARTED', ...options.wire }
       await new Promise((resolve) => setTimeout(resolve, QUIET_FOR_MS))
       if (ending === 'fails') {
-        const { code, message } = options.mapError(new Error('provider key sk-secret rejected'))
+        const mapError = options.mapError
+        if (!mapError) throw new Error('the copilot route passes no mapError to the turn')
+        const { code, message } = mapError(new Error('provider key sk-secret rejected'))
         yield { type: 'RUN_ERROR', ...options.wire, code, message }
         return
       }

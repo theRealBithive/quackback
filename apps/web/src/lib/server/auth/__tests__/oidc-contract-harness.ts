@@ -30,7 +30,11 @@ export interface IdTokenSpec {
 
 export interface IdentityProviderStub {
   signIdToken: (spec: IdTokenSpec) => Promise<string>
-  /** Decides the ID token for the next token-endpoint call. */
+  /**
+   * Decides the ID token for the next token-endpoint call. Starts as an
+   * honest provider that echoes the nonce it was sent; a test that needs a
+   * misbehaving one replaces it.
+   */
   tokenFor: (sentNonce: string | null) => IdTokenSpec
   jwks: unknown
 }
@@ -45,7 +49,7 @@ export async function startIdentityProviderStub(): Promise<IdentityProviderStub>
 
   const stub: IdentityProviderStub = {
     jwks,
-    tokenFor: () => ({}),
+    tokenFor: (sentNonce) => ({ nonce: sentNonce ?? undefined }),
     signIdToken: (spec) => {
       const claims: Record<string, unknown> = {
         email: 'you@example.com',

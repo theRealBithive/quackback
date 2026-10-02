@@ -116,11 +116,11 @@ const paragraph = (...children: TiptapContent[]): TiptapContent => ({
 
 // Blocks the editor can show without a visible body.
 const emptyBlock: fc.Arbitrary<Block> = fc.oneof(
-  fc.constant({ hasBody: false, node: { type: 'paragraph' } }),
+  fc.constant<Block>({ hasBody: false, node: { type: 'paragraph' } }),
   fc
     .constantFrom(' ', '   ', '\t', '\n', ' \u00a0 ')
     .map((blank) => ({ hasBody: false, node: paragraph(text(blank)) })),
-  fc.constant({
+  fc.constant<Block>({
     hasBody: false,
     node: { type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }] },
   })

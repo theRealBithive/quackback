@@ -37,7 +37,9 @@ const defaultChoice = fc.oneof(
   fc.constant({ kind: 'unknown' as const })
 )
 
-function defaultSlugFor(boards: Board[], choice: fc.ValueOf<typeof defaultChoice>) {
+type DefaultChoice = { kind: 'none' } | { kind: 'listed'; position: number } | { kind: 'unknown' }
+
+function defaultSlugFor(boards: Board[], choice: DefaultChoice) {
   if (choice.kind === 'none') return undefined
   if (choice.kind === 'unknown' || boards.length === 0) return 'slug-not-visible'
   return boards[choice.position % boards.length].slug

@@ -16,7 +16,7 @@
  * catalogue is consulted.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { ReactNode } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 import fc from 'fast-check'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -123,7 +123,7 @@ function allowAll(boards: Board[]) {
   return permissions
 }
 
-function homeFor(props: Partial<WidgetHomeProps>): ReactNode {
+function homeFor(props: Partial<WidgetHomeProps>): ReactElement {
   const boards = props.boards ?? []
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return (

@@ -64,6 +64,7 @@ import {
   mergeWelcomeCard,
   publicWelcomeCard,
 } from './settings.helpers'
+import type { SettingsRecord } from './settings.helpers'
 import { withCurrentStorageReadTokens } from '@/lib/server/content/storage-read-urls'
 
 const log = logger.child({ component: 'settings' })

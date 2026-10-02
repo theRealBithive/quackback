@@ -294,7 +294,7 @@ describe.skipIf(!available)('settings.metadata contract (F15, F16, F17)', () => 
     it('(F15) writers of the four partial-update settings and a flag change all keep their keys', async () => {
       await seed(JSON.stringify({ instanceId: 'inst_1' }))
 
-      await behindHeldRow([
+      await behindHeldRow<unknown>([
         () => updateChangelogSettings({ audience: 'authenticated' }),
         () => updateStatusSettings({ emailsDisabled: true }),
         () => updateWorkflowAbandonedAutoCloseSettings({ waitMinutes: 9 }),

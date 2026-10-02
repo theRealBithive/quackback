@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 12x — Test suites are flaky under parallel load
+## 13x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -132,6 +132,17 @@ loop piped each run through `tail -25`, which keeps the summary and throws away
 the `FAIL` lines above it, so the list of what to re-run had to be reconstructed
 from a truncated log. Pipe a shard run through `tee` to a file, or grep `^ FAIL`
 out of it — the summary alone cannot tell you what to re-run.
+
+Thirteenth run, upstream batch F: the coverage run over the 17 test
+directories next to the touched files plus the batch's own suites (about 500
+files) ended with ten failures in eight files, nearly all 15-second timeouts
+(`changelog-notified-at`, `changelog-display-date`, `targets-cache`,
+`conversation-stream-token.fn`, two contract suites written that day) and
+`process-integration.test.ts` asserting on global counts. Every one passed
+alone. The same run on its first attempt also flagged `process-integration`,
+which then passed twice in a row. Grep `^ FAIL` out of the wide run and re-run
+those files one by one; that took four minutes and was the only way to tell
+the batch apart from the machine.
 
 ## 6x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -472,7 +483,7 @@ suite — twice today, once with `--coverage` (ten minutes, killed). Guard the
 expansion (`[ -s list ] || exit`) or `mapfile` the list and check its length
 before the call. The `$param` route files need the array form anyway.
 
-## 4x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+## 5x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
 `lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
 `error:03000098:digital envelope routines::invalid digest`. It is not the repo:
@@ -528,6 +539,15 @@ three had to be re-run with `--coverage.reportOnFailure`, another eleven
 minutes. Both fixes are still unmade, and the sharded case adds a third
 observation: a partial set of reports is worse than none, because the gate reads
 it as a complete measurement.
+
+Fifth case, met during upstream batch F: `lib/server/functions/__tests__/open-handoff.test.ts`
+fails two tests on an unmodified `main` here, both on
+`request.headers.get('origin')` returning `null` where the suite expects the
+workspace origin. Likely the local `Request` implementation drops `Origin` as
+a forbidden request header; not verified. It cost a checkout of `main` and a
+second run to rule the batch out. Until it is fixed, treat these two failures
+as known on this machine and keep them out of any run whose coverage report
+matters.
 
 ## 4x — Mounting a real route in a test: four traps, none of which say so
 
@@ -1869,6 +1889,31 @@ command in the foreground finished in under three minutes both times. The
 budget has to fit the foreground call's ten-minute ceiling, so pass
 `MUTATION_BUDGET_SECONDS=570`; the runs here took 2m40s–4m40s for nine to
 eleven graded files.
+
+## 1x — A picked upstream suite is written against module names from commits we skipped
+
+Three suites in upstream batch F failed for reasons that had nothing to do with
+the fix they came with. `widget-home-compose-board.test.tsx` (#577) mocked
+`useWidgetMediaUpload` and `widget/posts`' `widgetCreatePublicPostFn`, names
+upstream introduced later with #566 and the widget-posts move; here they are
+`useWidgetImageUpload` and `public-posts`' `createPublicPostFn`, so the mock
+answered nothing and the submit never reached it. `rich-text-editor-enter.test.tsx`
+(#567) rendered without an `IntlProvider`, which the fork's editor needs. And
+the typecheck, not any test, found three fork-only fixtures that build an
+`IdentityProvider` without the field #609 added. Each looked like a broken fix
+until the mock or fixture was read. After a pick, run its own suites first and
+read a failure's first line before the fix's code: `No "X" export is defined on
+the mock` and `Could not find required intl object` are the tells.
+
+## 1x — happy-dom's `Headers` loses a `__Secure-` cookie, so an OAuth round trip fails with `state_mismatch`
+
+The batch F OIDC contract suites run real Better Auth against a stub identity
+provider. Under the default happy-dom environment the state cookie Better Auth
+sets is `__Secure-`-prefixed, and happy-dom's `Headers.getSetCookie` drops it,
+so the callback finds no state and answers `state_mismatch` — which reads as a
+bug in the sign-in flow. `// @vitest-environment node` at the top of the suite
+fixes it. Any test that carries a cookie across two real auth requests needs
+that line.
 
 # Resolved
 

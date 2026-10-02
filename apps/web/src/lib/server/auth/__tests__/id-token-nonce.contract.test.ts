@@ -408,7 +408,7 @@ describe('providers stored before the migration (F12)', () => {
     const [provider] = await listIdentityProviders()
     expect(provider.idTokenNonce).toBeNull()
 
-    const result = await signIn(provider, leavesNonceOut)
+    const result = await signIn({ ...provider }, leavesNonceOut)
     expect(result.nonceSent).toBeTruthy()
     expect(result.signedIn).toBe(false)
   })

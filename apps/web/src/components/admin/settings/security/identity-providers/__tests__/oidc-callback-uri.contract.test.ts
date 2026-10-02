@@ -195,8 +195,6 @@ describe('a return to the legacy callback path (F8)', () => {
     installIdentityProviderFetch(stub)
     await fc.assert(
       fc.asyncProperty(registrationIds, async (id) => {
-        stub.tokenFor = (sentNonce) => ({ nonce: sentNonce ?? undefined })
-
         const auth = await buildAuthFor(providerRow({ registrationId: id }), BASE_URL)
         const start = await startSignIn(auth, id)
         const viaLegacyPath = await returnToCallback(
