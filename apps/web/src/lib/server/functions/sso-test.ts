@@ -166,7 +166,7 @@ export const startSsoTestFn = createServerFn({ method: 'POST' })
     // Same path Better Auth sends on sign-in, so the test and production
     // share one redirect URI. The catch-all dispatches test vs prod by
     // looking up the OAuth `state` in the KV store (miss → fall through).
-    const redirectUri = `${config.baseUrl.replace(/\/$/, '')}${authProviderCallbackPath(data.registrationId)}`
+    const redirectUri = `${config.baseUrl.replace(/\/+$/, '')}${authProviderCallbackPath(data.registrationId)}`
     const testId = `ssotest_${randomBytes(15).toString('base64url')}`
     const state = randomBytes(32).toString('base64url')
     // PKCE (RFC 7636, S256) — mirrors production now that genericOAuth
