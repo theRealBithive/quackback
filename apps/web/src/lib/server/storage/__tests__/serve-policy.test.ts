@@ -73,3 +73,31 @@ describe('downloadFileName', () => {
     expect(downloadFileName('chat-files/a"b\r\nx: y.html')).toBe('a_b__x__y.html')
   })
 })
+
+describe('redirectPolicy — where the file name starts', () => {
+  it('reads the extension of a key that has no folder', () => {
+    expect(redirectPolicy('photo.png')).toEqual({ inlineType: 'image/png' })
+  })
+
+  it('treats a name that is only a dot and an inline extension as a download', () => {
+    expect(redirectPolicy('uploads/.png')).toEqual({ downloadName: '.png' })
+    expect(redirectPolicy('.png')).toEqual({ downloadName: '.png' })
+  })
+
+  it('treats a name that is only an inline extension, with no dot, as a download', () => {
+    expect(redirectPolicy('png')).toEqual({ downloadName: 'png' })
+    expect(redirectPolicy('uploads/pdf')).toEqual({ downloadName: 'pdf' })
+  })
+
+  it('ignores a dot in a folder name', () => {
+    expect(redirectPolicy('exports.png/workspace')).toEqual({ downloadName: 'workspace' })
+  })
+})
+
+describe('downloadFileName — which part is the storage id', () => {
+  it('strips the storage id only from the start of the name', () => {
+    expect(
+      downloadFileName('chat-files/note-3f2b8c1e-1a2b-4c3d-9e8f-0123456789ab-report.pdf')
+    ).toBe('note-3f2b8c1e-1a2b-4c3d-9e8f-0123456789ab-report.pdf')
+  })
+})
