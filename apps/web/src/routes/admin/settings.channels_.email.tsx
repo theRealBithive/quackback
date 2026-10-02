@@ -13,6 +13,7 @@ import { SettingsCard } from '@/components/admin/settings/settings-card'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { LocalDate, NUMERIC_DATE_TIME } from '@/components/ui/local-date'
 import { TrustedSendersCard } from '@/components/admin/settings/trusted-senders-card'
 import { EmailChannelSettings } from '@/components/admin/channels/email-channel-settings'
 import { EmailTransportCard } from '@/components/admin/channels/email-transport-card'
@@ -128,7 +129,7 @@ function EmailActivityCard() {
                 <span className="text-muted-foreground"> · {row.emailType}</span>
               </div>
               <div className="shrink-0 text-xs text-muted-foreground">
-                {row.status} · {new Date(row.createdAt).toLocaleString()}
+                {row.status} · <LocalDate date={row.createdAt} options={NUMERIC_DATE_TIME} />
               </div>
             </li>
           ))}

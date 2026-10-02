@@ -68,11 +68,11 @@ import {
 import { getConversationLinkedTicketFn } from '@/lib/server/functions/tickets'
 import { getWidgetCapabilitiesFn } from '@/lib/server/functions/widget-capabilities'
 import { TicketHeaderCard } from './ticket-header-card'
+import { useLocalDateFormatter } from '@/components/ui/local-date'
 import type { RequesterTicketDTO } from '@/lib/server/domains/tickets'
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-}
+/** A message's time of day, e.g. "3:04 PM". */
+const TIME_LABEL: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' }
 
 const NO_HEADERS = (): Record<string, string> => ({})
 const ALWAYS_READY = async (): Promise<boolean> => true
@@ -197,6 +197,7 @@ export function VisitorConversationThread({
   autofocusComposer = false,
 }: VisitorConversationThreadProps) {
   const intl = useIntl()
+  const formatDate = useLocalDateFormatter()
   const queryClient = useQueryClient()
   const firstName = firstNameOf(currentUser?.name)
 
@@ -979,7 +980,7 @@ export function VisitorConversationThread({
             contentJson={m.contentJson}
             attachments={m.attachments}
             citations={m.citations}
-            time={formatTime(m.createdAt)}
+            time={formatDate(m.createdAt, TIME_LABEL)}
             editedLabel={
               m.editedAt
                 ? intl.formatMessage({ id: 'widget.messenger.edited', defaultMessage: '(edited)' })

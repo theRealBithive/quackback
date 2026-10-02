@@ -7,6 +7,7 @@ import { billingQueries } from '@/lib/client/queries/billing'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
+import { useLocalDateFormatter, type LocalDateFormatter } from '@/components/ui/local-date'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { cn } from '@/lib/shared/utils'
 import { formatUsd } from '@/lib/shared/format-usd'
@@ -208,6 +209,7 @@ function CurrentPlanCard(props: {
 }) {
   const { overview, catalogue } = props
   const plan = catalogue?.plans.find((entry) => entry.id === overview.plan)
+  const format = useLocalDateFormatter()
   const purchased = overview.seats?.purchased ?? null
   const showSeats = purchased != null
   const trialPlanName =
@@ -237,17 +239,17 @@ function CurrentPlanCard(props: {
         : daysLeft === 0
           ? ' (ends today)'
           : ` (${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left)`
-    renewalBits.push(`Trial ends ${formatDate(overview.trialExpiresAt)}${left}`)
+    renewalBits.push(`Trial ends ${formatDate(format, overview.trialExpiresAt)}${left}`)
   } else if (overview.trialEnded && overview.trialExpiresAt) {
     renewalBits.push(
       trialPlanName
-        ? `Your ${trialPlanName} trial ended ${formatDate(overview.trialExpiresAt)}. Everything you built is still here.`
-        : `Your trial ended ${formatDate(overview.trialExpiresAt)}. Everything you built is still here.`
+        ? `Your ${trialPlanName} trial ended ${formatDate(format, overview.trialExpiresAt)}. Everything you built is still here.`
+        : `Your trial ended ${formatDate(format, overview.trialExpiresAt)}. Everything you built is still here.`
     )
   } else if (overview.cancellationAt) {
-    renewalBits.push(`Paid through ${formatDate(overview.cancellationAt)}`)
+    renewalBits.push(`Paid through ${formatDate(format, overview.cancellationAt)}`)
   } else if (overview.renewalAt) {
-    renewalBits.push(`Renews ${formatDate(overview.renewalAt)}`)
+    renewalBits.push(`Renews ${formatDate(format, overview.renewalAt)}`)
   }
   if (showSeats && plan && plan.billedPer === 'seat') {
     renewalBits.push(`${purchased} seats × ${formatUsd(perSeat, 0)}/seat`)
@@ -416,6 +418,7 @@ function UsageCard(props: {
   usage: Array<{ key: string; label: string; used: number; limit: number | null }>
   onTopUp: (meter: 'ai' | 'email') => void
 }) {
+  const format = useLocalDateFormatter()
   const emails = props.usage.find((line) => line.key === 'emailsPerMonth')
   const api = props.usage.find((line) => line.key === 'apiRequestsPerMonth')
   const inventory = props.usage.filter(
@@ -432,7 +435,7 @@ function UsageCard(props: {
   const hasApi = api != null && api.limit != null
   if (!hasAi && !hasEmails && !hasApi && inventory.length === 0) return null
 
-  const reset = nextMonthResetLabel()
+  const reset = nextMonthResetLabel(format)
   const meterUsed = ai ? Math.min(ai.usedCents, ai.includedCents) : 0
   const hasMonthly = hasAi || hasEmails || hasApi
 
@@ -575,11 +578,11 @@ function AddOnsCard(props: {
   )
 }
 
-function nextMonthResetLabel(): string {
+function nextMonthResetLabel(format: LocalDateFormatter): string {
   const date = new Date()
   date.setUTCDate(1)
   date.setUTCMonth(date.getUTCMonth() + 1)
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return format(date, { month: 'short', day: 'numeric' })
 }
 
 function PlanCard(props: {
@@ -811,13 +814,14 @@ function PeriodToggle(props: {
 }
 
 function InvoiceList({ invoices }: { invoices: CustomerInvoice[] }) {
+  const format = useLocalDateFormatter()
   return (
     <ul className="divide-y divide-border/50 rounded-xl border border-border/50">
       {invoices.map((invoice) => (
         <li key={invoice.id} className="flex items-center gap-3 px-4 py-2.5 text-[13px]">
           <span className="min-w-0 flex-1 truncate font-medium">{invoice.number ?? 'Invoice'}</span>
           <span className="hidden text-muted-foreground sm:inline">
-            {formatDate(invoice.createdAt)}
+            {formatDate(format, invoice.createdAt)}
           </span>
           <span className="tabular-nums">{formatUsd(invoice.amountCents, 2)}</span>
           <span className="hidden capitalize text-muted-foreground md:inline">
@@ -854,9 +858,7 @@ function PortalButton(props: { label: string }) {
   )
 }
 
-function formatDate(iso: string): string {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime())
-    ? iso
-    : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+/** e.g. "Oct 1, 2026"; a value that is not a date reads as given. */
+function formatDate(format: LocalDateFormatter, iso: string): string {
+  return format(iso, { year: 'numeric', month: 'short', day: 'numeric' }) || iso
 }
