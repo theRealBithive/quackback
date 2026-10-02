@@ -13,6 +13,8 @@
  * Reading of F17: a bag that is absent (NULL, blank, or the JSON text `null`)
  * holds nothing, so a write starts a new bag; only a present bag that is not
  * an object (array, number, string, boolean, unparseable text) is refused.
+ * The owner confirmed this reading (2026-10-02), matching F18's "a blank or
+ * `null` value is silent".
  *
  * Real Postgres, in a copy of `settings` inside a schema of this suite's own
  * (same approach as `settings-metadata-writes.db.test.ts`). The race is forced,

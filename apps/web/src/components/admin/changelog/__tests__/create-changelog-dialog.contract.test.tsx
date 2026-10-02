@@ -8,8 +8,13 @@
  *
  *   F1 A changelog entry whose editor shows content is saved, even when the
  *      markdown projection of that content is empty or the serializer failed.
- *   F3 The error from a failed create stays visible until the next attempt; a
- *      successful create never shows an error.
+ *   F3 The error from a failed create stays visible until the author edits
+ *      the entry or tries again; a successful create never shows an error.
+ *
+ * F3 was worded "until the next attempt" when first confirmed. The dialog
+ * clears the error as soon as the author edits the entry, which is upstream's
+ * behaviour; the owner kept that and the wording was corrected to match
+ * (2026-10-02).
  *
  * (F2, the refusal of an entry with no content in any form, is pinned on the
  * server in `domains/changelog/__tests__/changelog-content-rule.contract.test.ts`.)
@@ -134,7 +139,7 @@ describe('create changelog dialog', () => {
     expect(screen.queryByText('Content is required')).not.toBeNull()
   })
 
-  it('(F3) clears the error when the admin edits the entry for the next attempt', async () => {
+  it('(F3) clears the error when the author edits the entry', async () => {
     createChangelogFn.mockRejectedValueOnce(new Error('Content is required'))
     const user = userEvent.setup()
     renderDialog()

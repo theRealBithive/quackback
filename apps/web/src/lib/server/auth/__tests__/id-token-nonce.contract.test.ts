@@ -11,8 +11,14 @@
  *       is rejected.
  *   F10 A provider set to "no nonce" sends none and accepts a token without
  *       one, while signature, issuer and audience are still verified.
- *   F11 The nonce setting is applied identically to real sign-in and the
- *       connection test.
+ *   F11 The stored setting drives sign-in; the connection test detects a
+ *       provider that leaves the nonce out and records that finding.
+ *
+ * F11 was first confirmed as "the nonce setting is applied identically to real
+ * sign-in and the connection test". That cannot hold by design: the test sends
+ * a nonce even for a provider set to "no nonce", because sending one is how it
+ * finds out the provider drops it. The owner confirmed the corrected wording
+ * above (2026-10-02).
  *   F12 Providers that existed before the migration keep the nonce check on.
  *
  * Sign-in is the sign-in library's own code (Better Auth over the configs
@@ -27,9 +33,7 @@
  * tests below pin what the two really share: the same verdict on a wrong
  * issuer, audience, signature or nonce value, no nonce for a provider sign-in
  * cannot bind, and that the finding the test records is exactly what makes
- * sign-in accept (or keep requiring) the token the test saw. Whether
- * "check + token without nonce" should read differently is an open question
- * for the owner and is not asserted either way.
+ * sign-in accept (or keep requiring) the token the test saw.
  */
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
