@@ -80,6 +80,9 @@ import {
   getSlashMenuItems,
   handleImageDrop,
   hasActiveSuggestion,
+  markdownFromEditor,
+  plaintextFromTiptapJson,
+  seedMarkdownFallback,
   stopEnterFromReachingParentForm,
 } from '../rich-text-editor'
 import { COMMENT_EDITOR_FEATURES } from '@/components/public/comment-editor-features'
@@ -506,34 +509,109 @@ describe('stopEnterFromReachingParentForm', () => {
 describe('markdown serialization optimization', () => {
   it('skips markdown serialization when onChange has arity < 3', () => {
     const getMarkdown = vi.fn(() => '# hello')
-    const getJSON = vi.fn(() => ({ type: 'doc', content: [] }))
-    const getHTML = vi.fn(() => '<p></p>')
-    const mockEditor = { getMarkdown, getJSON, getHTML }
+    const editor = { getMarkdown }
 
-    // Simulate the onUpdate logic
-    function runOnUpdate(
-      editor: typeof mockEditor,
-      onChange: ((...args: unknown[]) => void) | undefined
-    ) {
-      if (!onChange) return
-      const json = editor.getJSON()
-      const html = editor.getHTML()
-      const markdown = onChange.length >= 3 ? (editor.getMarkdown?.() ?? '') : ''
-      onChange(json, html, markdown)
-    }
-
-    // 2-arg onChange (widget/portal) — should NOT call getMarkdown
-    const twoArgCallback = vi.fn((_json: unknown, _html: unknown) => {})
-    runOnUpdate(mockEditor, twoArgCallback)
+    expect(markdownFromEditor(editor, 2)).toBe('')
     expect(getMarkdown).not.toHaveBeenCalled()
-    expect(twoArgCallback).toHaveBeenCalledWith(expect.any(Object), expect.any(String), '')
 
-    // 3-arg onChange (changelog) — SHOULD call getMarkdown
-    getMarkdown.mockClear()
-    const threeArgCallback = vi.fn((_json: unknown, _html: unknown, _md: unknown) => {})
-    runOnUpdate(mockEditor, threeArgCallback)
+    expect(markdownFromEditor(editor, 3)).toBe('# hello')
     expect(getMarkdown).toHaveBeenCalledOnce()
-    expect(threeArgCallback).toHaveBeenCalledWith(expect.any(Object), expect.any(String), '# hello')
+  })
+
+  it('returns empty markdown when the serializer throws with no prior value', () => {
+    const editor = {
+      getMarkdown: () => {
+        throw new Error('unknown node')
+      },
+    }
+    expect(markdownFromEditor(editor, 3)).toBe('')
+  })
+
+  it('keeps the last successful markdown when the serializer throws', () => {
+    const editor = {
+      getMarkdown: () => {
+        throw new Error('unknown node')
+      },
+    }
+    expect(markdownFromEditor(editor, 3, '- GIF per link')).toBe('- GIF per link')
+  })
+
+  it('projects current JSON text when the serializer throws mid-edit', () => {
+    const editor = {
+      getMarkdown: () => {
+        throw new Error('unknown node')
+      },
+    }
+    const json = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'new edit' }],
+        },
+      ],
+    }
+    expect(markdownFromEditor(editor, 3, 'old markdown', json)).toBe('new edit')
+  })
+
+  it('seeds markdown fallback from JSON text when the serializer has not run', () => {
+    const json = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'Existing comment' }],
+        },
+      ],
+    }
+    expect(plaintextFromTiptapJson(json)).toBe('Existing comment')
+    expect(seedMarkdownFallback(json)).toBe('Existing comment')
+    expect(seedMarkdownFallback('already markdown')).toBe('already markdown')
+  })
+
+  it('keeps newlines between blocks in the plaintext fallback', () => {
+    const json = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'First' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Second' }] },
+      ],
+    }
+    expect(plaintextFromTiptapJson(json)).toBe('First\nSecond')
+  })
+
+  it('keeps newlines between paragraphs nested in a blockquote', () => {
+    const json = {
+      type: 'doc',
+      content: [
+        {
+          type: 'blockquote',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'First' }] },
+            { type: 'paragraph', content: [{ type: 'text', text: 'Second' }] },
+          ],
+        },
+      ],
+    }
+    expect(plaintextFromTiptapJson(json)).toBe('First\nSecond')
+  })
+
+  it('keeps JSON plaintext when initial getMarkdown throws', () => {
+    const json = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'Existing comment' }],
+        },
+      ],
+    }
+    const editor = {
+      getMarkdown: () => {
+        throw new Error('unknown node')
+      },
+    }
+    expect(seedMarkdownFallback(json, editor)).toBe('Existing comment')
   })
 })
 

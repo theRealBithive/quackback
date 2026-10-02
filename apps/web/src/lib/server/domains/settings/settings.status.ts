@@ -54,10 +54,10 @@ export async function updateStatusSettings(
   log.info(input, 'update status settings')
   try {
     const validated = statusSettingsSchema.parse(input)
-    const existing = await getStatusSettings()
-    const merged = { ...existing, ...validated }
-    await writeMetadataKey(METADATA_KEY, merged)
-    return merged
+    return await writeMetadataKey(METADATA_KEY, (stored) => ({
+      ...resolveStatusSettings(stored),
+      ...validated,
+    }))
   } catch (error) {
     log.error({ err: error }, 'update status settings failed')
     wrapDbError('update status settings', error)

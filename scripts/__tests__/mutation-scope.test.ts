@@ -320,6 +320,35 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/lib/client/conversation/__tests__/reconcile-cached-thread.contract.test.ts',
         ],
       },
+      {
+        file: 'apps/web/src/lib/server/storage/serve-policy.ts',
+        suites: [
+          'apps/web/src/lib/server/storage/__tests__/serve-policy.test.ts',
+          'apps/web/src/lib/server/storage/__tests__/serve-policy.contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/components/widget/widget-compose.ts',
+        suites: [
+          'apps/web/src/components/widget/__tests__/widget-compose.test.ts',
+          'apps/web/src/components/widget/__tests__/widget-compose-board.contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/utils/sse.ts',
+        suites: [
+          'apps/web/src/lib/server/utils/__tests__/sse.test.ts',
+          'apps/web/src/lib/server/utils/__tests__/sse-idle-timeout.contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/shared/oidc-request.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/oidc-request.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/shared/utils/is-empty-tiptap-doc.ts',
+        suites: ['apps/web/src/lib/shared/utils/__tests__/is-empty-tiptap-doc.test.ts'],
+      },
     ])
   })
 
@@ -851,6 +880,76 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: "log.debug({ role: principalRecord.role }, 'current user role')",
         replacement: '""',
         why: expect.stringContaining('The message is metadata on a log line. It reache'),
+      },
+      {
+        file: 'apps/web/src/components/widget/widget-compose.ts',
+        mutator: 'ConditionalExpression',
+        line: 'lines.length === 0',
+        replacement: 'false',
+        why: expect.stringContaining('String.prototype.split always returns at least one'),
+      },
+      {
+        file: 'apps/web/src/components/widget/widget-compose.ts',
+        mutator: 'ArrayDeclaration',
+        line: "? [{ type: 'paragraph' }]",
+        replacement: '[]',
+        why: expect.stringContaining('String.prototype.split always returns at least one'),
+      },
+      {
+        file: 'apps/web/src/components/widget/widget-compose.ts',
+        mutator: 'ObjectLiteral',
+        line: "? [{ type: 'paragraph' }]",
+        replacement: '{}',
+        why: expect.stringContaining('String.prototype.split always returns at least one'),
+      },
+      {
+        file: 'apps/web/src/components/widget/widget-compose.ts',
+        mutator: 'StringLiteral',
+        line: "? [{ type: 'paragraph' }]",
+        replacement: '""',
+        why: expect.stringContaining('String.prototype.split always returns at least one'),
+      },
+      {
+        file: 'apps/web/src/lib/server/utils/sse.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (keepAlive) clearInterval(keepAlive)',
+        replacement: 'true',
+        why: expect.stringContaining('clearInterval(null) is specified to do nothing, so'),
+      },
+      {
+        file: 'apps/web/src/lib/server/utils/sse.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (size === null || size <= 0) return',
+        replacement: 'false',
+        why: expect.stringContaining('JavaScript converts null to 0 in a numeric compari'),
+      },
+      {
+        file: 'apps/web/src/lib/server/utils/sse.ts',
+        mutator: 'OptionalChaining',
+        line: 'const size = controller?.desiredSize',
+        replacement: 'controller.desiredSize',
+        why: expect.stringContaining('The ReadableStream start callback runs synchronous'),
+      },
+      {
+        file: 'apps/web/src/lib/server/utils/sse.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (size !== undefined && size !== null && size <= 0) {',
+        replacement: 'true',
+        why: expect.stringContaining('ReadableStreamDefaultController.desiredSize is a n'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/utils/is-empty-tiptap-doc.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (!content || content.length === 0) return true',
+        replacement: 'false',
+        why: expect.stringContaining('With the length test removed, an empty array falls'),
+      },
+      {
+        file: 'apps/web/src/lib/shared/utils/is-empty-tiptap-doc.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (!children || children.length === 0) return true',
+        replacement: 'false',
+        why: expect.stringContaining('With the length test removed, an empty children ar'),
       },
     ])
   })
