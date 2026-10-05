@@ -1,7 +1,7 @@
 /**
  * The audience a freshly minted session is stamped with.
  *
- * Two separate claims, and the split matters. `stampSessionAudience` is the
+ * Two separate claims, and the split matters. `assignSessionScope` is the
  * rule — which sign-in path belongs to the widget — and it is a pure function,
  * so it is read directly. Whether the rule is *reached* is a fact about the
  * Better Auth options object, and nothing about the function can show it: a
@@ -85,7 +85,7 @@ vi.mock('@/lib/server/content/ssrf-guard', () => ({ safeFetch: vi.fn() }))
 vi.mock('@/lib/server/auth/hooks', () => ({ hooksBefore: vi.fn(), hooksAfter: vi.fn() }))
 
 import { getAuth, resetAuth } from '../index'
-import { ANONYMOUS_SIGN_IN_PATH, stampSessionAudience } from '../session-scope'
+import { ANONYMOUS_SIGN_IN_PATH, assignSessionScope } from '../session-audience'
 
 /** The options the most recent start-up handed Better Auth. */
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any
@@ -116,17 +116,17 @@ describe('what the instance declares about the audience column (R1)', () => {
   it('reaches the audience rule on every session it creates', async () => {
     await getAuth()
 
-    expect(builtOptions().databaseHooks.session.create.before).toBe(stampSessionAudience)
+    expect(builtOptions().databaseHooks.session.create.before).toBe(assignSessionScope)
   })
 })
 
-describe('stampSessionAudience (R5)', () => {
+describe('assignSessionScope (R5)', () => {
   it('stamps the widget audience on the lazy anonymous mint', async () => {
     // The path is spelled out rather than taken from the constant: the
     // constant has to be the endpoint Better Auth actually routes the
     // anonymous plugin to, and a test that reads it back from itself would
     // hold any spelling at all.
-    const stamped = await stampSessionAudience(
+    const stamped = await assignSessionScope(
       { id: 'sess_1', userId: 'user_1' },
       { path: '/sign-in/anonymous' }
     )
@@ -142,20 +142,20 @@ describe('stampSessionAudience (R5)', () => {
       '/callback/oidc',
       '/magic-link/verify',
     ]) {
-      expect(await stampSessionAudience({ id: 'sess_1' }, { path })).toBeUndefined()
+      expect(await assignSessionScope({ id: 'sess_1' }, { path })).toBeUndefined()
     }
   })
 
   it('leaves the row untouched when there is no path at all', async () => {
-    expect(await stampSessionAudience({ id: 'sess_1' }, undefined)).toBeUndefined()
-    expect(await stampSessionAudience({ id: 'sess_1' }, null)).toBeUndefined()
-    expect(await stampSessionAudience({ id: 'sess_1' }, {})).toBeUndefined()
+    expect(await assignSessionScope({ id: 'sess_1' }, undefined)).toBeUndefined()
+    expect(await assignSessionScope({ id: 'sess_1' }, null)).toBeUndefined()
+    expect(await assignSessionScope({ id: 'sess_1' }, {})).toBeUndefined()
   })
 
   it('claims the widget audience for that one path and no other (R5)', async () => {
     await fc.assert(
       fc.asyncProperty(fc.string(), async (path) => {
-        const stamped = await stampSessionAudience({ id: 'sess_1' }, { path })
+        const stamped = await assignSessionScope({ id: 'sess_1' }, { path })
 
         // The conservation law: either the row is handed back untouched, or it
         // is the anonymous mint and the stamp says widget. There is no third
@@ -178,7 +178,7 @@ describe('stampSessionAudience (R5)', () => {
           fc.string()
         ),
         async (row) => {
-          const stamped = await stampSessionAudience(row, { path: ANONYMOUS_SIGN_IN_PATH })
+          const stamped = await assignSessionScope(row, { path: ANONYMOUS_SIGN_IN_PATH })
 
           expect(stamped?.data).toMatchObject(row)
         }

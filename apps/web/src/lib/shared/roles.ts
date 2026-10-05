@@ -25,6 +25,12 @@ export type PrincipalType = 'user' | 'anonymous' | 'service' | 'support'
 export type SessionScope = 'dashboard' | 'widget' | 'portal'
 
 /**
+ * Request header the portal sets when it mints an anonymous session, so the
+ * session is tagged for the portal rather than the widget. Absent means widget.
+ */
+export const SESSION_AUDIENCE_HEADER = 'x-quackback-session-audience'
+
+/**
  * Normalize a stored scope. A value outside the three audiences reads as a
  * portal session, the least authority an audience can carry.
  *

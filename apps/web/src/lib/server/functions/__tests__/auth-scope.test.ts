@@ -118,7 +118,8 @@ import {
   requireAuth,
 } from '../auth-helpers'
 import { ensurePrincipalForUser } from '@/lib/server/domains/principals/principal.factory'
-import { isTeamMember, sessionRole, toSessionScope } from '@/lib/shared/roles'
+import { SESSION_AUDIENCE_HEADER, isTeamMember, sessionRole, toSessionScope } from '@/lib/shared/roles'
+import { assignSessionScope } from '@/lib/server/auth/session-audience'
 
 /** The three audiences a session may legitimately carry. */
 const KNOWN_SCOPES = ['dashboard', 'widget', 'portal'] as const
@@ -238,6 +239,50 @@ describe('requireAuth without a permission (R2, R7)', () => {
         }
       ),
       { numRuns: 200 }
+    )
+  })
+})
+
+// The mint decision and the gate, end to end: the scope assignSessionScope
+// stamps on a fresh anonymous session is the scope requireAuth then reads.
+describe('anonymous sessions minted by each surface', () => {
+  async function mintedAnonymousSession(headers: Record<string, string>) {
+    const minted = await assignSessionScope(
+      { userId: 'user_anon', token: 'tok' },
+      { path: '/sign-in/anonymous', headers: new Headers(headers) }
+    )
+    return {
+      session: { id: 'sess_anon', scope: minted?.data.scope },
+      user: { id: 'user_anon', email: 'temp-x@anon.invalid', name: 'Anon', image: null },
+    }
+  }
+
+  beforeEach(() => {
+    mockPrincipalFindFirst.mockResolvedValue({
+      id: 'principal_anon',
+      role: 'user',
+      type: 'anonymous',
+    })
+  })
+
+  it('lets a portal anonymous session through requireAuth as an anonymous portal user', async () => {
+    mockGetSession.mockResolvedValue(
+      await mintedAnonymousSession({ [SESSION_AUDIENCE_HEADER]: 'portal' })
+    )
+
+    const auth = await requireAuth()
+    expect(auth.scope).toBe('portal')
+    expect(auth.principal).toEqual({ id: 'principal_anon', role: 'user', type: 'anonymous' })
+    expect(auth.permissions).toEqual([])
+  })
+
+  it('refuses a portal anonymous session at a permission gate', async () => {
+    mockGetSession.mockResolvedValue(
+      await mintedAnonymousSession({ [SESSION_AUDIENCE_HEADER]: 'portal' })
+    )
+
+    await expect(requireAuth({ permission: PERMISSIONS.SETTINGS_MANAGE })).rejects.toThrow(
+      /dashboard session/
     )
   })
 })
