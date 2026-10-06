@@ -10,11 +10,12 @@
  * Edits change a local draft. Cancel and Save changes appear only while the
  * draft differs from what is stored; Save diffs closed operations against the
  * stored JSON so unrelated sections survive. Removing a draft row is
- * reversible (Undo toast). Saving an Account ID change, or role rules that
- * grant admin, still asks first: those are the two edits that change who gets
- * into what.
+ * reversible (Undo toast). Saving an Account ID change still asks first: it
+ * changes which account a sign-in reaches. Role rules are the Roles card's;
+ * Save here carries them through untouched.
  */
 import { useId, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { PlusIcon } from '@heroicons/react/24/solid'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,7 @@ import { Label } from '@/components/ui/label'
 import { SettingsCard } from '@/components/admin/settings/settings-card'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { useUserAttributes } from '@/lib/client/hooks/use-user-attributes-queries'
+import { settingsQueries } from '@/lib/client/queries/settings'
 import type { IdentityProvider } from '@/lib/server/domains/settings/identity-providers.service'
 import {
   PROFILE_FIELDS,
@@ -32,6 +34,7 @@ import {
 } from '@/lib/shared/oidc-claim-mapping'
 import type { AttributeDefinition } from '@/lib/shared/plan-claim-attribute-writes'
 import {
+  adminTierRoleIds,
   diffClaimMappingOperations,
   mappingSaveRisks,
   sourcesAreDefault,
@@ -58,13 +61,13 @@ import {
   mergeClaimMapping,
   normalizeAttributeMapping,
   normalizeProfileClaims,
-  normalizeRoleMapping,
   withAllowMissingEmail,
   type AttributeMapping,
   type ClaimsTableRow,
   type PeopleDefinition,
-  type RoleMapping,
 } from './provider-shared'
+import { grantableRoles, verifiedDomainNames } from './role-outcome'
+import { useRolesDraft } from './roles-draft-context'
 
 /** The table needs a label per attribute; the write planner needs its typed
  *  kind. One list serves both. */
@@ -107,7 +110,6 @@ type StoredMapping = IdentityProvider['claimMapping']
 
 /** The editable parts of the mapping. Everything else is carried through. */
 interface Draft {
-  role: RoleMapping | null
   attributes: AttributeMapping | null
   profileClaims: Partial<Record<ProfileField, string>>
   sources: IdentitySource[]
@@ -116,7 +118,6 @@ interface Draft {
 
 function draftFrom(mapping: StoredMapping): Draft {
   return {
-    role: mapping?.role ?? null,
     attributes: mapping?.attributes ?? null,
     profileClaims: { ...(mapping?.profile?.claims ?? {}) },
     sources: draftSources(mapping),
@@ -139,28 +140,16 @@ function draftProfile(base: StoredMapping, draft: Draft) {
   })
 }
 
-const SECTIONS = ['profile', 'role', 'attributes'] as const
+// Role rules are the Roles card's, so the role section is never a draft here.
+const SECTIONS = ['profile', 'attributes'] as const
 type Section = (typeof SECTIONS)[number]
 
 /**
  * One section of a draft in normalized form, so a stored mapping that is
- * written unusually (an explicit standard claim, a role with no rules, People
- * flags with no rows) reads as untouched. A blank stored path stays distinct
+ * written unusually (an explicit standard claim, People flags with no rows) reads as untouched. A blank stored path stays distinct
  * from the standard claim: clearing it is an edit worth saving.
  */
 function sectionKey(draft: Draft, section: Section): string {
-  if (section === 'role') {
-    const role = normalizeRoleMapping(draft.role)
-    return JSON.stringify(
-      role
-        ? [
-            role.claimPath,
-            role.rules.map((r) => [r.whenContains, r.role]),
-            role.syncOnEverySignIn === true,
-          ]
-        : null
-    )
-  }
   if (section === 'attributes') {
     const attributes = normalizeAttributeMapping(draft.attributes)
     return JSON.stringify(
@@ -207,7 +196,6 @@ function sectionEdited(draft: Draft, base: Draft, section: Section): boolean {
 }
 
 function withSection(draft: Draft, from: Draft, section: Section): Draft {
-  if (section === 'role') return { ...draft, role: from.role }
   if (section === 'attributes') return { ...draft, attributes: from.attributes }
   return {
     ...draft,
@@ -256,12 +244,15 @@ function ProfileEditor({
   const { saving, saveClaimMapping } = useProviderSave(provider)
   const { openTest } = useConnectionTest(provider)
   const capture = useProviderCapture(provider)
+  // Names a matched rule's custom role in the preview, or shows it missing.
+  const { data: rolesData } = useQuery(settingsQueries.roles())
+  // Unsaved edits on the Roles card, so the preview's Role line matches them.
+  const rolesDraft = useRolesDraft()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [dialog, setDialog] = useState<{
     mode: 'add' | 'edit'
     target?: ClaimRowDialogTarget
     path?: string
-    role?: RoleMapping | null
   } | null>(null)
   const stored = provider.claimMapping
   // `baseline` is the stored mapping the draft is based on: what it is
@@ -283,7 +274,7 @@ function ProfileEditor({
   }
   const conflict = baseline !== stored
 
-  const { role: mapping, attributes, profileClaims, sources, profileSync } = draft
+  const { attributes, profileClaims, sources, profileSync } = draft
   const update = (patch: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...patch }))
   const updateAttributes = (fn: (prev: AttributeMapping | null) => AttributeMapping | null) =>
     setDraft((prev) => ({ ...prev, attributes: fn(prev.attributes) }))
@@ -291,12 +282,10 @@ function ProfileEditor({
 
   const profile = draftProfile(baseline, draft)
   const draftMapping = mergeClaimMapping(baseline, {
-    role: mapping ?? undefined,
     profile,
     attributes: attributes ?? undefined,
   })
   const proposed = mergeClaimMapping(baseline, {
-    role: normalizeRoleMapping(mapping),
     profile,
     attributes: normalizeAttributeMapping(attributes),
   })
@@ -306,12 +295,7 @@ function ProfileEditor({
   ]
   const risks = mappingSaveRisks(baseline, proposed)
   const dirty = SECTIONS.some((section) => sectionEdited(draft, baseDraft, section))
-  // Admin rules that already existed and did not change are acknowledged
-  // silently; only new or altered admin rules get a confirmation.
-  const adminRulesChanged =
-    risks.hasAdminRules &&
-    JSON.stringify(adminRulesOf(baseline?.role)) !== JSON.stringify(adminRulesOf(proposed?.role))
-  const needsConfirm = dirty && (risks.identifierChanged || adminRulesChanged)
+  const needsConfirm = dirty && risks.identifierChanged
 
   const revert = () => {
     setBaseline(stored)
@@ -327,7 +311,8 @@ function ProfileEditor({
         expectedClaimMapping: baseline,
         operations,
         acknowledgeIdentifierChange: risks.identifierChanged,
-        acknowledgeAdminRules: risks.hasAdminRules,
+        // This card never edits role rules; stored ones are carried through.
+        acknowledgeAdminRules: true,
       },
       'Profile saved.'
     )
@@ -359,10 +344,6 @@ function ProfileEditor({
       })
       return
     }
-    if (commit.type === 'role') {
-      update({ role: commit.mapping })
-      return
-    }
     updateAttributes((prev) => {
       const map = [...(prev?.map ?? [])]
       if (typeof commit.baselineIndex === 'number' && map[commit.baselineIndex]) {
@@ -383,12 +364,7 @@ function ProfileEditor({
   const removeRow = (row: ClaimsTableRow) => {
     let label: string
     let undo: () => void
-    if (row.kind === 'role') {
-      const removed = mapping
-      update({ role: null })
-      label = 'role rules'
-      undo = () => update({ role: removed })
-    } else if (row.kind === 'people') {
+    if (row.kind === 'people') {
       const index = row.baselineIndex
       const entry = attributes?.map?.[index]
       if (!attributes || !entry) return
@@ -419,8 +395,6 @@ function ProfileEditor({
         target: { type: 'profile', field: row.field },
         path: row.isDefault ? undefined : row.path,
       })
-    } else if (row.kind === 'role') {
-      setDialog({ mode: 'edit', target: { type: 'role' }, role: mapping })
     } else if (row.kind === 'people') {
       setDialog({
         mode: 'edit',
@@ -437,7 +411,6 @@ function ProfileEditor({
   const tableModel = buildClaimsTableModel({
     mapping: {
       profile: { claims: profileClaims, allowMissingEmail, sources },
-      role: mapping ?? undefined,
       attributes: attributes ?? undefined,
     },
     definitions,
@@ -447,7 +420,6 @@ function ProfileEditor({
   // What each profile field takes from the last test sign-in under this draft.
   const testValues = previewProfileValues(draftMapping, capture)
   const issue = identityMappingIssue(baseline)
-  const hasRoleRules = tableModel.additional.some((row) => row.kind === 'role')
 
   return (
     <div className="space-y-5">
@@ -499,12 +471,6 @@ function ProfileEditor({
         </div>
       </div>
 
-      {hasRoleRules && !provider.autoCreateUsers && (
-        <p className="text-sm text-muted-foreground">
-          Role rules are not applied while account creation is off.
-        </p>
-      )}
-
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -549,14 +515,20 @@ function ProfileEditor({
 
       <OutcomePreviewRail
         capture={capture}
-        draft={draftMapping}
+        draft={
+          rolesDraft ? mergeClaimMapping(draftMapping, { role: rolesDraft.role }) : draftMapping
+        }
         definitions={definitions}
         providerPolicy={{
           autoCreateUsers: provider.autoCreateUsers,
-          autoProvisionRole: provider.autoProvisionRole,
+          autoProvisionRole: rolesDraft ? rolesDraft.defaultRole : provider.autoProvisionRole,
           detailsChangedAt: provider.detailsChangedAt,
           registrationId: provider.registrationId,
         }}
+        verifiedDomains={verifiedDomainNames(provider.domains)}
+        roles={rolesData ? grantableRoles(rolesData.roles) : undefined}
+        roleUnsaved={rolesDraft !== null}
+        adminTierRoleIds={adminTierRoleIds(rolesData?.roles ?? [])}
         dirty={dirty}
         onSaveAndTest={() => requestSave(true)}
         registrationId={provider.registrationId}
@@ -581,13 +553,11 @@ function ProfileEditor({
         availableTargets={addTargets}
         definitions={definitions}
         initialPath={dialog?.path}
-        initialRole={dialog?.role}
         registrationId={provider.registrationId}
         canTest
         capture={capture}
         draft={draftMapping}
         providerKind={provider.kind}
-        autoCreateUsers={provider.autoCreateUsers}
         onOpenChange={(open) => {
           if (!open) setDialog(null)
         }}
@@ -603,24 +573,10 @@ function ProfileEditor({
         title="Confirm these changes"
         confirmLabel="Save changes"
         description={
-          <div className="space-y-2 text-sm">
-            {risks.identifierChanged && (
-              <p>
-                Changing the Account ID can stop existing accounts matching and create new ones
-                instead. Existing accounts are not migrated, and the connection must be tested
-                again.
-              </p>
-            )}
-            {adminRulesChanged && (
-              <p>
-                {risks.adminRules.length === 1
-                  ? 'A rule grants admin access.'
-                  : `${risks.adminRules.length} rules grant admin access.`}{' '}
-                Matching people become admins even when their email is outside this provider&apos;s
-                verified domains.
-              </p>
-            )}
-          </div>
+          <p className="text-sm">
+            Changing the Account ID can stop existing accounts matching and create new ones instead.
+            Existing accounts are not migrated, and the connection must be tested again.
+          </p>
         }
         onConfirm={() => {
           setConfirmOpen(false)
@@ -629,8 +585,4 @@ function ProfileEditor({
       />
     </div>
   )
-}
-
-function adminRulesOf(role: RoleMapping | undefined | null) {
-  return (role?.rules ?? []).filter((r) => r.role === 'admin').map((r) => r.whenContains)
 }

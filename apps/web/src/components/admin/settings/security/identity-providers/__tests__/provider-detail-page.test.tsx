@@ -169,6 +169,11 @@ vi.mock('@/lib/client/queries/settings', () => ({
       queryFn: async () => state.authConfig,
       staleTime: Infinity,
     }),
+    roles: () => ({
+      queryKey: ['settings', 'roles'],
+      queryFn: async () => ({ roles: [], maxCustomRoles: null }),
+      staleTime: Infinity,
+    }),
     providerAccountCount: (id: string) => ({
       queryKey: ['settings', 'identityProviders', id, 'accountCount'],
       queryFn: async () => ({ count: state.accountCount }),
@@ -193,6 +198,11 @@ vi.mock('@/lib/client/queries/admin', () => ({
 }))
 
 vi.mock('sonner', () => ({ toast: toastSpy }))
+
+// The lockout guard's admin list; the Roles card tests drive it.
+vi.mock('../use-provider-admins', () => ({
+  useProviderAdmins: () => ({ isPending: false, isError: false, data: [], refetch: vi.fn() }),
+}))
 
 // Stub the Test sign-in button used inside the preview rail so the page does
 // not pull in the test-flow server fns. Pass `disabled` through.
@@ -269,6 +279,7 @@ function renderPage(provider: IdentityProvider, props: { autoTest?: boolean } = 
     count: state.accountCount,
   })
   qc.setQueryData(['admin', 'userAttributes'], state.userAttributes)
+  qc.setQueryData(['settings', 'roles'], { roles: [], maxCustomRoles: null })
   return render(
     <QueryClientProvider client={qc}>
       <ProviderDetailPage providerId={provider.id} {...props} />
@@ -282,7 +293,8 @@ const saveConnection = () => fireEvent.click(screen.getByRole('button', { name: 
 const openConnectionOptions = () =>
   fireEvent.click(screen.getByRole('button', { name: /Connection options/ }))
 /** Sign-in & access and Profile both end in Save changes. */
-const section = (id: 'connection' | 'signin' | 'mapping') => within(document.getElementById(id)!)
+const section = (id: 'connection' | 'signin' | 'mapping' | 'roles') =>
+  within(document.getElementById(id)!)
 const saveSignIn = () =>
   fireEvent.click(section('signin').getByRole('button', { name: 'Save changes' }))
 const saveUserDetails = () => {
@@ -317,11 +329,14 @@ beforeEach(() => {
 })
 
 describe('<ProviderDetailPage> page shell', () => {
-  it('renders the three sections and nothing else', () => {
+  it('renders the four sections and nothing else', () => {
     renderPage(makeProvider({}))
-    expect(screen.getByRole('heading', { name: 'Connection' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Sign-in & access' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Profile' })).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Connection',
+      'Sign-in & access',
+      'Profile',
+      'Roles',
+    ])
     expect(
       screen.getByText('What Quackback takes from Acme SSO for each person.')
     ).toBeInTheDocument()
@@ -331,7 +346,10 @@ describe('<ProviderDetailPage> page shell', () => {
 
   it('shows the role sign-in really gives when no default was saved', () => {
     renderPage(makeProvider({ autoCreateUsers: true, autoProvisionRole: null }))
-    expect(screen.getByRole('combobox', { name: 'New account role' })).toHaveTextContent('Member')
+    // The default role lives on the Roles card now.
+    expect(
+      section('roles').getByRole('combobox', { name: 'Role for people at a verified domain' })
+    ).toHaveTextContent('Member')
   })
 
   it('names the provider and its family in the header', () => {
@@ -884,7 +902,7 @@ describe('<ProviderDetailPage> sign-in & access', () => {
     expect(screen.getByText(/Before you require SSO/)).toBeInTheDocument()
   })
 
-  it('saves the button, creation and role choices together and nothing else', async () => {
+  it('saves the button and creation choices together and nothing else', async () => {
     renderPage(makeProvider({ showButton: false, autoCreateUsers: true }))
     fireEvent.click(screen.getByRole('switch', { name: 'Show sign-in button' }))
     saveSignIn()
@@ -892,22 +910,24 @@ describe('<ProviderDetailPage> sign-in & access', () => {
     expect(lastUpsert()).toMatchObject({
       showButton: true,
       autoCreateUsers: true,
-      autoProvisionRole: 'user',
       label: 'Acme SSO',
     })
+    // The default role belongs to the Roles card.
+    expect(lastUpsert()).not.toHaveProperty('autoProvisionRole')
     expect(lastUpsert()).not.toHaveProperty('claimMapping')
     expect(lastUpsert()).not.toHaveProperty('scopes')
     expect(mappingSpy).not.toHaveBeenCalled()
   })
 
-  it('nulls the new account role when creation is turned off', async () => {
+  it('has no role control, and turning creation off keeps the stored default role', async () => {
     renderPage(makeProvider({ autoCreateUsers: true, autoProvisionRole: 'member' }))
-    expect(screen.getByLabelText('New account role')).toBeInTheDocument()
+    expect(section('signin').queryByLabelText('New account role')).not.toBeInTheDocument()
+    expect(section('signin').queryByRole('combobox')).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('switch', { name: 'Create accounts on first sign-in' }))
-    expect(screen.queryByLabelText('New account role')).not.toBeInTheDocument()
     saveSignIn()
     await waitFor(() => expect(upsertSpy).toHaveBeenCalled())
-    expect(lastUpsert()).toMatchObject({ autoCreateUsers: false, autoProvisionRole: null })
+    expect(lastUpsert()).toMatchObject({ autoCreateUsers: false })
+    expect(lastUpsert()).not.toHaveProperty('autoProvisionRole')
   })
 
   it('keeps the display name and logo under Sign-in appearance', async () => {
@@ -1026,7 +1046,11 @@ describe('<ProviderDetailPage> profile', () => {
     expect(screen.getByText('upn')).toBeInTheDocument()
     expect(screen.getAllByText('Custom')).toHaveLength(1)
     expect(screen.queryByText('Default')).not.toBeInTheDocument()
-    expect(screen.getByText('groups')).toBeInTheDocument()
+    // The role claim shows on the Roles card, not in the Profile table.
+    expect(section('mapping').queryByText('groups')).not.toBeInTheDocument()
+    expect(section('roles').getByRole('combobox', { name: 'Claim to check' })).toHaveTextContent(
+      'groups'
+    )
   })
 
   it('shows a stored profile claim this UI cannot edit instead of calling the mapping standard', () => {
@@ -1393,5 +1417,62 @@ describe('<ProviderDetailPage> remove', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Remove provider' }))
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(toastSpy.error).toHaveBeenCalledWith(expect.stringMatching(/only enabled sign-in/i))
+  })
+})
+
+describe('<ProviderDetailPage> roles preview', () => {
+  const groupsCapture: SsoTestCapture = {
+    ...matchingCapture,
+    claims: { ...matchingCapture.claims, groups: ['engineering'] },
+    replay: {
+      sources: [
+        {
+          source: 'idToken' as const,
+          claims: { sub: 's', email: 'alice@example.com', groups: ['engineering'] },
+        },
+        { source: 'userinfo' as const, claims: { sub: 's' } as Record<string, string> },
+      ],
+    },
+  }
+  const roleLine = () =>
+    within(section('mapping').getByRole('heading', { name: 'Role' }).parentElement!).getByText(
+      /Portal user|Admin|Member/
+    )
+
+  it('answers the Profile preview’s Role line for the Roles card’s unsaved rules', async () => {
+    renderPage(makeProvider({ label: 'Acme ID', lastTestCapture: groupsCapture }))
+    expect(roleLine()).toHaveTextContent(/^Portal user$/)
+
+    const roles = section('roles')
+    fireEvent.click(roles.getByRole('button', { name: 'Add rule' }))
+    // The value the test person sent is offered from the last test sign-in.
+    await userEvent.click(roles.getByRole('combobox', { name: 'Value for rule 1' }))
+    await userEvent.click(screen.getByRole('option', { name: 'engineering' }))
+    await userEvent.click(roles.getByRole('combobox', { name: 'Role for rule 1' }))
+    await userEvent.click(screen.getByRole('option', { name: 'Admin' }))
+
+    await waitFor(() => expect(roleLine()).toHaveTextContent(/^Admin \(rule 1, unsaved\)$/))
+
+    fireEvent.click(roles.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(roleLine()).toHaveTextContent(/^Portal user$/))
+  })
+
+  it('reads an unsaved default role change too', async () => {
+    renderPage(
+      makeProvider({
+        label: 'Acme ID',
+        lastTestCapture: groupsCapture,
+        domains: [{ ...verifiedDomain, name: 'example.com' }],
+        autoProvisionRole: 'member',
+      })
+    )
+    expect(roleLine()).toHaveTextContent(/^Member \(verified domain\)$/)
+    await userEvent.click(
+      section('roles').getByRole('combobox', { name: 'Role for people at a verified domain' })
+    )
+    await userEvent.click(screen.getByRole('option', { name: 'Admin' }))
+    await waitFor(() =>
+      expect(roleLine()).toHaveTextContent(/^Admin \(verified domain, unsaved\)$/)
+    )
   })
 })
