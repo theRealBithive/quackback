@@ -328,6 +328,11 @@ describe('<ProviderDetailPage> page shell', () => {
     expect(screen.queryByRole('heading', { name: /Remove/ })).not.toBeInTheDocument()
   })
 
+  it('shows the role sign-in really gives when no default was saved', () => {
+    renderPage(makeProvider({ autoCreateUsers: true, autoProvisionRole: null }))
+    expect(screen.getByRole('combobox', { name: 'New account role' })).toHaveTextContent('Member')
+  })
+
   it('names the provider and its family in the header', () => {
     renderPage(makeProvider({ kind: 'entra', label: 'Acme SSO' }))
     expect(screen.getByRole('heading', { name: 'Acme SSO' })).toBeInTheDocument()
