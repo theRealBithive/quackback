@@ -26,7 +26,8 @@ are offset by one from upstream's #520 on — upstream `0276_post_tags_is_public
 is our `0277` — and skipping upstream `0277_widget_chat_to_messenger` puts
 `0278`–`0280` back in step. They part again after `0280`: upstream
 `0281`–`0288` are not picked (visual theme, integration sync, #580, Dutch
-search), so upstream `0289_identity_provider_id_token_nonce` is our `0281`,
+search), so upstream `0289_identity_provider_id_token_nonce` is our `0281`, upstream
+`0287_conversation_message_edited_at` is our `0282`,
 and every later pick takes the next free number here.
 
 ## Recompute
@@ -132,7 +133,7 @@ the deploy tag where there is one.
 | `38b4612f3` #577 | 2026-09-21 | fix(widget): show the compose board when only one is available                                  | picked, batch F; re-resolve limited to confirmed boards, which kept fork W4 (b18861a4e)                                                                                                             | #38                       |
 | `cf6f40665` #578 | 2026-09-21 | fix(inbox): show the account name on support user details                                       | open                                                                                                                                                                                                | —                         |
 | `ec9693dc7` #579 | 2026-09-22 | fix(inbox): show account names across support surfaces                                          | open                                                                                                                                                                                                | —                         |
-| `ccf8f0521` #580 | 2026-09-23 | feat(inbox): edit and delete your own support messages                                          | planned, batch G (migration needs renumbering)                                                                                                                                                      | —                         |
+| `ccf8f0521` #580 | 2026-09-23 | feat(inbox): edit and delete your own support messages                                          | picked, batch G; migration renumbered to `0282_conversation_message_edited_at`; deleting someone else's message now needs `conversation.manage` (confirmed by the owner)                            | #40                       |
 | `3644a3b72` #583 | 2026-09-23 | fix(mcp): make MCP OAuth work with every major MCP client                                       | planned, batch J (builds on #555 and #580)                                                                                                                                                          | —                         |
 | `f77776c35` #581 | 2026-09-23 | fix(integrations): open sync history from the settings header                                   | open                                                                                                                                                                                                | —                         |
 | `e339b9a38` #586 | 2026-09-23 | fix(auth): advertise the callback URI Better Auth actually sends for OIDC                       | picked, batch F                                                                                                                                                                                     | #38                       |
