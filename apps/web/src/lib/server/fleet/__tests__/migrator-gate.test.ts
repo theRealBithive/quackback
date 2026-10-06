@@ -357,6 +357,7 @@ describe('replayGateVerdict', () => {
       '0280_widget_session_scope',
       '0281_identity_provider_id_token_nonce',
       '0282_conversation_message_edited_at',
+      '0283_account_profile_sync',
     ])
     const verdict = replayGateVerdict(before, verdictsFor(replaySetFor(before)), false)
     expect(verdict.ok).toBe(false)
