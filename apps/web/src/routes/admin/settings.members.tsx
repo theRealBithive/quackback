@@ -24,6 +24,7 @@ export const Route = createFileRoute('/admin/settings/members')({
   loader: async ({ context }) => {
     assertRoutePermission(context.permissions, PERMISSIONS.MEMBER_VIEW)
     const { settings, queryClient, principal } = context
+    const canManageMembers = !!context.permissions?.includes(PERMISSIONS.MEMBER_MANAGE)
     await Promise.all([
       queryClient.ensureQueryData(settingsQueries.teamMembersAndInvitations()),
       queryClient.ensureQueryData(settingsQueries.teams()),
@@ -32,13 +33,14 @@ export const Route = createFileRoute('/admin/settings/members')({
     return {
       settings,
       currentMember: principal as { id: PrincipalId; role: 'admin' | 'member'; userId: UserId },
+      canManageMembers,
     }
   },
   component: MembersPage,
 })
 
 function MembersPage() {
-  const { settings, currentMember } = Route.useLoaderData()
+  const { settings, currentMember, canManageMembers } = Route.useLoaderData()
   const { tab = 'members' } = Route.useSearch()
   const navigate = Route.useNavigate()
 
@@ -66,7 +68,11 @@ function MembersPage() {
           <TabsTrigger value="roles">Roles</TabsTrigger>
         </TabsList>
         <TabsContent value="members">
-          <MembersTab workspaceName={settings!.name} currentMember={currentMember} />
+          <MembersTab
+            workspaceName={settings!.name}
+            currentMember={currentMember}
+            canManageMembers={canManageMembers}
+          />
         </TabsContent>
         <TabsContent value="teams">
           <TeamsTab />

@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useMemo } from 'react'
+import { Fragment, lazy, Suspense, useState, useEffect, useMemo } from 'react'
 import {
   type ColumnDef,
   type FilterFn,
@@ -9,7 +9,7 @@ import {
   tableFeatures,
   useTable,
 } from '@tanstack/react-table'
-import { useSuspenseQuery, useQueryClient } from '@tanstack/react-query'
+import { useSuspenseQuery } from '@tanstack/react-query'
 import { useRouteContext } from '@tanstack/react-router'
 import { settingsQueries } from '@/lib/client/queries/settings'
 import { EnvelopeIcon, PlusIcon } from '@heroicons/react/24/solid'
@@ -30,7 +30,6 @@ import { FormError } from '@/components/shared/form-error'
 import { CopyButton } from '@/components/shared/copy-button'
 import { SettingsCard } from '@/components/admin/settings/settings-card'
 import { Button } from '@/components/ui/button'
-import { InviteMemberDialog } from '@/components/auth/invite-member-dialog'
 import { AddSeatsDialog } from '@/components/admin/settings/billing/add-seats-dialog'
 import {
   type PendingInvitation,
@@ -45,6 +44,14 @@ import { seatInviteBlocked, seatAddAvailable } from '@/components/admin/settings
 import { CUSTOM_ROLE_BADGE } from '@/components/admin/settings/team/role-ui'
 import type { UserId, PrincipalId } from '@quackback/ids'
 import { isAdmin } from '@/lib/shared/roles'
+import { useOpenedOnce } from '@/lib/client/hooks/use-opened-once'
+
+// Loads the first time it opens, not with the roster.
+const AddPeopleDialog = lazy(() =>
+  import('@/components/admin/settings/team/add-people-dialog').then((m) => ({
+    default: m.AddPeopleDialog,
+  }))
+)
 
 // Discriminated union: each row is either a member or an invitation
 type TeamRow =
@@ -158,18 +165,20 @@ function SignInLabel({
 interface MembersTabProps {
   workspaceName: string
   currentMember: { id: PrincipalId; role: 'admin' | 'member'; userId: UserId }
+  /** Holds member.manage: may add people to the team. */
+  canManageMembers: boolean
 }
 
 /** The teammate roster + pending invitations (the Members tab of Members & Teams). */
-export function MembersTab({ workspaceName, currentMember }: MembersTabProps) {
+export function MembersTab({ workspaceName, currentMember, canManageMembers }: MembersTabProps) {
   const { session } = useRouteContext({ from: '__root__' })
   const teamDataQuery = useSuspenseQuery(settingsQueries.teamMembersAndInvitations())
   const { members, avatarMap, formattedInvitations, seatUsage } = teamDataQuery.data
 
   const [search, setSearch] = useState('')
-  const [showInviteDialog, setShowInviteDialog] = useState(false)
+  const [showAddPeople, setShowAddPeople] = useState(false)
+  const addPeopleOpened = useOpenedOnce(showAddPeople)
   const [showAddSeats, setShowAddSeats] = useState(false)
-  const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [inviteLinkMap, setInviteLinkMap] = useState<Record<string, string>>({})
 
@@ -185,8 +194,8 @@ export function MembersTab({ workspaceName, currentMember }: MembersTabProps) {
   const seatDescription = seatLine
     ? inviteBlocked
       ? canAddSeat
-        ? `${seatLine}. Add a seat to invite more.`
-        : `${seatLine}. Upgrade to invite more.`
+        ? `${seatLine}. Add a seat to add more people.`
+        : `${seatLine}. Upgrade to add more people.`
       : seatLine
     : `Manage who has access to ${workspaceName}`
 
@@ -379,10 +388,19 @@ export function MembersTab({ workspaceName, currentMember }: MembersTabProps) {
         title="Members"
         description={seatDescription}
         action={
-          <Button size="sm" onClick={() => setShowInviteDialog(true)}>
-            <PlusIcon className="h-4 w-4" />
-            Invite member
-          </Button>
+          canManageMembers ? (
+            <div className="flex items-center gap-2">
+              {inviteBlocked && canAddSeat && (
+                <Button size="sm" variant="outline" onClick={() => setShowAddSeats(true)}>
+                  Add seat
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setShowAddPeople(true)}>
+                <PlusIcon className="h-4 w-4" />
+                Add people
+              </Button>
+            </div>
+          ) : undefined
         }
         contentClassName="p-0 sm:p-0"
       >
@@ -552,12 +570,16 @@ export function MembersTab({ workspaceName, currentMember }: MembersTabProps) {
         </div>
       </SettingsCard>
 
-      <InviteMemberDialog
-        open={showInviteDialog}
-        onClose={() => setShowInviteDialog(false)}
-        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['settings', 'team'] })}
-        onAddSeat={canAddSeat ? () => setShowAddSeats(true) : undefined}
-      />
+      {canManageMembers && addPeopleOpened && (
+        <Suspense fallback={null}>
+          <AddPeopleDialog
+            open={showAddPeople}
+            onOpenChange={setShowAddPeople}
+            canGrantAdmin={isCurrentUserAdmin}
+            workspaceName={workspaceName}
+          />
+        </Suspense>
+      )}
       <AddSeatsDialog open={showAddSeats} onOpenChange={setShowAddSeats} />
     </div>
   )
