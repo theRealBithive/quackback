@@ -3,8 +3,8 @@
  * <ProviderDetailPage> — one page per provider, three sections.
  *
  * Connection is a summary with Edit; Sign-in & access holds the explicit
- * access decisions; User details rests on "Uses standard profile fields" and
- * opens a compact editor under Customize. Everything the old form asserted
+ * access decisions; Profile always shows its mapping table, with Save changes
+ * only while there are edits. Everything the old form asserted
  * still has to hold underneath: the IdP family round-trips through the
  * persisted `kind`, scopes / prompt / client-auth save their normalized
  * values, the connection-test state is readable, and each section commits
@@ -281,12 +281,10 @@ const editConnection = () => fireEvent.click(screen.getByRole('button', { name: 
 const saveConnection = () => fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 const openConnectionOptions = () =>
   fireEvent.click(screen.getByRole('button', { name: /Connection options/ }))
-/** Sign-in & access and the User details editor both end in Save changes. */
-const section = (id: 'signin' | 'mapping') => within(document.getElementById(id)!)
+/** Sign-in & access and Profile both end in Save changes. */
+const section = (id: 'connection' | 'signin' | 'mapping') => within(document.getElementById(id)!)
 const saveSignIn = () =>
   fireEvent.click(section('signin').getByRole('button', { name: 'Save changes' }))
-/** User details is a sentence until Customize opens the editor. */
-const customize = () => fireEvent.click(screen.getByRole('button', { name: 'Customize' }))
 const saveUserDetails = () => {
   fireEvent.click(section('mapping').getByRole('button', { name: 'Save changes' }))
   const confirm = screen.queryByRole('alertdialog')
@@ -323,7 +321,10 @@ describe('<ProviderDetailPage> page shell', () => {
     renderPage(makeProvider({}))
     expect(screen.getByRole('heading', { name: 'Connection' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Sign-in & access' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'User details' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Profile' })).toBeInTheDocument()
+    expect(
+      screen.getByText('What Quackback takes from Acme SSO for each person.')
+    ).toBeInTheDocument()
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /Remove/ })).not.toBeInTheDocument()
   })
@@ -378,7 +379,8 @@ describe('<ProviderDetailPage> page shell', () => {
 
   it('does not offer Enable sign-in after a test on an already enabled provider', () => {
     renderPage(makeProvider({ enabled: true }))
-    fireEvent.click(screen.getByRole('button', { name: 'Test sign-in' }))
+    // Profile's preview offers a test too; this is the connection's own.
+    fireEvent.click(section('connection').getByRole('button', { name: 'Test sign-in' }))
     expect(openTestSpy.mock.calls[0][0].successAction).toBeUndefined()
   })
 })
@@ -430,17 +432,17 @@ describe('<ProviderDetailPage> connection', () => {
       })
     )
     expect(screen.getByText(/Connected as Jane Smith/)).toBeInTheDocument()
-    expect(screen.getByText('jane@acme.com')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Test again' })).toBeInTheDocument()
+    expect(section('connection').getByText('jane@acme.com')).toBeInTheDocument()
+    expect(section('connection').getByRole('button', { name: 'Test again' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument()
     // Provenance and raw claims stay reachable for troubleshooting.
-    expect(screen.getByText('View test details')).toBeInTheDocument()
+    expect(section('connection').getByText('View test details')).toBeInTheDocument()
   })
 
   it('shows "Not tested yet" when the provider has no successful test', () => {
     renderPage(makeProvider({ lastSuccessfulTestAt: null }))
     expect(screen.getByText(/Not tested yet/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Test sign-in' })).not.toBeDisabled()
+    expect(section('connection').getByRole('button', { name: 'Test sign-in' })).not.toBeDisabled()
   })
 
   it('shows the stale state when the connection changed since the last test', () => {
@@ -999,16 +1001,16 @@ describe('<ProviderDetailPage> account options', () => {
 })
 
 /**
- * User details rests on one sentence. Customize opens the editor; existing
- * custom mappings show directly.
+ * Profile always shows its table, standard or not; custom mappings are marked
+ * as the exception.
  */
-describe('<ProviderDetailPage> user details', () => {
-  it('shows the standard summary with no table for an unconfigured mapping', () => {
+describe('<ProviderDetailPage> profile', () => {
+  it('shows the table for an unconfigured mapping without a Customize step', () => {
     renderPage(makeProvider({ claimMapping: null }))
-    expect(screen.getByText('Uses standard profile fields')).toBeInTheDocument()
-    expect(screen.getByText('No role rules or custom attributes.')).toBeInTheDocument()
-    expect(screen.queryByRole('table')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument()
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(screen.queryByText('Uses standard profile fields')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument()
+    expect(section('mapping').queryByRole('button', { name: 'Save changes' })).toBeNull()
   })
 
   it('shows custom mappings directly and marks only the exception', () => {
@@ -1035,8 +1037,7 @@ describe('<ProviderDetailPage> user details', () => {
         },
       })
     )
-    // The five profile fields are still standard, but the resting view must
-    // not collapse to the one-sentence summary and hide the stored row.
+    // The five profile fields are still standard; the stored row is listed too.
     expect(screen.getByRole('table')).toBeInTheDocument()
     expect(screen.getByText('locale')).toBeInTheDocument()
     expect(screen.getByText(/not editable here/)).toBeInTheDocument()
@@ -1048,12 +1049,14 @@ describe('<ProviderDetailPage> user details', () => {
         claimMapping: { profile: { sources: ['idToken', 'userinfo', 'accessTokenJwt'] } },
       })
     )
-    expect(screen.getByTestId('compatibility-sources')).toHaveTextContent('Access-token JWT')
+    // Open by default for a non-standard list; closed, its summary names it.
+    expect(screen.getByLabelText('Access-token JWT')).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: /Compatibility/ }))
+    expect(screen.getByTestId('compatibility-section')).toHaveTextContent('Access-token JWT')
   })
 
-  it('opens the compact editor with the five profile fields and no Default badges', () => {
+  it('lists the five profile fields with no Default badges', () => {
     renderPage(makeProvider({ claimMapping: null }))
-    customize()
     for (const [label, path] of [
       ['Account ID', 'sub'],
       ['Email', 'email'],
@@ -1072,12 +1075,10 @@ describe('<ProviderDetailPage> user details', () => {
       screen.getByText('Name and avatar are set when an account is created.')
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add mapping' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument()
   })
 
   it('keeps the source controls inside Compatibility, closed for standard sources', () => {
     renderPage(makeProvider({ claimMapping: null }))
-    customize()
     expect(screen.queryByTestId('identity-sources-editor')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Compatibility/ }))
     expect(screen.getByTestId('identity-sources-editor')).toBeInTheDocument()
@@ -1090,17 +1091,13 @@ describe('<ProviderDetailPage> user details', () => {
         claimMapping: { profile: { sources: ['idToken', 'userinfo', 'accessTokenJwt'] } },
       })
     )
-    customize()
     expect(screen.getByLabelText('Access-token JWT')).toBeChecked()
   })
 
-  it('does not write anything for an untouched standard mapping', async () => {
+  it('offers nothing to save for an untouched standard mapping', () => {
     renderPage(makeProvider({ claimMapping: null }))
-    customize()
-    saveUserDetails()
-    await waitFor(() =>
-      expect(screen.getByText('Uses standard profile fields')).toBeInTheDocument()
-    )
+    expect(section('mapping').queryByRole('button', { name: 'Save changes' })).toBeNull()
+    expect(section('mapping').queryByRole('button', { name: 'Cancel' })).toBeNull()
     expect(mappingSpy).not.toHaveBeenCalled()
   })
 
@@ -1112,14 +1109,11 @@ describe('<ProviderDetailPage> user details', () => {
       claims: { roles: ['admin'] },
     }
     renderPage(makeProvider({ autoCreateUsers: true, claimMapping: null }))
-    expect(screen.getByText('Uses standard profile fields')).toBeInTheDocument()
-    customize()
     expect(screen.queryByText('Role')).not.toBeInTheDocument()
   })
 
   it('confirms an Account ID change before saving', async () => {
     renderPage(makeProvider({ claimMapping: null }))
-    customize()
     fireEvent.click(screen.getByRole('button', { name: 'Edit Account ID mapping' }))
     fireEvent.click(screen.getByRole('combobox', { name: 'Provider claim' }))
     fireEvent.change(screen.getByPlaceholderText('Search or type…'), { target: { value: 'oid' } })
@@ -1183,7 +1177,6 @@ describe('<ProviderDetailPage> claim → person-attribute mapping', () => {
   it('adds a row, picks a claim path and attribute, and saves without touching role/profile', async () => {
     state.userAttributes = PEOPLE_ATTRS
     renderPage(makeProvider({ claimMapping: null }))
-    customize()
     fireEvent.click(screen.getByRole('button', { name: 'Add mapping' }))
     await userEvent.click(screen.getByRole('combobox', { name: 'Set from this provider' }))
     await userEvent.click(screen.getByRole('option', { name: /Department/ }))
@@ -1214,7 +1207,6 @@ describe('<ProviderDetailPage> claim → person-attribute mapping', () => {
         },
       })
     )
-    customize()
     fireEvent.click(screen.getByRole('button', { name: 'Remove Department mapping' }))
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(screen.queryByText('Department')).not.toBeInTheDocument()
@@ -1239,7 +1231,6 @@ describe('<ProviderDetailPage> claim → person-attribute mapping', () => {
         },
       })
     )
-    customize()
     fireEvent.click(screen.getByRole('button', { name: 'Remove Department mapping' }))
     saveUserDetails()
     await waitFor(() => expect(mappingSpy).toHaveBeenCalled())
@@ -1255,7 +1246,6 @@ describe('<ProviderDetailPage> claim → person-attribute mapping', () => {
         },
       })
     )
-    customize()
     await userEvent.click(
       screen.getByRole('checkbox', { name: 'Overwrite attribute values that are already set' })
     )
@@ -1280,7 +1270,6 @@ describe('<ProviderDetailPage> claim → person-attribute mapping', () => {
         },
       })
     )
-    customize()
     fireEvent.click(screen.getByRole('button', { name: 'Add mapping' }))
     expect(screen.getByRole('link', { name: 'Open People settings' })).toHaveAttribute(
       'href',
@@ -1298,7 +1287,6 @@ describe('<ProviderDetailPage> claim → person-attribute mapping', () => {
       })
     )
     expect(screen.getByText('Attribute no longer exists')).toBeInTheDocument()
-    customize()
     fireEvent.click(screen.getByRole('button', { name: 'Remove cost_center mapping' }))
     saveUserDetails()
     await waitFor(() => expect(mappingSpy).toHaveBeenCalled())
@@ -1320,7 +1308,6 @@ describe('<ProviderDetailPage> claim → person-attribute mapping', () => {
         },
       })
     )
-    customize()
     expect(screen.getByText(/“Engineering”/)).toBeInTheDocument()
     expect(screen.getByText(/skipped: missing claim/)).toBeInTheDocument()
   })
@@ -1349,7 +1336,6 @@ describe('<ProviderDetailPage> claim → person-attribute mapping', () => {
         },
       })
     )
-    customize()
     expect(screen.getByText(/“From session”/)).toBeInTheDocument()
     expect(screen.queryByText(/“Engineering”/)).not.toBeInTheDocument()
   })
@@ -1364,7 +1350,6 @@ describe('<ProviderDetailPage> claim → person-attribute mapping', () => {
         },
       })
     )
-    customize()
     expect(screen.getByText(/Run a test sign-in to inspect this IdP's claims/)).toBeInTheDocument()
   })
 })

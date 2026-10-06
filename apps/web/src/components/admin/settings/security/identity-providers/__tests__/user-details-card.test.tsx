@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 /**
- * <UserDetailsCard> save coordination: the editor edits a draft, Save diffs
- * operations against the stored JSON, and the two risky edits (Account ID,
- * new admin rules) still confirm before writing.
+ * <UserDetailsCard>, titled Profile: the mapping table is always open. Edits
+ * change a draft; Cancel and Save changes appear only while the draft differs
+ * from what is stored. Save diffs operations against the stored JSON, and the
+ * two risky edits (Account ID, new admin rules) still confirm before writing.
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import type { IdentityProviderId } from '@quackback/ids'
 import type { IdentityProvider } from '@/lib/server/domains/settings/identity-providers.service'
 import { UserDetailsCard } from '../user-details-card'
@@ -106,7 +107,7 @@ function makeProvider(over: Partial<IdentityProvider> = {}): IdentityProvider {
   return {
     id: 'idp_x' as IdentityProviderId,
     registrationId: 'oidc_x',
-    label: 'Acme SSO',
+    label: 'Acme ID',
     kind: null,
     configured: true,
     discoveryUrl: 'https://idp.example/.well-known/openid-configuration',
@@ -159,19 +160,77 @@ function makeProvider(over: Partial<IdentityProvider> = {}): IdentityProvider {
   }
 }
 
+/**
+ * A stand-in for the server and the providers query: Save applies its
+ * operations (refusing a stale `expectedClaimMapping` the way the service
+ * does), and the card reads its provider from the query cache, so the refetch
+ * after Save lands as it does on the page.
+ */
+const server = {
+  provider: null as IdentityProvider | null,
+  qc: null as QueryClient | null,
+}
+
+const PROVIDERS_KEY = ['settings', 'identityProviders']
+
+async function serverSave({
+  data,
+}: {
+  data: { expectedClaimMapping: unknown; operations: unknown[] }
+}): Promise<undefined> {
+  const current = server.provider!
+  if (
+    JSON.stringify(data.expectedClaimMapping ?? null) !==
+    JSON.stringify(current.claimMapping ?? null)
+  ) {
+    throw new Error('This mapping was updated elsewhere. Reload and try again.')
+  }
+  server.provider = {
+    ...current,
+    claimMapping: applyClaimMappingEdits(
+      current.claimMapping,
+      data.operations as import('@/lib/shared/sso-claim-mapping-edit').ClaimMappingOperation[]
+    ) as IdentityProvider['claimMapping'],
+  }
+  return undefined
+}
+
+function CardFromCache({ id }: { id: string }) {
+  const { data } = useQuery({
+    queryKey: PROVIDERS_KEY,
+    queryFn: async () => [server.provider!],
+    staleTime: Infinity,
+  })
+  const provider = data?.find((p) => p.id === id)
+  return provider ? <UserDetailsCard provider={provider} /> : null
+}
+
 function renderCard(provider: IdentityProvider) {
+  server.provider = provider
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   qc.setQueryData(['admin', 'userAttributes'], [DEPARTMENT])
-  const view = render(
+  qc.setQueryData(PROVIDERS_KEY, [provider])
+  server.qc = qc
+  return render(
     <QueryClientProvider client={qc}>
-      <UserDetailsCard provider={provider} />
+      <CardFromCache id={provider.id} />
     </QueryClientProvider>
   )
-  fireEvent.click(screen.getByRole('button', { name: 'Customize' }))
-  return view
+}
+
+/** Another admin, or another card on the page, writes the stored mapping. */
+async function changeElsewhere(claimMapping: IdentityProvider['claimMapping']) {
+  server.provider = { ...server.provider!, claimMapping }
+  await act(async () => {
+    server.qc!.setQueryData(PROVIDERS_KEY, [server.provider])
+    // The query notifies its observers on a timer.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
 }
 
 const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+const saveButton = () => screen.queryByRole('button', { name: 'Save changes' })
+const cancelButton = () => screen.queryByRole('button', { name: 'Cancel' })
 const confirmSave = () =>
   fireEvent.click(
     within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Save changes' })
@@ -197,8 +256,8 @@ const lastSaved = () =>
   )
 
 beforeEach(() => {
-  mappingSpy.mockClear()
-  mappingSpy.mockResolvedValue(undefined)
+  mappingSpy.mockReset()
+  mappingSpy.mockImplementation(serverSave)
   openTest.mockClear()
   toastSpy.mockClear()
   ssoTestRef.lastSuccess = null
@@ -216,11 +275,10 @@ describe('UserDetailsCard save coordination', () => {
     renderCard(makeProvider({ claimMapping: null }))
     editAccountId()
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
-    save()
-    // No operations: the editor simply closes.
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument()
-    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // No operations, so nothing to save or cancel.
+    expect(saveButton()).not.toBeInTheDocument()
+    expect(cancelButton()).not.toBeInTheDocument()
     expect(mappingSpy).not.toHaveBeenCalled()
   })
 
@@ -373,7 +431,7 @@ describe('UserDetailsCard save coordination', () => {
     renderCard(provider)
     fireEvent.click(screen.getByRole('button', { name: /Compatibility/ }))
     expect(screen.getByTestId('identity-sources-editor')).toBeInTheDocument()
-    save()
+    expect(saveButton()).not.toBeInTheDocument()
     expect(mappingSpy).not.toHaveBeenCalled()
     expect(effectiveProfileSignature(null)).toBe(effectiveProfileSignature(provider.claimMapping))
     expect(
@@ -441,7 +499,7 @@ describe('UserDetailsCard save coordination', () => {
     await waitFor(() => expect(mappingSpy).toHaveBeenCalled())
     expect(openTest).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Edit Department mapping' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument()
+    expect(saveButton()).toBeInTheDocument()
   })
 
   it('editing the second duplicate People row updates that row', async () => {
@@ -519,17 +577,6 @@ describe('UserDetailsCard save coordination', () => {
   })
 })
 
-/** The card at rest, before Customize. */
-function renderSummary(provider: IdentityProvider) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  qc.setQueryData(['admin', 'userAttributes'], [DEPARTMENT])
-  return render(
-    <QueryClientProvider client={qc}>
-      <UserDetailsCard provider={provider} />
-    </QueryClientProvider>
-  )
-}
-
 const syncBox = () =>
   screen.getByRole('checkbox', { name: 'Update name and avatar on every sign-in' })
 
@@ -584,27 +631,17 @@ describe('UserDetailsCard profile sync', () => {
     expect(lastMapping().operations).toEqual([{ op: 'setProfileSync', syncOnSignIn: false }])
     expect(lastSaved()).toBeNull()
   })
-
-  it('the summary says name and avatar update on every sign-in only while sync is on', () => {
-    const off = renderSummary(makeProvider({ claimMapping: null }))
-    expect(screen.queryByText('Name and avatar update on every sign-in.')).not.toBeInTheDocument()
-    off.unmount()
-    renderSummary(makeProvider({ claimMapping: { profile: { syncOnSignIn: true } } }))
-    expect(screen.getByText('Name and avatar update on every sign-in.')).toBeInTheDocument()
-    expect(screen.getByText('Uses standard profile fields')).toBeInTheDocument()
-    expect(screen.queryByRole('table')).not.toBeInTheDocument()
-  })
 })
 
 describe('UserDetailsCard test sign-in column', () => {
   it('shows what each field took from the last test sign-in, once there is one', () => {
     const untested = renderCard(makeProvider({ lastTestCapture: null }))
     expect(
-      screen.queryByRole('columnheader', { name: 'In the test sign-in' })
+      screen.queryByRole('columnheader', { name: 'Last test sign-in' })
     ).not.toBeInTheDocument()
     untested.unmount()
     renderCard(makeProvider())
-    expect(screen.getByRole('columnheader', { name: 'In the test sign-in' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Last test sign-in' })).toBeInTheDocument()
     expect(screen.getAllByText('person-123').length).toBeGreaterThan(0)
     expect(screen.getByText('Not sent, initials are shown')).toBeInTheDocument()
     expect(screen.getByText('Name is used')).toBeInTheDocument()
@@ -638,5 +675,250 @@ describe('UserDetailsCard test sign-in column', () => {
     expect(lastMapping().operations).toEqual([
       { op: 'setProfileClaim', field: 'image', path: 'photo_url' },
     ])
+  })
+})
+
+describe('UserDetailsCard always open', () => {
+  it('shows the Profile table with no click and no Customize button', () => {
+    renderCard(makeProvider({ claimMapping: null }))
+    expect(screen.getByRole('heading', { name: 'Profile' })).toBeInTheDocument()
+    expect(
+      screen.getByText('What Quackback takes from Acme ID for each person.')
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'User details' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Uses standard profile fields')).not.toBeInTheDocument()
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
+      'Field',
+      'Acme ID claim',
+      'Last test sign-in',
+      'Actions',
+    ])
+    for (const label of ['Account ID', 'Email', 'Name', 'Username', 'Avatar']) {
+      expect(screen.getByRole('button', { name: `Edit ${label} mapping` })).toBeInTheDocument()
+    }
+    expect(screen.getByRole('button', { name: 'Add mapping' })).toBeInTheDocument()
+    expect(syncBox()).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Compatibility/ })).toBeInTheDocument()
+  })
+
+  it('falls back to Provider claim when the provider has no label', () => {
+    renderCard(makeProvider({ label: '' }))
+    expect(screen.getByRole('columnheader', { name: 'Provider claim' })).toBeInTheDocument()
+  })
+
+  it('shows Cancel and Save changes only once the draft differs from what is saved', async () => {
+    renderCard(makeProvider({ claimMapping: null }))
+    expect(saveButton()).not.toBeInTheDocument()
+    expect(cancelButton()).not.toBeInTheDocument()
+    await userEvent.click(syncBox())
+    expect(saveButton()).toBeInTheDocument()
+    expect(cancelButton()).toBeInTheDocument()
+    // Undoing the edit by hand makes the draft clean again.
+    await userEvent.click(syncBox())
+    expect(saveButton()).not.toBeInTheDocument()
+  })
+
+  it('Cancel reverts the draft and writes nothing', async () => {
+    renderCard(
+      makeProvider({
+        claimMapping: {
+          attributes: { map: [{ claimPath: 'dept', attributeKey: 'department' }] },
+        },
+      })
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Department mapping' }))
+    expect(screen.queryByText('dept')).not.toBeInTheDocument()
+    fireEvent.click(cancelButton()!)
+    expect(screen.getByText('dept')).toBeInTheDocument()
+    expect(saveButton()).not.toBeInTheDocument()
+    expect(cancelButton()).not.toBeInTheDocument()
+    expect(mappingSpy).not.toHaveBeenCalled()
+  })
+
+  it('Save persists the draft, keeps it showing and hides the footer', async () => {
+    renderCard(makeProvider({ claimMapping: null }))
+    await addDepartmentMapping()
+    save()
+    await waitFor(() => expect(mappingSpy).toHaveBeenCalled())
+    expect(lastSaved()).toEqual({
+      attributes: { map: [{ claimPath: 'dept', attributeKey: 'department' }] },
+    })
+    await waitFor(() => expect(saveButton()).not.toBeInTheDocument())
+    expect(cancelButton()).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit Department mapping' })).toBeInTheDocument()
+    expect(toastSpy.success).toHaveBeenCalledWith('Profile saved.')
+  })
+
+  it('a confirmation still gates Save, and the footer stays until it is accepted', async () => {
+    renderCard(makeProvider({ claimMapping: { profile: { claims: { id: 'oid' } } } }))
+    editAccountId()
+    await userEvent.click(screen.getByRole('button', { name: 'Use sub' }))
+    save()
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(/Changing the Account ID/)
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(mappingSpy).not.toHaveBeenCalled()
+    expect(saveButton()).toBeInTheDocument()
+  })
+
+  it('a stored mapping that changes under a clean draft is shown, not reverted', async () => {
+    renderCard(makeProvider({ claimMapping: null }))
+    await changeElsewhere({
+      attributes: { map: [{ claimPath: 'dept', attributeKey: 'department' }] },
+    })
+    expect(screen.getByRole('button', { name: 'Edit Department mapping' })).toBeInTheDocument()
+    expect(saveButton()).not.toBeInTheDocument()
+  })
+
+  it('keeps the notes the resting summary used to carry', () => {
+    renderCard(
+      makeProvider({
+        autoCreateUsers: false,
+        claimMapping: {
+          profile: { claims: { email: '  ' }, sources: ['idToken', 'userinfo', 'accessTokenJwt'] },
+          role: { claimPath: 'groups', rules: [{ whenContains: 'eng', role: 'member' }] },
+        },
+      })
+    )
+    expect(screen.getByText('Email mapping has no claim path')).toBeInTheDocument()
+    expect(
+      screen.getByText('Role rules are not applied while account creation is off.')
+    ).toBeInTheDocument()
+  })
+})
+
+describe('UserDetailsCard review fixes', () => {
+  it.each([
+    ['an explicit standard claim', { profile: { claims: { email: 'email' } } }],
+    ['a role section with no rules', { role: { claimPath: 'groups', rules: [] } }],
+    ['People flags with no rows', { attributes: { overrideExisting: true } }],
+  ])('is clean on load for %s', (_name, claimMapping) => {
+    renderCard(makeProvider({ claimMapping: claimMapping as IdentityProvider['claimMapping'] }))
+    expect(saveButton()).not.toBeInTheDocument()
+    expect(cancelButton()).not.toBeInTheDocument()
+  })
+
+  it('follows a section changed elsewhere that the admin did not edit', async () => {
+    renderCard(makeProvider({ claimMapping: null }))
+    await addDepartmentMapping()
+    const role = { claimPath: 'groups', rules: [{ whenContains: 'eng', role: 'member' as const }] }
+    await changeElsewhere({ role })
+    expect(screen.getByRole('button', { name: 'Edit role rules' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit Department mapping' })).toBeInTheDocument()
+    expect(screen.queryByText(/changed elsewhere/)).not.toBeInTheDocument()
+    save()
+    await waitFor(() => expect(mappingSpy).toHaveBeenCalled())
+    await waitFor(() => expect(saveButton()).not.toBeInTheDocument())
+    expect(server.provider!.claimMapping).toEqual({
+      role,
+      attributes: { map: [{ claimPath: 'dept', attributeKey: 'department' }] },
+    })
+  })
+
+  it('flags an edited section that changed elsewhere and refuses to overwrite it', async () => {
+    renderCard(makeProvider({ claimMapping: null }))
+    await addDepartmentMapping()
+    const theirs = { attributes: { map: [{ claimPath: 'cost', attributeKey: 'department' }] } }
+    await changeElsewhere(theirs)
+    expect(
+      screen.getByText("This provider's profile settings changed elsewhere. Review before saving.")
+    ).toBeInTheDocument()
+    save()
+    await waitFor(() => expect(toastSpy.error).toHaveBeenCalled())
+    expect(toastSpy.error.mock.calls[0][0]).toMatch(/Reload/)
+    expect(server.provider!.claimMapping).toEqual(theirs)
+    // Cancel takes the stored mapping and clears the notice.
+    fireEvent.click(cancelButton()!)
+    expect(screen.queryByText(/changed elsewhere/)).not.toBeInTheDocument()
+    expect(screen.getByText('cost')).toBeInTheDocument()
+  })
+
+  it('reads as saved only once the stored mapping says so', async () => {
+    // The write is accepted but the refetch still returns the old mapping.
+    mappingSpy.mockImplementationOnce(async () => undefined)
+    renderCard(makeProvider({ claimMapping: null }))
+    await userEvent.click(syncBox())
+    save()
+    await waitFor(() => expect(mappingSpy).toHaveBeenCalled())
+    await waitFor(() => expect(saveButton()).not.toBeDisabled())
+    expect(saveButton()).toBeInTheDocument()
+    expect(syncBox()).toBeChecked()
+  })
+
+  it('clears a blank stored path from the field dialog', async () => {
+    renderCard(makeProvider({ claimMapping: { profile: { claims: { email: '  ' } } } }))
+    expect(screen.getByText('Email mapping has no claim path')).toBeInTheDocument()
+    expect(saveButton()).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Email mapping' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use email' }))
+    await waitFor(() => expect(saveButton()).toBeInTheDocument())
+    save()
+    await waitFor(() => expect(mappingSpy).toHaveBeenCalled())
+    expect(lastMapping().operations).toEqual([{ op: 'resetProfileClaim', field: 'email' }])
+    await waitFor(() =>
+      expect(screen.queryByText('Email mapping has no claim path')).not.toBeInTheDocument()
+    )
+    expect(saveButton()).not.toBeInTheDocument()
+  })
+
+  it('never carries a draft from one provider to another', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    qc.setQueryData(['admin', 'userAttributes'], [DEPARTMENT])
+    const a = makeProvider({ claimMapping: null })
+    const b = makeProvider({ id: 'idp_y' as IdentityProviderId, claimMapping: null })
+    const view = render(
+      <QueryClientProvider client={qc}>
+        <UserDetailsCard provider={a} />
+      </QueryClientProvider>
+    )
+    await addDepartmentMapping()
+    expect(saveButton()).toBeInTheDocument()
+    view.rerender(
+      <QueryClientProvider client={qc}>
+        <UserDetailsCard provider={b} />
+      </QueryClientProvider>
+    )
+    expect(saveButton()).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit Department mapping' })).toBeNull()
+  })
+
+  it('Undo restores only what that removal removed', async () => {
+    renderCard(
+      makeProvider({
+        claimMapping: {
+          role: { claimPath: 'groups', rules: [{ whenContains: 'eng', role: 'member' }] },
+          attributes: { map: [{ claimPath: 'dept', attributeKey: 'department' }] },
+        },
+      })
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Remove role rules' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Department mapping' }))
+    const undoRole = (
+      toastSpy.mock.calls[0] as unknown as [string, { action: { onClick: () => void } }]
+    )[1].action.onClick
+    act(() => undoRole())
+    expect(screen.getByRole('button', { name: 'Edit role rules' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit Department mapping' })).toBeNull()
+  })
+
+  it('scrolls the table sideways on a narrow screen instead of the page', () => {
+    renderCard(makeProvider())
+    expect(screen.getByRole('table').parentElement).toHaveClass('overflow-x-auto')
+  })
+
+  it('names non-standard sources once, in the Compatibility summary', () => {
+    renderCard(
+      makeProvider({
+        claimMapping: { profile: { sources: ['idToken', 'userinfo', 'accessTokenJwt'] } },
+      })
+    )
+    expect(screen.queryByTestId('compatibility-sources')).not.toBeInTheDocument()
+    // Open by default for a non-standard list; the summary shows once closed.
+    fireEvent.click(screen.getByRole('button', { name: /Compatibility/ }))
+    expect(screen.getByTestId('compatibility-section')).toHaveTextContent(
+      'ID token → Userinfo → Access-token JWT'
+    )
   })
 })
