@@ -112,7 +112,8 @@ function AiOutcomePill({ outcome }: { outcome: AssistantInvolvementOutcome }) {
  * date set, and only after mount (the label depends on "now").
  */
 function TicketDueChip({ dueAt, resolvedAt }: { dueAt: string | null; resolvedAt: string | null }) {
-  const formatDate = useLocalDateFormatter()
+  // The title is the English sentence "Due <date>", so the date stays English.
+  const formatDate = useLocalDateFormatter('en-US')
   const [now, setNow] = useState<Date | null>(null)
   useEffect(() => {
     setNow(new Date())

@@ -88,9 +88,13 @@ function MessageTime({ iso }: { iso: string }) {
   return <span>{formatDate(iso, TIME_LABEL)}</span>
 }
 
-/** The "(edited)" mark, titled with the time of the edit. */
+/**
+ * The "(edited)" mark, titled with the time of the edit. The title is an
+ * English sentence, so its time is English too until the sentence is
+ * translated: a sentence never mixes languages.
+ */
 function EditedAt({ iso }: { iso: string }) {
-  const formatDate = useLocalDateFormatter()
+  const formatDate = useLocalDateFormatter('en-US')
   return <EditedMark title={`Edited ${formatDate(iso, TIME_LABEL)}`} />
 }
 

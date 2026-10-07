@@ -121,3 +121,35 @@ describe('InboxDetailPanel ticket date field', () => {
     expect(row.textContent).toContain('Oct 1, 2026')
   })
 })
+
+// Batch L contract, T4: A date inside copy of a fixed language (an English admin sentence) stays in that language, so a sentence never mixes languages.
+describe('InboxDetailPanel due chip', () => {
+  it('keeps the date in its English "Due" title English on a German page (T4)', async () => {
+    setRuntimeLocale('de-DE', 'Europe/Berlin')
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    client.setQueryData(ticketKeys.types(), [{ id: TYPE_ID, fields: [] }])
+    const dueAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+    render(
+      <IntlProvider locale="de" defaultLocale="en" onError={() => {}}>
+        <QueryClientProvider client={client}>
+          <InboxDetailPanel
+            item={{ kind: 'ticket', id: ticket.id }}
+            ticket={{ ...ticket, dueAt }}
+            onChanged={() => {}}
+            onSelectItem={() => {}}
+            onTrackAsFeedback={() => {}}
+            onCreateTicket={() => {}}
+            onInsertFromCopilot={() => {}}
+          />
+        </QueryClientProvider>
+      </IntlProvider>
+    )
+
+    const chip = await screen.findByTitle(/^Due /)
+    const title = chip.getAttribute('title')!
+    const english = new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(dueAt))
+    const german = new Intl.DateTimeFormat('de-DE', { month: 'short' }).format(new Date(dueAt))
+    expect(title).toContain(english)
+    if (english !== german) expect(title).not.toContain(german)
+  })
+})
