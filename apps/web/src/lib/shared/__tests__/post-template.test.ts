@@ -262,6 +262,21 @@ describe('whether a board switch may replace the description', () => {
     expect(mayReplaceDescription(emphasised, template)).toBe(false)
   })
 
+  it('treats swapping one mark for another as the author changing the description (V5)', () => {
+    function stepsMarked(markType: string): TiptapContent {
+      return {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: 'Steps', marks: [{ type: markType }] }],
+          },
+        ],
+      }
+    }
+    expect(mayReplaceDescription(stepsMarked('italic'), stepsMarked('bold'))).toBe(false)
+  })
+
   it('reads marks regardless of their order (V5)', () => {
     const boldItalic: TiptapContent = {
       type: 'doc',
