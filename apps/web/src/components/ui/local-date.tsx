@@ -13,7 +13,7 @@ import { parseCalendarDate } from '@/lib/shared/utils/date'
  * in UTC with a locale both sides know: the locale of the surrounding
  * IntlProvider, which the server resolves and sends with the document, or a
  * fixed one outside a provider. Once hydrated, the text switches to the
- * viewer's time zone and stays in the app's locale: the locale is decided once,
+ * viewer's time zone and stays in that locale: the locale is decided once,
  * by the request bootstrap, and never re-read from the browser (fork: upstream
  * also switches to the browser's regional form of the app's language, which
  * would be a second place deciding a locale). A component that mounts after
@@ -119,15 +119,17 @@ function useHydrated(): boolean {
 /**
  * The date formatter for this render: the first-render format until hydrated,
  * then the viewer's zone. Inside an IntlProvider both are in the app's locale;
- * with a `locale`, both use exactly it and only the zone switches.
+ * with a `locale`, both use exactly it and only the zone switches. Outside a
+ * provider both stay in the first render's English, because the browser's
+ * runtime locale would be a second place deciding the language.
  */
 export function useLocalDateFormatter(locale?: string): LocalDateFormatter {
   const hydrated = useHydrated()
   const appLocale = useContext(IntlContext)?.locale
   return useMemo<LocalDateFormatter>(() => {
     const base = hydrated ? formatViewerDate : formatFirstRenderDate
-    const fixed = locale ?? appLocale
-    return fixed ? (date, options) => base(date, options, fixed) : base
+    const fixed = locale ?? appLocale ?? FIRST_RENDER_LOCALE
+    return (date, options) => base(date, options, fixed)
   }, [hydrated, locale, appLocale])
 }
 
