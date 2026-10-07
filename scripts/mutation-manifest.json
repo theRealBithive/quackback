@@ -67,8 +67,44 @@
       ]
     },
     {
-      "file": "apps/web/src/lib/server/auth/session-scope.ts",
-      "suites": ["apps/web/src/lib/server/auth/__tests__/session-scope-on-create.test.ts"]
+      "file": "apps/web/src/lib/server/auth/session-audience.ts",
+      "suites": [
+        "apps/web/src/lib/server/auth/__tests__/session-scope-on-create.test.ts",
+        "apps/web/src/lib/server/auth/__tests__/session-audience.test.ts",
+        "apps/web/src/lib/server/auth/__tests__/session-audience-heal.db.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/src/lib/server/auth/client-ip.ts",
+      "suites": [
+        "apps/web/src/lib/server/auth/__tests__/client-ip.test.ts",
+        "apps/web/src/lib/server/auth/__tests__/client-ip-wiring.test.ts",
+        "apps/web/src/lib/server/functions/__tests__/anon-vote-client-ip.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/src/lib/server/auth/http-disabled-paths.ts",
+      "suites": ["apps/web/src/lib/server/auth/__tests__/http-disabled-paths.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/auth/sso-managed-email.ts",
+      "suites": ["apps/web/src/lib/server/auth/__tests__/sso-managed-email.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/runtime-error-log.ts",
+      "suites": ["apps/web/src/lib/server/__tests__/runtime-error-log.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/unsubscribe-token.ts",
+      "suites": ["apps/web/src/lib/shared/__tests__/unsubscribe-token.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/one-click-unsubscribe.ts",
+      "suites": ["apps/web/src/lib/server/functions/__tests__/one-click-unsubscribe.test.ts"]
+    },
+    {
+      "file": "packages/email/src/list-unsubscribe.ts",
+      "suites": ["packages/email/src/__tests__/list-unsubscribe.test.ts"]
     },
     {
       "file": "apps/web/src/lib/server/realtime/stream-token.ts",
