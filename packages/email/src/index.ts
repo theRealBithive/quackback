@@ -22,6 +22,7 @@ import { Resend } from 'resend'
 import { createLogger } from '@quackback/logger'
 import { isSyntheticAnonEmail } from './anon'
 import { applyDisplayName, isSesEmailConfigured, sendViaSes } from './ses'
+import { listUnsubscribeHeaders } from './list-unsubscribe'
 // Capability-bearing senders declare `to: SecureRecipient` so a contact address
 // cannot be passed to one. See ./recipient for why the classes are shaped this
 // way, and why the guarantee belongs here rather than at the call sites.
@@ -850,6 +851,7 @@ export async function sendStatusChangeEmail(params: SendStatusChangeParams): Pro
       preferencesUrl,
       logoUrl,
     }),
+    extraHeaders: listUnsubscribeHeaders(unsubscribeUrl),
     emailType: 'StatusChangeEmail',
     preview: { postUrl },
   })
@@ -900,6 +902,7 @@ export async function sendNewCommentEmail(params: SendNewCommentParams): Promise
       preferencesUrl,
       logoUrl,
     }),
+    extraHeaders: listUnsubscribeHeaders(unsubscribeUrl),
     emailType: 'NewCommentEmail',
     preview: { postUrl },
   })
@@ -1337,6 +1340,7 @@ export async function sendPostMentionEmail(args: SendPostMentionEmailArgs): Prom
       preferencesUrl,
       logoUrl,
     }),
+    extraHeaders: listUnsubscribeHeaders(unsubscribeUrl),
     emailType: 'PostMentionEmail',
     preview: { postUrl },
   })
@@ -1453,6 +1457,7 @@ export async function sendChangelogPublishedEmail(
       logoUrl,
     }),
     from,
+    extraHeaders: listUnsubscribeHeaders(unsubscribeUrl),
     emailType: 'ChangelogPublishedEmail',
     preview: { changelogUrl },
   })
@@ -1502,6 +1507,7 @@ export async function sendFeedbackLinkedEmail(
       attributedByName,
       logoUrl,
     }),
+    extraHeaders: listUnsubscribeHeaders(unsubscribeUrl),
     emailType: 'FeedbackLinkedEmail',
     preview: { postUrl },
   })
@@ -1558,6 +1564,7 @@ export async function sendStatusIncidentPublishedEmail(
       preferencesUrl,
       logoUrl,
     }),
+    extraHeaders: listUnsubscribeHeaders(unsubscribeUrl),
     emailType: 'StatusIncidentPublishedEmail',
     preview: { incidentUrl },
   })
@@ -1616,6 +1623,7 @@ export async function sendStatusMaintenanceScheduledEmail(
       preferencesUrl,
       logoUrl,
     }),
+    extraHeaders: listUnsubscribeHeaders(unsubscribeUrl),
     emailType: 'StatusMaintenanceScheduledEmail',
     preview: { incidentUrl },
   })

@@ -1,4 +1,8 @@
-import { loadPortalMessages, type SupportedLocale } from '@/lib/shared/i18n'
+import {
+  loadPortalMessages,
+  loadUnsubscribeMessages,
+  type SupportedLocale,
+} from '@/lib/shared/i18n'
 
 /**
  * Load the portal's message catalogue for a locale the caller already knows.
@@ -22,4 +26,15 @@ export async function loadPortalIntl(locale: SupportedLocale): Promise<{
   messages: Record<string, string>
 }> {
   return { locale, messages: await loadPortalMessages(locale) }
+}
+
+/**
+ * {@link loadPortalIntl} for the standalone /unsubscribe page, which renders
+ * only its own `unsubscribe.` strings and so seeds only those.
+ */
+export async function loadUnsubscribeIntl(locale: SupportedLocale): Promise<{
+  locale: SupportedLocale
+  messages: Record<string, string>
+}> {
+  return { locale, messages: await loadUnsubscribeMessages(locale) }
 }

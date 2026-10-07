@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
-import { sendInvitationEmail, sendRawEmail } from '../index'
+import { sendChangelogPublishedEmail, sendInvitationEmail, sendRawEmail } from '../index'
 import { sealedTo, sendingAs } from './brands'
 import {
   clearMailbox,
@@ -92,6 +92,23 @@ describe.skipIf(!mailpitAvailable)('email delivery (real SMTP via mailpit)', () 
     )
     expect(headers['In-Reply-To']?.[0]).toBe(`<${parentId}>`)
     expect(headers['References']?.[0]).toBe(`<${rootId}> <${parentId}>`)
+  })
+
+  it('delivers RFC 8058 one-click unsubscribe headers on a changelog email', async () => {
+    const result = await sendChangelogPublishedEmail({
+      to: 'subscriber@example.test',
+      changelogTitle: 'May release',
+      changelogUrl: 'https://acme.test/changelog/1',
+      contentPreview: 'New things',
+      workspaceName: 'Acme',
+      unsubscribeUrl: 'https://acme.test/unsubscribe?token=tok-smtp',
+    })
+    expect(result.sent).toBe(true)
+
+    const [summary] = await waitForMessages(1)
+    const headers = await getHeaders(summary.ID)
+    expect(headers['List-Unsubscribe']).toEqual(['<https://acme.test/unsubscribe?token=tok-smtp>'])
+    expect(headers['List-Unsubscribe-Post']).toEqual(['List-Unsubscribe=One-Click'])
   })
 
   it('refuses to deliver to a synthetic anonymous address', async () => {
