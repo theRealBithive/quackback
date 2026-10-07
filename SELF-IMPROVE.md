@@ -2289,6 +2289,37 @@ to the smallest of the three sets (asserted in
 named constant per surface would make the difference visible instead of buried
 in three JSX literals.
 
+## 1x — A manual walkthrough in the dev server has no recipe, and every step of it fails quietly
+
+Driving the running app with Playwright for a pre-merge check cost about ten
+extra turns, and none of the failures named itself:
+
+- `bun --env-file=.env --cwd apps/web vite dev` resolves `--env-file` after the
+  `--cwd`, so a relative path loads nothing. Pass `$PWD/.env`.
+- Signing in through the UI is slow to script. A POST to
+  `/api/auth/sign-in/email` with an `Origin` header, saved as Playwright
+  `storageState`, works for every later script.
+- Typing into the page before hydration does nothing and raises no error. Wait
+  for `networkidle` and about two more seconds.
+- The board pickers in the portal, widget and admin dialog are Radix `Select`s.
+  `locator('select')` matches nothing; use `getByRole('combobox')` and
+  `getByRole('option', { name })`.
+- `pkill -f vite` matches the shell that runs it and kills it. Stop the dev
+  server through the background-task handle instead.
+
+A checked-in Playwright login helper plus a short README section would make
+this a two-minute step.
+
+## 1x — A newly published advisory turns `check` red on main and on every open pull request
+
+The audit gate grades the current advisory database, not the diff. Three
+advisories published against unchanged dependencies made `check`, a required
+status check, fail on `main` and on an unrelated feature PR at the same time.
+The way through was a separate dependency PR first, then merging the new
+`main` into the feature branch and waiting for a second full CI run. When
+`check` fails, look at the audit step before reading anything else, and fix it
+on its own branch from `main`.
+
 ## Resolved
 
 Entries that were actually fixed, with what fixed them.
