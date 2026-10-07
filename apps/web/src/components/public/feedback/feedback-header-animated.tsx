@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { PencilIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
+import { PORTAL_POST_EDITOR_FEATURES } from '@/components/public/feedback/portal-post-editor-features'
 import { usePortalImageUpload } from '@/lib/client/hooks/use-image-upload'
 import { useCreatePublicPost } from '@/lib/client/mutations/portal-posts'
 import { useAuthPopover } from '@/components/auth/auth-popover-context'
@@ -395,7 +396,7 @@ export function FeedbackHeaderAnimated({
                 minHeight="150px"
                 borderless
                 toolbarPosition="bottom"
-                features={{ images: canUploadImages, quackbackEmbeds: true }}
+                features={{ ...PORTAL_POST_EDITOR_FEATURES, images: canUploadImages }}
                 onImageUpload={canUploadImages ? uploadImage : undefined}
               />
             </motion.div>

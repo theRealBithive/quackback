@@ -21,13 +21,14 @@ import { renderWithIntl } from '@/test/render-with-intl'
 import type { JSONContent } from '@tiptap/react'
 import { RichTextEditor, type EditorFeatures } from '@/components/ui/rich-text-editor'
 import { POST_TEMPLATE_EDITOR_FEATURES } from '../post-template-editor'
+import { PORTAL_POST_EDITOR_FEATURES } from '@/components/public/feedback/portal-post-editor-features'
 import { usePostTemplatePrefill } from '@/lib/client/hooks/use-post-template-prefill'
 import type { TiptapContent } from '@/lib/shared/db-types'
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
-/** The feature sets the three post forms pass today. */
-const PORTAL_FEATURES: EditorFeatures = { images: false, quackbackEmbeds: true }
+/** The feature sets the three post forms pass (the portal's, for a visitor who may not upload). */
+const PORTAL_FEATURES: EditorFeatures = { ...PORTAL_POST_EDITOR_FEATURES, images: false }
 const WIDGET_AND_ADMIN_FEATURES: EditorFeatures = {
   headings: true,
   codeBlocks: true,
@@ -42,10 +43,15 @@ const WIDGET_AND_ADMIN_FEATURES: EditorFeatures = {
   slashMenu: true,
 }
 
-/** Everything the template editor offers: marks, both list kinds, a link. */
+/** Everything the template editor offers: a heading, marks, both list kinds, a link. */
 const BUG_TEMPLATE: TiptapContent = {
   type: 'doc',
   content: [
+    {
+      type: 'heading',
+      attrs: { level: 3 },
+      content: [{ type: 'text', text: 'Bug report' }],
+    },
     {
       type: 'paragraph',
       content: [{ type: 'text', text: 'Steps to reproduce', marks: [{ type: 'bold' }] }],
@@ -122,6 +128,7 @@ function surfaceText(): string {
 }
 
 const TEMPLATE_WORDS = [
+  'Bug report',
   'Steps to reproduce',
   'Open',
   'Click',
