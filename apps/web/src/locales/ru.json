@@ -1426,5 +1426,10 @@
   "onboarding.account.setupComplete.title": "Это рабочее пространство уже настроено",
   "onboarding.account.setupComplete.signIn": "Войдите с учётной записью администратора.",
   "onboarding.noAccess.alreadySetUpTitle": "Это рабочее пространство уже настроено",
-  "onboarding.noAccess.alreadySetUpBody": "Войдите с учётной записью администратора, чтобы управлять им."
+  "onboarding.noAccess.alreadySetUpBody": "Войдите с учётной записью администратора, чтобы управлять им.",
+  "ui.editor.slash.video.title": "Видео",
+  "ui.editor.slash.video.description": "Загрузить видео в формате MP4, WebM, MOV или M4V",
+  "ui.editor.video.uploadFailed": "Не удалось загрузить видео. Попробуйте ещё раз.",
+  "ui.editor.action.insertVideo": "Вставить видео",
+  "ui.editor.video.remove": "Удалить видео"
 }

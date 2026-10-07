@@ -231,7 +231,7 @@ describe('buildExtensions', () => {
   })
 
   it('always includes the native video node for saved-content compatibility', () => {
-    const names = buildExtensions({ videos: false }, { placeholder: '' }).map(
+    const names = buildExtensions({ videos: false }, { placeholder: '', intl: englishIntl() }).map(
       (extension) => (extension as { name: string }).name
     )
     expect(names).toContain('video')

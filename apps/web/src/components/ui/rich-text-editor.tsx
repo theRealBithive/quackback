@@ -2893,11 +2893,11 @@ function MenuBar({
       } catch (error) {
         console.error('Failed to upload video:', error)
         const { toast } = await import('sonner')
-        toast.error("Couldn't upload video. Try again.")
+        toast.error(videoUploadFailed(intl))
       }
     }
     input.click()
-  }, [editor, onVideoUpload])
+  }, [editor, onVideoUpload, intl])
 
   const canUndo = canUndoRedo.undo
   const canRedo = canUndoRedo.redo
@@ -3052,7 +3052,10 @@ function MenuBar({
           icon={<VideoIcon className="size-4" />}
           onClick={insertVideo}
           disabled={disabled}
-          title="Insert Video"
+          title={intl.formatMessage({
+            id: 'ui.editor.action.insertVideo',
+            defaultMessage: 'Insert Video',
+          })}
         />
       )}
 

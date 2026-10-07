@@ -1,11 +1,13 @@
 import { Node } from '@tiptap/core'
 import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react'
+import { useIntl } from 'react-intl'
 import { XMarkIcon } from '@heroicons/react/24/solid'
 import { cn } from '@/lib/shared/utils'
 
 function UploadedVideoNodeView({ node, selected, deleteNode }: ReactNodeViewProps) {
   const src = node.attrs.src as string | null
   const title = (node.attrs.title as string | null) ?? ''
+  const intl = useIntl()
   return (
     <NodeViewWrapper className="group relative my-4" contentEditable={false}>
       {src ? (
@@ -20,7 +22,10 @@ function UploadedVideoNodeView({ node, selected, deleteNode }: ReactNodeViewProp
       ) : null}
       <button
         type="button"
-        aria-label="Remove video"
+        aria-label={intl.formatMessage({
+          id: 'ui.editor.video.remove',
+          defaultMessage: 'Remove video',
+        })}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => deleteNode()}
         className={cn(

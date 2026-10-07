@@ -1426,5 +1426,10 @@
   "onboarding.account.setupComplete.title": "تم إعداد مساحة العمل هذه بالفعل",
   "onboarding.account.setupComplete.signIn": "سجّل الدخول بحساب مسؤول.",
   "onboarding.noAccess.alreadySetUpTitle": "تم إعداد مساحة العمل هذه بالفعل",
-  "onboarding.noAccess.alreadySetUpBody": "سجّل الدخول بحساب مسؤول لإدارتها."
+  "onboarding.noAccess.alreadySetUpBody": "سجّل الدخول بحساب مسؤول لإدارتها.",
+  "ui.editor.slash.video.title": "فيديو",
+  "ui.editor.slash.video.description": "ارفع فيديو بصيغة MP4 أو WebM أو MOV أو M4V",
+  "ui.editor.video.uploadFailed": "تعذّر رفع الفيديو. حاول مرة أخرى.",
+  "ui.editor.action.insertVideo": "إدراج فيديو",
+  "ui.editor.video.remove": "إزالة الفيديو"
 }

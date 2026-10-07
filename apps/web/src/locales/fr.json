@@ -1426,5 +1426,10 @@
   "onboarding.account.setupComplete.title": "Cet espace de travail est déjà configuré",
   "onboarding.account.setupComplete.signIn": "Connectez-vous avec un compte administrateur.",
   "onboarding.noAccess.alreadySetUpTitle": "Cet espace de travail est déjà configuré",
-  "onboarding.noAccess.alreadySetUpBody": "Connectez-vous avec un compte administrateur pour le gérer."
+  "onboarding.noAccess.alreadySetUpBody": "Connectez-vous avec un compte administrateur pour le gérer.",
+  "ui.editor.slash.video.title": "Vidéo",
+  "ui.editor.slash.video.description": "Importer une vidéo MP4, WebM, MOV ou M4V",
+  "ui.editor.video.uploadFailed": "Impossible d'importer la vidéo. Réessayez.",
+  "ui.editor.action.insertVideo": "Insérer une vidéo",
+  "ui.editor.video.remove": "Supprimer la vidéo"
 }
