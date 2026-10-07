@@ -196,7 +196,6 @@ async function runTicketReactionJobs(ticketId: TicketId): Promise<number> {
       maxAttempts: 5,
       leaseToken: 'test',
       lockedUntil: new Date(),
-      runAt: new Date(),
     })
   }
   return jobs.length

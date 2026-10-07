@@ -250,7 +250,6 @@ async function reactionJobFor(conversationId: ConversationId): Promise<ClaimedJo
     maxAttempts: row.max_attempts,
     leaseToken: 'test',
     lockedUntil: new Date(),
-    runAt: new Date(),
   }
 }
 

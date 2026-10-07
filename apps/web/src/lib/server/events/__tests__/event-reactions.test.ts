@@ -144,7 +144,6 @@ function drain(eventId: string, resolve: () => Promise<[]> = async () => []) {
     maxAttempts: 10,
     leaseToken: 'test',
     lockedUntil: new Date(),
-    runAt: new Date(),
   }
   return runEventDispatch(job, { resolve })
 }
@@ -517,7 +516,6 @@ describe.skipIf(!fixture.available)('event reactions (real DB, rolled back)', ()
         maxAttempts: 3,
         leaseToken: 'test',
         lockedUntil: new Date(),
-        runAt: new Date(),
       })
     ).resolves.toBeUndefined()
     expectReacted({}, '')
