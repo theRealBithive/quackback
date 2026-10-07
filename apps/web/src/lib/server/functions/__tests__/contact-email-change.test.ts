@@ -19,6 +19,25 @@
  * mocked `.handler(fn)` returns the handler itself so each function is reached
  * by name. Indexing a positional array of handlers breaks the moment a function
  * is added above another, which has caught this repo before.
+ *
+ * Contract (upstream #689), confirmed:
+ *
+ * E1 When an address's domain requires SSO, the person cannot sign in by email link or code either. The refusal depends only on the domain, never on whether an account exists.
+ * E2 A person changes their email address only through the confirmed flow. The library's direct change endpoints cannot be reached over HTTP.
+ * E3 An address at a domain that requires SSO cannot be taken by the person's own change or by an admin's edit. Renaming someone whose address stays the same still works.
+ * E4 When an admin enters a new address, it is not treated as verified. An unchanged address keeps its verification.
+ * E5 When a domain's enforcing provider signs someone in with an address at that domain, that sign-in verifies the account it lands on, so the account links instead of staying stuck. Whoever held an unlinked account before loses their sessions.
+ * E6 An admin's edit that crosses with a concurrent change to the same address is refused, not silently overwritten.
+ *
+ * Contract (upstream #662), confirmed, the one item held in this file:
+ *
+ * C7 Server-side calls into the sign-in library that pass request headers along get the same treatment as requests that reach it directly.
+ *
+ * Held here: E2 (the confirmed flow) and E3 (the person's own change), and C7.
+ * Tests without a number predate both pull requests. Tests marked "beyond E3"
+ * refuse moving OFF a managed address, which E3 does not say; tests marked
+ * "conflicts with E3" let an account on the domain's provider take an address
+ * there, which reads against E3's "cannot be taken". Both are open questions.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -158,7 +177,7 @@ beforeEach(() => {
 })
 
 describe('requestEmailChangeFn', () => {
-  it('asks Better Auth for a CHANGE code, not a plain verification code', async () => {
+  it('asks Better Auth for a CHANGE code, not a plain verification code (E2)', async () => {
     // The bug this pins: a plain verification code is keyed on the new address
     // alone, is never sent because no account holds that address yet, and can
     // never be found by step 2.
@@ -172,7 +191,7 @@ describe('requestEmailChangeFn', () => {
     expect(hoisted.sendVerificationOTP).not.toHaveBeenCalled()
   })
 
-  it('skips the current-address code when the account has no reachable address', async () => {
+  it('skips the current-address code when the account has no reachable address (E2)', async () => {
     accountIs(PLACEHOLDER)
 
     await call(requestEmailChangeFn, { email: REAL })
@@ -181,7 +200,7 @@ describe('requestEmailChangeFn', () => {
     expect(hoisted.requestEmailChangeEmailOTP).toHaveBeenCalled()
   })
 
-  it('refuses to send anywhere when a reachable account omits the current code', async () => {
+  it('refuses to send anywhere when a reachable account omits the current code (E2)', async () => {
     accountIs(REAL)
 
     await expect(call(requestEmailChangeFn, { email: 'new@example.com' })).rejects.toThrow(
@@ -190,7 +209,7 @@ describe('requestEmailChangeFn', () => {
     expect(hoisted.requestEmailChangeEmailOTP).not.toHaveBeenCalled()
   })
 
-  it('refuses to send anywhere when the current code is wrong', async () => {
+  it('refuses to send anywhere when the current code is wrong (E2)', async () => {
     accountIs(REAL)
     hoisted.checkVerificationOTP.mockRejectedValueOnce(new Error('INVALID_OTP'))
 
@@ -200,7 +219,7 @@ describe('requestEmailChangeFn', () => {
     expect(hoisted.requestEmailChangeEmailOTP).not.toHaveBeenCalled()
   })
 
-  it('spends the current-address code, so it cannot be replayed', async () => {
+  it('spends the current-address code, so it cannot be replayed (E2)', async () => {
     accountIs(REAL)
 
     await call(requestEmailChangeFn, { email: 'new@example.com', currentCode: '123456' })
@@ -243,7 +262,7 @@ describe('sendCurrentAddressCodeFn', () => {
   // The routed endpoint runs the sign-in hook chain, whose email-sign-in toggle
   // and Require SSO rule would refuse this code for reasons that are not this
   // flow's. The path-less mint skips that chain (otp-endpoint-hooks.test.ts).
-  it('mints the code without the sign-in hooks and mails it', async () => {
+  it('mints the code without the sign-in hooks and mails it (E2)', async () => {
     accountIs(REAL)
 
     await call(sendCurrentAddressCodeFn)
@@ -280,7 +299,7 @@ describe('confirmEmailChangeFn', () => {
     expect(hoisted.changeEmailEmailOTP).not.toHaveBeenCalled()
   })
 
-  it('writes the address when the code checks out', async () => {
+  it('writes the address when the code checks out (E2)', async () => {
     confirmingFrom('old@example.com')
 
     const res = await call<{ ok: boolean; email?: string }>(confirmEmailChangeFn, {
@@ -328,12 +347,12 @@ describe('confirmEmailChangeFn', () => {
   })
 })
 
-describe('headers forwarded to Better Auth', () => {
+describe('headers forwarded to Better Auth (C7)', () => {
   /** The client-IP header each Better Auth call received. */
   const forwardedIps = (fn: ReturnType<typeof vi.fn>) =>
     fn.mock.calls.map(([arg]) => (arg as { headers: Headers }).headers.get('x-quackback-client-ip'))
 
-  it('carry the resolved client address, never the client-supplied one', async () => {
+  it('carry the resolved client address, never the client-supplied one (C7)', async () => {
     accountIs(REAL)
     await call(sendCurrentAddressCodeFn)
 
@@ -370,7 +389,7 @@ describe('a domain that requires SSO', () => {
     ]
   })
 
-  it('sends no current-address code for a managed address', async () => {
+  it('sends no current-address code for a managed address (no number: beyond E3)', async () => {
     accountIs(SSO)
 
     await expect(call(sendCurrentAddressCodeFn)).rejects.toThrow(/single sign-on/i)
@@ -378,7 +397,7 @@ describe('a domain that requires SSO', () => {
     expect(hoisted.sendVerifyAddressCode).not.toHaveBeenCalled()
   })
 
-  it('refuses to move off a managed address, even with a good current code', async () => {
+  it('refuses to move off a managed address, even with a good current code (no number: beyond E3)', async () => {
     accountIs(SSO)
 
     await expect(
@@ -387,7 +406,7 @@ describe('a domain that requires SSO', () => {
     expect(hoisted.requestEmailChangeEmailOTP).not.toHaveBeenCalled()
   })
 
-  it('refuses to move onto a managed domain', async () => {
+  it('refuses to move onto a managed domain (E3)', async () => {
     accountIs(PLACEHOLDER)
 
     await expect(call(requestEmailChangeFn, { email: 'new@acme.com' })).rejects.toThrow(
@@ -396,7 +415,7 @@ describe('a domain that requires SSO', () => {
     expect(hoisted.requestEmailChangeEmailOTP).not.toHaveBeenCalled()
   })
 
-  it('refuses to write a managed address at confirm time', async () => {
+  it('refuses to write a managed address at confirm time (E3)', async () => {
     confirmingFrom(PLACEHOLDER)
 
     const res = await call<{ ok: boolean }>(confirmEmailChangeFn, {
@@ -411,7 +430,7 @@ describe('a domain that requires SSO', () => {
   // Someone whose provider released no email signs in through the domain's own
   // provider; the rule is there to keep them on it, not to stop them naming
   // their address there.
-  it('lets an account that signs in through the owning provider add an address there', async () => {
+  it('lets an account that signs in through the owning provider add an address there (no number: conflicts with E3)', async () => {
     accountIs(PLACEHOLDER)
     hoisted.accountFindFirst.mockResolvedValue({ id: 'acc_1' })
 
@@ -422,7 +441,7 @@ describe('a domain that requires SSO', () => {
 
   // The SSO answer is checked before the holder lookup, so it cannot tell a
   // caller which addresses at the domain hold accounts.
-  it('answers the same at confirm whether or not the managed address is taken', async () => {
+  it('answers the same at confirm whether or not the managed address is taken (E3)', async () => {
     confirmingFrom(PLACEHOLDER, { id: 'usr_other' })
     const taken = await call<{ ok: boolean; reason?: string }>(confirmEmailChangeFn, {
       email: 'ceo@acme.com',
@@ -438,7 +457,7 @@ describe('a domain that requires SSO', () => {
     expect(free).toEqual(taken)
   })
 
-  it('lets an account on the owning provider correct its address within the domain', async () => {
+  it('lets an account on the owning provider correct its address within the domain (no number: conflicts with E3)', async () => {
     accountIs(SSO)
     hoisted.accountFindFirst.mockResolvedValue({ id: 'acc_1' })
 
@@ -447,7 +466,7 @@ describe('a domain that requires SSO', () => {
     expect(hoisted.requestEmailChangeEmailOTP).toHaveBeenCalled()
   })
 
-  it('still keeps that account from moving off the domain', async () => {
+  it('still keeps that account from moving off the domain (no number: beyond E3)', async () => {
     accountIs(SSO)
     hoisted.accountFindFirst.mockResolvedValue({ id: 'acc_1' })
 
@@ -456,7 +475,7 @@ describe('a domain that requires SSO', () => {
     ).rejects.toThrow(/single sign-on/i)
   })
 
-  it('sends a current-address code to a managed address on the owning provider', async () => {
+  it('sends a current-address code to a managed address on the owning provider (no number: conflicts with E3)', async () => {
     accountIs(SSO)
     hoisted.accountFindFirst.mockResolvedValue({ id: 'acc_1' })
 
@@ -465,7 +484,7 @@ describe('a domain that requires SSO', () => {
     expect(hoisted.sendVerifyAddressCode).toHaveBeenCalledWith(SSO, '654321')
   })
 
-  it('still moves between addresses at other domains', async () => {
+  it('still moves between addresses at other domains (E3)', async () => {
     accountIs(REAL)
 
     await call(requestEmailChangeFn, { email: 'pat@example.org', currentCode: '123456' })

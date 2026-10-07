@@ -4,6 +4,19 @@
  * Every refusal is paired with the case that does vouch, so a test that sees
  * nothing change is evidence the rule held, not that the seam carried nothing.
  * Runs inside the db-test-fixture rollback transaction.
+ *
+ * Contract (upstream #689), confirmed:
+ *
+ * E1 When an address's domain requires SSO, the person cannot sign in by email link or code either. The refusal depends only on the domain, never on whether an account exists.
+ * E2 A person changes their email address only through the confirmed flow. The library's direct change endpoints cannot be reached over HTTP.
+ * E3 An address at a domain that requires SSO cannot be taken by the person's own change or by an admin's edit. Renaming someone whose address stays the same still works.
+ * E4 When an admin enters a new address, it is not treated as verified. An unchanged address keeps its verification.
+ * E5 When a domain's enforcing provider signs someone in with an address at that domain, that sign-in verifies the account it lands on, so the account links instead of staying stuck. Whoever held an unlinked account before loses their sessions.
+ * E6 An admin's edit that crosses with a concurrent change to the same address is refused, not silently overwritten.
+ *
+ * Only E5 is held here. That Better Auth then links the verified account is
+ * the library's behaviour and is not re-proved; the hand-off from a sign-in
+ * to this function is `email-change-wiring.test.ts`.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
 import { createId, type UserId } from '@quackback/ids'
@@ -79,7 +92,7 @@ describe.skipIf(!fixture.available)('vouchForEnforcedAddress', () => {
   afterEach(() => fixture.rollback())
   afterAll(() => fixture.close())
 
-  it('verifies an unverified account at its enforced domain and ends its sessions', async () => {
+  it('verifies an unverified account at its enforced domain and ends its sessions (E5)', async () => {
     const email = `sam-${suffix()}@acme.com`
     const userId = await seed(email)
 
@@ -96,7 +109,7 @@ describe.skipIf(!fixture.available)('vouchForEnforcedAddress', () => {
     )
   })
 
-  it('does nothing for a provider that does not enforce the domain', async () => {
+  it('does nothing for a provider that does not enforce the domain (E5)', async () => {
     const email = `sam-${suffix()}@acme.com`
     const userId = await seed(email)
 
@@ -110,7 +123,7 @@ describe.skipIf(!fixture.available)('vouchForEnforcedAddress', () => {
     expect(await state(userId)).toEqual({ verified: false, sessions: 1 })
   })
 
-  it('does nothing when the domain does not require SSO', async () => {
+  it('does nothing when the domain does not require SSO (E5)', async () => {
     const email = `sam-${suffix()}@acme.com`
     const userId = await seed(email)
 
@@ -126,7 +139,7 @@ describe.skipIf(!fixture.available)('vouchForEnforcedAddress', () => {
 
   // Another identity of this provider owns the account the address sits on, so
   // this sign-in does not land there and may not vouch for it.
-  it('leaves an account another identity of the provider owns alone', async () => {
+  it('leaves an account another identity of the provider owns alone (E5)', async () => {
     const email = `sam-${suffix()}@acme.com`
     const userId = await seed(email)
     await testDb.insert(account).values({
@@ -149,7 +162,7 @@ describe.skipIf(!fixture.available)('vouchForEnforcedAddress', () => {
 
   // An admin corrected the address of someone already on the provider; their
   // next sign-in restores verification, and their session stays.
-  it('re-verifies the linked account this identity signs in to', async () => {
+  it('re-verifies the linked account this identity signs in to (E5)', async () => {
     const email = `sam-${suffix()}@acme.com`
     const userId = await seed(email)
     const sub = `sub-${suffix()}`
@@ -171,7 +184,7 @@ describe.skipIf(!fixture.available)('vouchForEnforcedAddress', () => {
     expect(await state(userId)).toEqual({ verified: true, sessions: 1 })
   })
 
-  it('does not vouch for a linked account whose address is not the one asserted', async () => {
+  it('does not vouch for a linked account whose address is not the one asserted (E5)', async () => {
     const userId = await seed(`old-${suffix()}@acme.com`)
     const sub = `sub-${suffix()}`
     await testDb.insert(account).values({
@@ -192,7 +205,7 @@ describe.skipIf(!fixture.available)('vouchForEnforcedAddress', () => {
     expect(await state(userId)).toEqual({ verified: false, sessions: 1 })
   })
 
-  it('leaves an already verified account and its sessions alone', async () => {
+  it('leaves an already verified account and its sessions alone (E5)', async () => {
     const email = `sam-${suffix()}@acme.com`
     const userId = await seed(email, { verified: true })
 
@@ -204,5 +217,18 @@ describe.skipIf(!fixture.available)('vouchForEnforcedAddress', () => {
     })
 
     expect(await state(userId)).toEqual({ verified: true, sessions: 1 })
+  })
+  it('writes and records nothing when no account holds the asserted address (E5)', async () => {
+    const bystander = await seed(`someone-${suffix()}@acme.com`)
+
+    await vouchForEnforcedAddress({
+      registrationId: 'oidc_acme',
+      accountId: `sub-${suffix()}`,
+      email: `nobody-${suffix()}@acme.com`,
+      providers: providers(true),
+    })
+
+    expect(await state(bystander)).toEqual({ verified: false, sessions: 1 })
+    expect(audit.recordAuditEvent).not.toHaveBeenCalled()
   })
 })

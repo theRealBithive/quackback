@@ -1,4 +1,20 @@
+/**
+ * Where the onboarding wizard sends a caller.
+ *
+ * Contract (upstream #656), confirmed:
+ *
+ * O1 While setup is still open, the first person who signs in can claim the workspace and becomes its admin.
+ * O2 Once setup is complete, nobody can claim the workspace through the onboarding step: not a portal user and not a teammate, even when no human admin is left.
+ * O3 A refused claim changes nothing: the workspace's name, slug and modules stay as they were, and the caller keeps the role they had.
+ * O4 A workspace that was marked complete by its config file before its owner ever arrived still counts as open, so its first person can claim it.
+ * O5 When the setup state cannot be read unambiguously, the workspace counts as closed.
+ *
+ * Tests without a number predate #656. The claim itself (O1-O5 end to end) is
+ * `functions/__tests__/onboarding-bootstrap-claim.db.test.ts`; this suite holds
+ * the screens and routing that must agree with it.
+ */
 import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import { isSetupBlocked, mayForwardCompletedSetup, pickOnboardingStep } from '../-onboarding-step'
 import { DEFAULT_SETUP_STATE, type SetupState } from '@/lib/shared/db-types'
 
@@ -84,7 +100,7 @@ describe('pickOnboardingStep V2', () => {
   // A finished self-hosted install whose human admins are gone. Not
   // provisioned, so `setupOpenToClaim` stays true, but the workspace step
   // refuses the claim, so a non-admin who signs in must not be routed there.
-  it('routes a non-admin on a finished install with no admin to the terminal page', () => {
+  it('routes a non-admin on a finished install with no admin to the terminal page (O2)', () => {
     const state = {
       setupClaimedByOther: false,
       setupOpenToClaim: true,
@@ -99,7 +115,7 @@ describe('pickOnboardingStep V2', () => {
   })
 
   // The control: one fact different, and the same caller belongs in the wizard.
-  it('still sends the first user of an unprovisioned install to the claim step', () => {
+  it('still sends the first user of an unprovisioned install to the claim step (O1)', () => {
     expect(
       pickOnboardingStep({
         session: { userId: 'u_first' },
@@ -208,7 +224,7 @@ describe('pickOnboardingStep V2', () => {
   // config file can stamp the wizard's steps before anyone has ever signed in.
   // Routing on the stamp alone sent the first user past the only place that
   // hands out the first admin, into steps that then refuse them.
-  it('sends the first user of a pre-stamped workspace to the claim step anyway', () => {
+  it('sends the first user of a pre-stamped workspace to the claim step anyway (O4)', () => {
     expect(
       pickOnboardingStep({
         session: { userId: 'u_first' },
@@ -331,5 +347,57 @@ describe('mayForwardCompletedSetup', () => {
     expect(
       mayForwardCompletedSetup({ pathname: '/onboarding/workspace', userRole: 'member' })
     ).toBe(false)
+  })
+})
+
+// Every caller who does not already hold admin, on every combination of the
+// other routing facts: once the server says setup is complete, the router
+// never sends them to the claim step. Reaches: no principal, user, member;
+// claimed by another or not; provenance open, closed or unasked; with and
+// without a stored setup state.
+describe('a finished install, whoever asks (O2)', () => {
+  const nonAdminPrincipal = fc.oneof(
+    fc.constant(null),
+    fc.constantFrom('user', 'member').map((role) => ({ id: 'p_caller', role }))
+  )
+  const otherFacts = fc.record({
+    setupClaimedByOther: fc.boolean(),
+    setupOpenToClaim: fc.constantFrom(true, false, null),
+    setupState: fc.constantFrom(null, DEFAULT_SETUP_STATE),
+  })
+
+  it('routes every non-admin to the terminal page, never to the claim', () => {
+    fc.assert(
+      fc.property(nonAdminPrincipal, otherFacts, (principalRecord, facts) => {
+        const routed = { ...facts, setupClosedReason: 'setupComplete' as const, principalRecord }
+
+        expect(isSetupBlocked(routed)).toBe(true)
+        expect(pickOnboardingStep({ session: { userId: 'u_caller' }, state: routed })).toBe(
+          '/onboarding/no-access'
+        )
+      })
+    )
+  })
+
+  // The control for the property above: the finished-setup reason alone is
+  // what blocks. With no reason, no other owner and an open provenance, the
+  // same non-admin callers are routed to the claim step.
+  it('routes the same callers to the claim step while setup is open (O1)', () => {
+    fc.assert(
+      fc.property(nonAdminPrincipal, (principalRecord) => {
+        const routed = {
+          setupClaimedByOther: false,
+          setupOpenToClaim: true,
+          setupClosedReason: null,
+          setupState: null,
+          principalRecord,
+        }
+
+        expect(isSetupBlocked(routed)).toBe(false)
+        expect(pickOnboardingStep({ session: { userId: 'u_caller' }, state: routed })).toBe(
+          '/onboarding/workspace'
+        )
+      })
+    )
   })
 })

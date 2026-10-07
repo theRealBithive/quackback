@@ -3,6 +3,18 @@
  * is configured to read only the private header, requests through
  * `auth.handler` get it set from the socket peer, and server-side `auth.api.*`
  * calls get the same rewrite of the headers they forward.
+ *
+ * Contract (confirmed list for batch K, upstream #662; the full list is in
+ * client-ip.test.ts):
+ *
+ *   C1 Sign-in attempts are counted per real client address, as the operator
+ *      configured it: the connecting peer when no proxy is trusted, and the
+ *      address the outermost trusted proxy saw otherwise, however many
+ *      entries a client prepends.
+ *   C2 A client cannot choose its own counting bucket, neither with forwarding
+ *      headers nor by sending the internal client-address header itself.
+ *   C7 Server-side calls into the sign-in library that pass request headers
+ *      along get the same treatment as requests that reach it directly.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -63,12 +75,12 @@ beforeEach(() => {
 })
 
 describe('Better Auth client address wiring', () => {
-  it('configures the instance to read only the private header', async () => {
+  it('configures the instance to read only the private header (C2)', async () => {
     await getAuth()
     expect(built.options?.advanced?.ipAddress).toEqual(betterAuthIpAddressOptions)
   })
 
-  it('hands the handler the socket peer, whatever the client sent', async () => {
+  it('hands the handler the socket peer, whatever the client sent (C1, C2)', async () => {
     await auth.handler(
       new Request('http://localhost:3000/api/auth/sign-in/email', {
         method: 'POST',
@@ -80,7 +92,7 @@ describe('Better Auth client address wiring', () => {
     expect(seen?.headers.get(CLIENT_IP_HEADER)).toBe('203.0.113.41')
   })
 
-  it('rewrites the headers forwarded by a server-side api call', async () => {
+  it('rewrites the headers forwarded by a server-side api call (C7)', async () => {
     await auth.api.getSession({ headers: new Headers({ [CLIENT_IP_HEADER]: '9.9.9.9' }) })
     const seen = built.getSession.mock.calls[0]?.[0]
     expect(seen?.headers.get(CLIENT_IP_HEADER)).toBe('203.0.113.41')

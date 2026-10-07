@@ -905,7 +905,9 @@ describe('dispatch on the ses rung', () => {
     expect(command.input.Content?.Simple?.Body?.Html?.Data).not.toContain('Unsubscribe')
   })
 
-  it('carries RFC 8058 one-click unsubscribe headers on a changelog email', async () => {
+  // Contract U7 (upstream #687; the full U list is in list-unsubscribe.test.ts):
+  //   U7 Every notification email that has an unsubscribe link carries List-Unsubscribe. It offers one-click only when the link is HTTPS. An email without a link carries neither header.
+  it('(U7) carries RFC 8058 one-click unsubscribe headers on a changelog email', async () => {
     process.env.EMAIL_FROM = 'notifications@platform.test'
     await sendChangelogPublishedEmail({
       to: 'customer@example.test',
@@ -922,7 +924,7 @@ describe('dispatch on the ses rung', () => {
     ])
   })
 
-  it('carries them on a post update email, with that email’s own link', async () => {
+  it('(U7) carries them on a post update email, with that email’s own link', async () => {
     process.env.EMAIL_FROM = 'notifications@platform.test'
     await sendNewCommentEmail({
       to: 'customer@example.test',
@@ -941,7 +943,7 @@ describe('dispatch on the ses rung', () => {
     ])
   })
 
-  it('offers no one-click over plain http, and no header at all without a link', async () => {
+  it('(U7) offers no one-click over plain http, and no header at all without a link', async () => {
     process.env.EMAIL_FROM = 'notifications@platform.test'
     const mention = (unsubscribeUrl?: string) =>
       sendPostMentionEmail({

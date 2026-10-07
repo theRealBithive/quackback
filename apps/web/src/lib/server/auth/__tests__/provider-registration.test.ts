@@ -29,6 +29,18 @@
  *    levels and error when it closes.
  * M10 An `oauth_client_resource` row is bound to an existing client and to a resource by its
  *     identifier, and both bindings cascade on delete.
+ *
+ * Contract (upstream #689), confirmed:
+ *
+ * E1 When an address's domain requires SSO, the person cannot sign in by email link or code either. The refusal depends only on the domain, never on whether an account exists.
+ * E2 A person changes their email address only through the confirmed flow. The library's direct change endpoints cannot be reached over HTTP.
+ * E3 An address at a domain that requires SSO cannot be taken by the person's own change or by an admin's edit. Renaming someone whose address stays the same still works.
+ * E4 When an admin enters a new address, it is not treated as verified. An unchanged address keeps its verification.
+ * E5 When a domain's enforcing provider signs someone in with an address at that domain, that sign-in verifies the account it lands on, so the account links instead of staying stuck. Whoever held an unlinked account before loses their sessions.
+ * E6 An admin's edit that crosses with a concurrent change to the same address is refused, not silently overwritten.
+ *
+ * Only E5 is held here, by the onProviderEmail test; the rest of the suite
+ * predates #689.
  */
 import { describe, it, expect, vi } from 'vitest'
 import fc from 'fast-check'
@@ -636,7 +648,7 @@ describe('production profile mapping adapter', () => {
   // The enforcing-provider vouch must only ever see an address the provider
   // itself released: a placeholder or a stored address standing in for one
   // would let a provider vouch for an account it never named.
-  it('hands only a provider-released address to onProviderEmail', async () => {
+  it('hands only a provider-released address to onProviderEmail (E5)', async () => {
     const onProviderEmail = vi.fn(async () => {})
     const build = (claimMapping: unknown) =>
       buildGenericOAuthConfigs({

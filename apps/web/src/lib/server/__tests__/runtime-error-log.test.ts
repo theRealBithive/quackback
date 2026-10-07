@@ -4,6 +4,28 @@
  * the framework's real request handler, and where it matters the real request
  * boundary inside it, so they fail if the print moves or changes shape, or if
  * the boundary stops telling the runtime log what it already logged.
+ * * Contract (confirmed list for batch K, upstream #688):
+ *
+ *   L1 A client that hangs up mid-request is logged as an aborted request at
+ *      info, not as an error.
+ *   L2 Work of our own that we cancel is still logged as an error, even though
+ *      it fails the same way.
+ *   L3 A failure already logged at the request boundary is not printed a
+ *      second time by the runtime.
+ *   L4 A server-function call rejected for invalid input is logged as a
+ *      warning, not an error.
+ *   L5 Connecting an integration whose platform credentials are missing is
+ *      refused with a clear 400 and logged as a warning.
+ *   L6 A caller without a usable session at the link-preview endpoint is
+ *      logged as a warning.
+ *
+ * Where they are held:
+ *   L1, L2, L3  lib/server/__tests__/runtime-error-log.test.ts and
+ *               lib/server/middleware/__tests__/request-context.test.ts
+ *   L4          lib/server/middleware/__tests__/server-fn-log.test.ts
+ *   L5          integrations/__tests__/connect-url-platform-credentials.test.ts
+ *               and integrations/github/server/__tests__/connect-url.test.ts
+ *   L6          lib/server/functions/__tests__/link-preview-log-level.test.ts
  */
 import { describe, it, expect, vi } from 'vitest'
 import { requestHandler } from '@tanstack/react-start/server'
@@ -44,7 +66,7 @@ async function runThroughFramework(
 const closed = () => new DOMException('The connection was closed.', 'AbortError')
 
 describe('installRuntimeErrorLog', () => {
-  it('drops the dump for a client disconnect the request boundary saw', async () => {
+  it('drops the dump for a client disconnect the request boundary saw (L1, L3)', async () => {
     const cap = capture()
     const { printed, target } = fakeConsole()
     installRuntimeErrorLog({ log: cap.log, target })
@@ -72,7 +94,7 @@ describe('installRuntimeErrorLog', () => {
     expect(records.map((r) => r.msg)).toEqual(['request aborted by client'])
   })
 
-  it('drops a disconnect the framework raises after the boundary has returned', async () => {
+  it('drops a disconnect the framework raises after the boundary has returned (L1, L3)', async () => {
     // The framework rethrows the signal's reason once the middleware chain is
     // done, so this throw never passes through the boundary's catch.
     const cap = capture()
@@ -98,7 +120,7 @@ describe('installRuntimeErrorLog', () => {
     expect(cap.records().some((r) => r.level === 'error')).toBe(false)
   })
 
-  it('logs an AbortError that is not a client disconnect', async () => {
+  it('logs an AbortError that is not a client disconnect (L2)', async () => {
     // e.g. our own cancelled outbound fetch escaping a route.
     const cap = capture()
     const { printed, target } = fakeConsole()
@@ -115,7 +137,7 @@ describe('installRuntimeErrorLog', () => {
     expect(records[0].msg).toBe('unhandled request error')
   })
 
-  it('logs any other escaped error as one structured line', async () => {
+  it('logs any other escaped error as one structured line (L3)', async () => {
     const cap = capture()
     const { printed, target } = fakeConsole()
     installRuntimeErrorLog({ log: cap.log, target })
@@ -135,7 +157,7 @@ describe('installRuntimeErrorLog', () => {
     expect(records[0].err.message).toBe('cannot read properties of undefined')
   })
 
-  it('does not log again an error the request boundary already logged', async () => {
+  it('does not log again an error the request boundary already logged (L3)', async () => {
     const cap = capture()
     const { printed, target } = fakeConsole()
     installRuntimeErrorLog({ log: cap.log, target })
@@ -157,7 +179,7 @@ describe('installRuntimeErrorLog', () => {
     expect(records.map((r) => [r.level, r.msg])).toEqual([['error', 'request failed']])
   })
 
-  it('shares what the boundary logged with a wrapper installed before a module reload', async () => {
+  it('shares what the boundary logged with a wrapper installed before a module reload (L3)', async () => {
     // A dev reload re-evaluates this module but the console keeps the first
     // wrapper (the install guard lives on the console), so both must read one set.
     const cap = capture()
@@ -202,7 +224,7 @@ describe('installRuntimeErrorLog', () => {
 })
 
 describe('isClientDisconnect', () => {
-  it("is the request's own abort and nothing else", () => {
+  it("is the request's own abort and nothing else (L1, L2)", () => {
     const controller = new AbortController()
     const request = new Request('http://localhost/', { signal: controller.signal })
     const reason = closed()

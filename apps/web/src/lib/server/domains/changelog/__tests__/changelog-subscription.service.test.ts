@@ -1,3 +1,21 @@
+/**
+ * The changelog subscription service, with the database stubbed.
+ *
+ * Contract (upstream #687), verbatim:
+ *
+ *   U1 Opening an unsubscribe link never unsubscribes anyone. It shows what would happen and asks for confirmation.
+ *   U2 The unsubscribe happens only on an explicit confirmation, or on a one-click request from the mail provider.
+ *   U3 A malformed, unknown, used or expired token shows the expired-link page, never a server error.
+ *   U4 A one-click request in the RFC 8058 form is answered with success for every token, whether live, used, unknown or malformed. A request without the one-click body is refused. A body larger than 1 KB is refused after reading no more than that.
+ *   U5 A token is spent only once the opt-out has actually happened. If the opt-out fails, the link keeps working and a retry succeeds exactly once.
+ *   U6 Unsubscribing from the changelog also stops the changelog mail that reaches a person through posts they follow, even if they never subscribed to the changelog.
+ *   U7 Every notification email that has an unsubscribe link carries List-Unsubscribe. It offers one-click only when the link is HTTPS. An email without a link carries neither header.
+ *   U8 The unsubscribe page is in the language the rest of the site resolved for the request, in all nine languages, and the German addresses the reader formally.
+ *   U9 The unsubscribe page's strings are not loaded into the portal or the widget.
+ *
+ * Only the unsubscribeChangelog test here belongs to that contract (U6); the
+ * behaviour against real rows is in events/__tests__/changelog-unsubscribe-targets.db.test.ts.
+ */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { PrincipalId } from '@quackback/ids'
 
@@ -96,7 +114,7 @@ describe('subscribeSelfServe / subscribeAdmin', () => {
 describe('unsubscribeChangelog', () => {
   // Behaviour against real rows (a principal with no row, and keeping an
   // existing row's source) is covered by changelog-unsubscribe-targets.db.test.ts.
-  it('upserts an opted-out row, stamping only unsubscribedAt on conflict', async () => {
+  it('(U6) upserts an opted-out row, stamping only unsubscribedAt on conflict', async () => {
     const { unsubscribeChangelog } = await import('../changelog-subscription.service')
 
     await unsubscribeChangelog(PRINCIPAL_ID)

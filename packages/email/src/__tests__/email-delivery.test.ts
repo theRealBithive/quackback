@@ -94,7 +94,9 @@ describe.skipIf(!mailpitAvailable)('email delivery (real SMTP via mailpit)', () 
     expect(headers['References']?.[0]).toBe(`<${rootId}> <${parentId}>`)
   })
 
-  it('delivers RFC 8058 one-click unsubscribe headers on a changelog email', async () => {
+  // Contract U7 (upstream #687; the full U list is in list-unsubscribe.test.ts):
+  //   U7 Every notification email that has an unsubscribe link carries List-Unsubscribe. It offers one-click only when the link is HTTPS. An email without a link carries neither header.
+  it('(U7) delivers RFC 8058 one-click unsubscribe headers on a changelog email', async () => {
     const result = await sendChangelogPublishedEmail({
       to: 'subscriber@example.test',
       changelogTitle: 'May release',

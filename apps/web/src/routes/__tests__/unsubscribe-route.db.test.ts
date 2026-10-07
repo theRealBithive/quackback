@@ -5,6 +5,20 @@
  * change nothing: the page asks first, and only the confirm button (a POST) or
  * a mail client's RFC 8058 one-click POST to the same URL unsubscribes. A
  * second POST with a spent token is harmless and answers 200 either way.
+ *
+ * Contract (upstream #687), verbatim:
+ *
+ *   U1 Opening an unsubscribe link never unsubscribes anyone. It shows what would happen and asks for confirmation.
+ *   U2 The unsubscribe happens only on an explicit confirmation, or on a one-click request from the mail provider.
+ *   U3 A malformed, unknown, used or expired token shows the expired-link page, never a server error.
+ *   U4 A one-click request in the RFC 8058 form is answered with success for every token, whether live, used, unknown or malformed. A request without the one-click body is refused. A body larger than 1 KB is refused after reading no more than that.
+ *   U5 A token is spent only once the opt-out has actually happened. If the opt-out fails, the link keeps working and a retry succeeds exactly once.
+ *   U6 Unsubscribing from the changelog also stops the changelog mail that reaches a person through posts they follow, even if they never subscribed to the changelog.
+ *   U7 Every notification email that has an unsubscribe link carries List-Unsubscribe. It offers one-click only when the link is HTTPS. An email without a link carries neither header.
+ *   U8 The unsubscribe page is in the language the rest of the site resolved for the request, in all nine languages, and the German addresses the reader formally.
+ *   U9 The unsubscribe page's strings are not loaded into the portal or the widget.
+ *
+ * This module holds U1–U5 against a real database.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createId, type BoardId, type PostId, type PrincipalId, type UserId } from '@quackback/ids'
@@ -45,8 +59,8 @@ vi.mock('@tanstack/react-start', async (importOriginal) => ({
   },
 }))
 
-// The page loads its catalog by reading Accept-Language off the live request,
-// which a test has none of.
+// The catalogue itself is not under test here (unsubscribe-page.test.tsx
+// renders it); an empty one keeps this suite about the database.
 vi.mock('@/lib/server/functions/locale', () => ({
   loadUnsubscribeIntl: async () => ({ locale: 'en', messages: {} }),
 }))
@@ -78,6 +92,8 @@ const fixture = await createDbTestFixture({
     await db.select({ id: unsubscribeTokens.id }).from(unsubscribeTokens).limit(0)
   },
 })
+
+const ONE_KB = 1_024
 
 const suffix = () => `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 
@@ -144,12 +160,15 @@ async function tokenUsedAt(token: string): Promise<Date | null> {
 
 type Handler = (ctx: { request: Request }) => Promise<Response>
 const routeOptions = Route.options as unknown as {
-  loader: (ctx: { deps: { token?: string } }) => Promise<unknown>
+  loader: (ctx: {
+    deps: { token?: string }
+    context: { resolvedLocale?: string }
+  }) => Promise<unknown>
   server?: { handlers?: Record<string, Handler> }
 }
 
 function openPage(token: string) {
-  return routeOptions.loader({ deps: { token } })
+  return routeOptions.loader({ deps: { token }, context: { resolvedLocale: 'en' } })
 }
 
 function oneClick(token: string, body = 'List-Unsubscribe=One-Click'): Promise<Response> {
@@ -169,7 +188,7 @@ describe.skipIf(!fixture.available)('/unsubscribe (real DB, rolled back)', () =>
   afterEach(fixture.rollback)
   afterAll(fixture.close)
 
-  it('opening the link changes nothing and says what it would unsubscribe from', async () => {
+  it('(U1) opening the link changes nothing and says what it would unsubscribe from', async () => {
     const s = await seed()
 
     const data = await openPage(s.token)
@@ -183,7 +202,7 @@ describe.skipIf(!fixture.available)('/unsubscribe (real DB, rolled back)', () =>
     expect(await tokenUsedAt(s.token)).toBeNull()
   })
 
-  it('confirming unsubscribes, and a second confirm is a harmless invalid result', async () => {
+  it('(U2) (U5) confirming unsubscribes, and a second confirm is a harmless invalid result', async () => {
     const s = await seed()
 
     const first = await processUnsubscribeTokenFn({ data: { token: s.token } })
@@ -199,14 +218,14 @@ describe.skipIf(!fixture.available)('/unsubscribe (real DB, rolled back)', () =>
     expect(second).toEqual({ success: false, error: 'invalid' })
   })
 
-  it('a reopened link after confirming shows the spent-link view, still without writing', async () => {
+  it('(U3) a reopened link after confirming shows the spent-link view, still without writing', async () => {
     const s = await seed()
     await processUnsubscribeTokenFn({ data: { token: s.token } })
 
     expect(await openPage(s.token)).toMatchObject({ status: 'error', error: 'invalid' })
   })
 
-  it('one-click POST unsubscribes, and a repeat still answers 200', async () => {
+  it('(U2) (U4) one-click POST unsubscribes, and a repeat still answers 200', async () => {
     const s = await seed()
 
     const first = await oneClick(s.token)
@@ -225,7 +244,7 @@ describe.skipIf(!fixture.available)('/unsubscribe (real DB, rolled back)', () =>
     expect(await isSubscribed(s)).toBe(true)
   })
 
-  it('a POST without the one-click body is refused and changes nothing', async () => {
+  it('(U4) a POST without the one-click body is refused and changes nothing', async () => {
     const s = await seed()
 
     const res = await oneClick(s.token, 'something=else')
@@ -235,7 +254,7 @@ describe.skipIf(!fixture.available)('/unsubscribe (real DB, rolled back)', () =>
     expect(await tokenUsedAt(s.token)).toBeNull()
   })
 
-  it('a malformed or unknown token answers 200 without a write', async () => {
+  it('(U4) a malformed or unknown token answers 200 without a write', async () => {
     const s = await seed()
 
     for (const token of [
@@ -250,7 +269,7 @@ describe.skipIf(!fixture.available)('/unsubscribe (real DB, rolled back)', () =>
     expect(await isSubscribed(s)).toBe(true)
   })
 
-  it('a failed opt-out leaves the token live, so the retry it asks for still unsubscribes', async () => {
+  it('(U5) a failed opt-out leaves the token live, so the retry it asks for still unsubscribes', async () => {
     const s = await seed()
     await testDb
       .insert(changelogSubscriptions)
@@ -288,7 +307,7 @@ describe.skipIf(!fixture.available)('/unsubscribe (real DB, rolled back)', () =>
     expect(await tokenUsedAt(token)).toEqual(spentAt)
   })
 
-  it('accepts the one-click body as multipart/form-data too', async () => {
+  it('(U4) accepts the one-click body as multipart/form-data too', async () => {
     const s = await seed()
     const form = new FormData()
     form.set('List-Unsubscribe', 'One-Click')
@@ -303,7 +322,7 @@ describe.skipIf(!fixture.available)('/unsubscribe (real DB, rolled back)', () =>
     expect(await isSubscribed(s)).toBe(false)
   })
 
-  it('refuses an oversized body without reading past the cap, and changes nothing', async () => {
+  it('(U4) refuses an oversized body without reading past the cap, and changes nothing', async () => {
     const s = await seed()
     let pulled = 0
     const chunk = new TextEncoder().encode('List-Unsubscribe=One-Click&pad=' + 'x'.repeat(512))
@@ -324,11 +343,50 @@ describe.skipIf(!fixture.available)('/unsubscribe (real DB, rolled back)', () =>
       } as RequestInit),
     })
     expect(res.status).toBe(400)
-    expect(pulled).toBeLessThan(16 * 1024)
+    // The handler stops at the first chunk that crosses the cap. A stream
+    // hands out whole chunks and keeps one pulled ahead, so the cap plus two
+    // chunks is the most it can have been asked for; an unbounded read would
+    // keep pulling forever.
+    expect(pulled).toBeLessThanOrEqual(ONE_KB + 2 * chunk.byteLength)
     expect(await isSubscribed(s)).toBe(true)
   })
 
-  it('has no GET handler: a GET renders the confirm page instead of acting', () => {
+  it('(U3) (U4) an expired token shows the expired-link view and its one-click changes nothing', async () => {
+    const s = await seed()
+    await testDb
+      .update(unsubscribeTokens)
+      .set({ expiresAt: new Date(Date.now() - 60 * 1000) })
+      .where(eq(unsubscribeTokens.token, s.token))
+
+    expect(await openPage(s.token)).toMatchObject({ status: 'error', error: 'invalid' })
+    expect(await processUnsubscribeTokenFn({ data: { token: s.token } })).toEqual({
+      success: false,
+      error: 'invalid',
+    })
+    expect((await oneClick(s.token)).status).toBe(200)
+    expect(await isSubscribed(s)).toBe(true)
+    expect(await tokenUsedAt(s.token)).toBeNull()
+  })
+
+  it('(U1) opening a link that names no post asks without a post title and spends nothing', async () => {
+    const s = await seed()
+    const token = crypto.randomUUID()
+    await testDb.insert(unsubscribeTokens).values({
+      token,
+      principalId: s.principalId,
+      postId: null,
+      action: 'unsubscribe_changelog',
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    })
+
+    const data = await openPage(token)
+
+    expect(data).toMatchObject({ status: 'confirm', action: 'unsubscribe_changelog' })
+    expect((data as { postTitle?: string }).postTitle).toBeUndefined()
+    expect(await tokenUsedAt(token)).toBeNull()
+  })
+
+  it('(U1) has no GET handler: a GET renders the confirm page instead of acting', () => {
     expect(routeOptions.server?.handlers?.GET).toBeUndefined()
   })
 })

@@ -25,12 +25,23 @@
  *
  * The sibling mock-based suite (onboarding-admin-promotion.fn.test.ts) keeps
  * the call-shape and managed-field coverage; this one is about the guards.
+ *
+ * Contract (upstream #656), confirmed:
+ *
+ * O1 While setup is still open, the first person who signs in can claim the workspace and becomes its admin.
+ * O2 Once setup is complete, nobody can claim the workspace through the onboarding step: not a portal user and not a teammate, even when no human admin is left.
+ * O3 A refused claim changes nothing: the workspace's name, slug and modules stay as they were, and the caller keeps the role they had.
+ * O4 A workspace that was marked complete by its config file before its owner ever arrived still counts as open, so its first person can claim it.
+ * O5 When the setup state cannot be read unambiguously, the workspace counts as closed.
+ *
+ * Tests without a number predate #656 and pin the provisioned-workspace and
+ * human-owner guards, which this contract does not restate.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
 import { createId, type PrincipalId, type UserId } from '@quackback/ids'
 import { createDbTestFixture, testDb } from '@/lib/server/__tests__/db-test-fixture'
 import { principal, user, settings, eq, sql, DEFAULT_SETUP_STATE } from '@/lib/server/db'
-import { finishIdentityOnboarding } from '@/lib/server/setup-state'
+import { applyDeferredLaunchStartingPoint } from '@/lib/server/setup-state'
 import { mergeSetupState } from '@/lib/server/config-file/reconciler'
 
 vi.mock('@/lib/server/db', async (importOriginal) => ({
@@ -85,7 +96,7 @@ vi.mock('@/lib/server/domains/principals/bootstrap-admin', async (importOriginal
   findHumanAdmin: hoisted.findHumanAdmin,
 }))
 
-import { saveWorkspaceAndGoalFn } from '../onboarding'
+import { saveWorkspaceAndGoalFn, getWorkspaceClaimFn } from '../onboarding'
 
 const fixture = await createDbTestFixture({
   probe: async (db) => {
@@ -174,6 +185,36 @@ async function seedServiceAdmin(): Promise<void> {
 
 const WORKSPACE_INPUT = { workspaceName: 'Acme', useCase: 'product_feedback' as const }
 
+/**
+ * The setup state an owner leaves behind after finishing the wizard, built by
+ * the producer the workspace step itself calls. A function, so it runs inside
+ * a test and never at collection time.
+ */
+function finishedSetupState(): string {
+  const workspaceDone = {
+    ...DEFAULT_SETUP_STATE,
+    steps: { ...DEFAULT_SETUP_STATE.steps, workspace: true },
+  }
+  return JSON.stringify(applyDeferredLaunchStartingPoint(workspaceDone, 'product_feedback'))
+}
+
+/** What a refused claim must leave untouched (O3), read back from the tables. */
+async function workspaceAndCaller(callerId: UserId) {
+  const [workspace] = await testDb
+    .select({
+      name: settings.name,
+      slug: settings.slug,
+      featureFlags: settings.featureFlags,
+      setupState: settings.setupState,
+    })
+    .from(settings)
+  const callerPrincipal = await testDb.query.principal.findFirst({
+    where: eq(principal.userId, callerId),
+    columns: { role: true },
+  })
+  return { workspace, callerRole: callerPrincipal?.role ?? null }
+}
+
 describe.skipIf(!fixture.available)('bootstrap promotion guard', () => {
   beforeEach(async () => {
     await fixture.begin()
@@ -219,7 +260,7 @@ describe.skipIf(!fixture.available)('bootstrap promotion guard', () => {
 
   // A service principal is not a human owner, so it must not block the first
   // real user from claiming setup.
-  it('still promotes the first human when only a service admin exists', async () => {
+  it('still promotes the first human when only a service admin exists (O1)', async () => {
     await testDb.insert(principal).values({
       id: createId('principal') as PrincipalId,
       userId: null,
@@ -250,7 +291,7 @@ describe.skipIf(!fixture.available)('bootstrap promotion guard', () => {
     expect(hoisted.setPrincipalRole).not.toHaveBeenCalled()
   })
 
-  it('promotes the first user on a workspace nobody has claimed', async () => {
+  it('promotes the first user on a workspace nobody has claimed (O1)', async () => {
     const firstId = await seedUser('first@acme.example')
     hoisted.getSession.mockResolvedValue({ session: { scope: 'dashboard' }, user: { id: firstId } })
 
@@ -268,7 +309,7 @@ describe.skipIf(!fixture.available)('bootstrap promotion guard', () => {
   // come from the role write. The double answers from the real table here
   // rather than a fixed value, because "already exists" is exactly the fact it
   // has to get right for this test to mean anything.
-  it('upgrades a first user whose principal was already created at the default role', async () => {
+  it('upgrades a first user whose principal was already created at the default role (O1)', async () => {
     const firstId = await seedUser('first@acme.example')
     await seedPrincipal({ userId: firstId, role: 'user' })
     hoisted.getSession.mockResolvedValue({ session: { scope: 'dashboard' }, user: { id: firstId } })
@@ -407,15 +448,8 @@ describe.skipIf(!fixture.available)('bootstrap promotion guard', () => {
   // principal left. Nobody owns it, but its setup is not waiting for anyone:
   // the workspace step must not hand admin, and the workspace's name and slug,
   // to the next signed-in portal user who posts it.
-  it('refuses a portal user on a finished install that has no human admin', async () => {
-    await seedSettings(
-      JSON.stringify(
-        finishIdentityOnboarding(
-          { ...DEFAULT_SETUP_STATE, steps: { ...DEFAULT_SETUP_STATE.steps, workspace: true } },
-          'product_feedback'
-        )
-      )
-    )
+  it('refuses a portal user on a finished install that has no human admin (O2, O3)', async () => {
+    await seedSettings(finishedSetupState())
     await seedServiceAdmin()
     const portalUserId = await seedUser('portal.user@elsewhere.example')
     await seedPrincipal({ userId: portalUserId, role: 'user' })
@@ -423,20 +457,21 @@ describe.skipIf(!fixture.available)('bootstrap promotion guard', () => {
       session: { scope: 'dashboard' },
       user: { id: portalUserId },
     })
+    const before = await workspaceAndCaller(portalUserId)
 
     await expect(saveWorkspaceAndGoalFn({ data: WORKSPACE_INPUT })).rejects.toThrow(
       /already set up/i
     )
     expect(hoisted.ensurePrincipalForUser).not.toHaveBeenCalled()
     expect(hoisted.setPrincipalRole).not.toHaveBeenCalled()
-    const [row] = await testDb.select({ name: settings.name }).from(settings)
-    expect(row?.name).toBe('Existing')
+    expect(before.workspace?.name).toBe('Existing')
+    expect(await workspaceAndCaller(portalUserId)).toEqual(before)
   })
 
   // The declarative config file can stamp onboarding complete before anyone
   // has signed in. That workspace has no owner yet, so its first user must
   // still be able to claim it. The state is the reconciler's own output.
-  it('still lets the first user claim a workspace the config file stamped complete', async () => {
+  it('still lets the first user claim a workspace the config file stamped complete (O4)', async () => {
     await seedSettings(
       JSON.stringify(mergeSetupState(null, { name: 'Acme', onboardingComplete: true }))
     )
@@ -457,7 +492,7 @@ describe.skipIf(!fixture.available)('bootstrap promotion guard', () => {
     )
   })
 
-  it('still lets the first user claim a workspace the config file only named', async () => {
+  it('still lets the first user claim a workspace the config file only named (O1)', async () => {
     await seedSettings(JSON.stringify(mergeSetupState(null, { name: 'Acme' })))
     const firstId = await seedUser('first@acme.example')
     hoisted.getSession.mockResolvedValue({ session: { scope: 'dashboard' }, user: { id: firstId } })
@@ -484,5 +519,153 @@ describe.skipIf(!fixture.available)('bootstrap promotion guard', () => {
 
     await expect(saveWorkspaceAndGoalFn({ data: WORKSPACE_INPUT })).rejects.toThrow(/only admin/i)
     expect(hoisted.setPrincipalRole).not.toHaveBeenCalled()
+  })
+
+  // Every caller who is not already an admin, on a finished install, with and
+  // without a non-human admin left. Exhaustive rather than sampled: the space
+  // is six cells and each one is a separate way in. Admins are not in it —
+  // they are not claiming anything (contract wording, not a filter).
+  describe('a finished install, whoever asks (O2, O3)', () => {
+    const callerKinds = [
+      { label: 'a signed-in user with no principal here', role: null },
+      { label: 'a portal user', role: 'user' },
+      { label: 'a teammate', role: 'member' },
+    ] as const
+    const adminLandscapes = [
+      { label: 'no admin of any kind', serviceAdmin: false },
+      { label: 'only a service admin', serviceAdmin: true },
+    ] as const
+    const cells = callerKinds.flatMap((caller) =>
+      adminLandscapes.map((landscape) => ({ caller, landscape }))
+    )
+
+    it.each(cells)(
+      'refuses $caller.label with $landscape.label and changes nothing',
+      async ({ caller, landscape }) => {
+        await seedSettings(finishedSetupState())
+        if (landscape.serviceAdmin) await seedServiceAdmin()
+        const callerId = await seedUser(
+          `caller-${Math.random().toString(36).slice(2, 8)}@x.example`
+        )
+        if (caller.role !== null) await seedPrincipal({ userId: callerId, role: caller.role })
+        hoisted.getSession.mockResolvedValue({
+          session: { scope: 'dashboard' },
+          user: { id: callerId },
+        })
+        const before = await workspaceAndCaller(callerId)
+
+        await expect(saveWorkspaceAndGoalFn({ data: WORKSPACE_INPUT })).rejects.toThrow(
+          /already set up/i
+        )
+
+        expect(hoisted.ensurePrincipalForUser).not.toHaveBeenCalled()
+        expect(hoisted.setPrincipalRole).not.toHaveBeenCalled()
+        expect(await workspaceAndCaller(callerId)).toEqual(before)
+        expect(before.callerRole).toBe(caller.role)
+      }
+    )
+  })
+
+  // O4 keeps a stamped workspace open for its owner, not for ever. The first
+  // person claims it through the real workspace step (which writes the real
+  // setup state); the promotion itself is stubbed, so afterwards there is
+  // still no human admin — the exact situation O2 is about.
+  it('closes a config-stamped workspace once its first person has finished setup (O4, O2)', async () => {
+    await seedSettings(
+      JSON.stringify(mergeSetupState(null, { name: 'Acme', onboardingComplete: true }))
+    )
+    const firstId = await seedUser('first@acme.example')
+    hoisted.getSession.mockResolvedValue({ session: { scope: 'dashboard' }, user: { id: firstId } })
+
+    await saveWorkspaceAndGoalFn({ data: WORKSPACE_INPUT })
+    expect(hoisted.ensurePrincipalForUser).toHaveBeenCalledTimes(1)
+
+    const laterId = await seedUser('later@elsewhere.example')
+    await seedPrincipal({ userId: laterId, role: 'user' })
+    hoisted.getSession.mockResolvedValue({ session: { scope: 'dashboard' }, user: { id: laterId } })
+    const before = await workspaceAndCaller(laterId)
+
+    await expect(
+      saveWorkspaceAndGoalFn({ data: { workspaceName: 'Taken Over', useCase: 'internal' } })
+    ).rejects.toThrow(/already set up/i)
+    expect(hoisted.ensurePrincipalForUser).toHaveBeenCalledTimes(1)
+    expect(await workspaceAndCaller(laterId)).toEqual(before)
+  })
+
+  // O5 promises a refusal, not which one. Two rows are ambiguous to the
+  // provenance check as well, which runs first and refuses with its own
+  // message; an earlier revision of this test asserted the setup-complete
+  // wording and was wrong about the contract, not about the code.
+  it('refuses the claim when two settings rows make the setup state ambiguous (O5)', async () => {
+    await seedSettings(JSON.stringify(mergeSetupState(null, { name: 'Acme' })))
+    await seedSettings(JSON.stringify(mergeSetupState(null, { name: 'Acme' })))
+    const firstId = await seedUser('first@acme.example')
+    hoisted.getSession.mockResolvedValue({ session: { scope: 'dashboard' }, user: { id: firstId } })
+
+    await expect(saveWorkspaceAndGoalFn({ data: WORKSPACE_INPUT })).rejects.toThrow()
+    expect(hoisted.ensurePrincipalForUser).not.toHaveBeenCalled()
+    expect(hoisted.setPrincipalRole).not.toHaveBeenCalled()
+  })
+
+  it('refuses the claim when the stored setup state cannot be parsed (O5, O3)', async () => {
+    await seedSettings('{"version":2,"steps":')
+    const firstId = await seedUser('first@acme.example')
+    hoisted.getSession.mockResolvedValue({ session: { scope: 'dashboard' }, user: { id: firstId } })
+    const before = await workspaceAndCaller(firstId)
+
+    await expect(saveWorkspaceAndGoalFn({ data: WORKSPACE_INPUT })).rejects.toThrow(
+      /already set up/i
+    )
+    expect(hoisted.ensurePrincipalForUser).not.toHaveBeenCalled()
+    expect(await workspaceAndCaller(firstId)).toEqual(before)
+  })
+
+  // The unguarded law across every setup shape: the screen that decides
+  // whether to offer a first-user signup says "open" exactly when the
+  // workspace step then accepts the first user, and it never reports a
+  // reason for a workspace it calls open. Reaches: fresh install, config-
+  // named, config-stamped, owner-finished, two rows, unparsable state.
+  describe('the claim screen agrees with the promoter (O1, O2, O4, O5)', () => {
+    const shapes = [
+      { label: 'a fresh install', seed: async () => {} },
+      {
+        label: 'a config-named workspace',
+        seed: () => seedSettings(JSON.stringify(mergeSetupState(null, { name: 'Acme' }))),
+      },
+      {
+        label: 'a config-stamped workspace',
+        seed: () =>
+          seedSettings(
+            JSON.stringify(mergeSetupState(null, { name: 'Acme', onboardingComplete: true }))
+          ),
+      },
+      { label: 'an owner-finished workspace', seed: () => seedSettings(finishedSetupState()) },
+      {
+        label: 'two settings rows',
+        seed: async () => {
+          await seedSettings(finishedSetupState())
+          await seedSettings(finishedSetupState())
+        },
+      },
+      { label: 'an unparsable setup state', seed: () => seedSettings('not json') },
+    ]
+
+    it.each(shapes)('on $label', async ({ seed }) => {
+      await seed()
+      const firstId = await seedUser('first@acme.example')
+      hoisted.getSession.mockResolvedValue({
+        session: { scope: 'dashboard' },
+        user: { id: firstId },
+      })
+
+      const claim = await getWorkspaceClaimFn()
+      const accepted = await saveWorkspaceAndGoalFn({ data: WORKSPACE_INPUT }).then(
+        () => true,
+        () => false
+      )
+
+      expect(claim.openToClaim).toBe(accepted)
+      expect(claim.openToClaim).toBe(claim.closedReason === null)
+    })
   })
 })

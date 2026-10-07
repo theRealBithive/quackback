@@ -7,6 +7,20 @@
  * immediately re-key the duplicate detection (findDuplicatesForPrincipal
  * reads contactEmail). Only Postgres proves both the write and the re-match.
  * Runs inside the db-test-fixture rollback transaction.
+ *
+ * Contract (upstream #689), confirmed:
+ *
+ * E1 When an address's domain requires SSO, the person cannot sign in by email link or code either. The refusal depends only on the domain, never on whether an account exists.
+ * E2 A person changes their email address only through the confirmed flow. The library's direct change endpoints cannot be reached over HTTP.
+ * E3 An address at a domain that requires SSO cannot be taken by the person's own change or by an admin's edit. Renaming someone whose address stays the same still works.
+ * E4 When an admin enters a new address, it is not treated as verified. An unchanged address keeps its verification.
+ * E5 When a domain's enforcing provider signs someone in with an address at that domain, that sign-in verifies the account it lands on, so the account links instead of staying stuck. Whoever held an unlinked account before loses their sessions.
+ * E6 An admin's edit that crosses with a concurrent change to the same address is refused, not silently overwritten.
+ *
+ * Held here: E3 (the admin's edit), E4 and E6. Tests without a number predate
+ * #689. Two refusals below go beyond E3's wording (moving someone OFF a
+ * managed address) or read against it (an account on the domain's provider
+ * may take an address there); they carry no number and are open questions.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
 import { createId, type PrincipalId, type UserId } from '@quackback/ids'
@@ -27,6 +41,21 @@ vi.mock('@/lib/server/domains/settings/identity-providers.service', () => ({
 vi.mock('@/lib/server/auth/registered-providers', () => ({
   getRegisteredOidcProviderIds: async () => new Set(['oidc_acme']),
 }))
+
+// The SSO check is real. It also runs between the edit's read of the stored
+// address and its write, which makes it the one place a concurrent change can
+// be staged from out here (E6): `race.meanwhile` runs just before it.
+const race = vi.hoisted(() => ({ meanwhile: null as null | (() => Promise<void>) }))
+vi.mock('@/lib/server/auth/sso-managed-email', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/lib/server/auth/sso-managed-email')>()
+  return {
+    ...real,
+    assertEmailMoveAllowed: async (opts: Parameters<typeof real.assertEmailMoveAllowed>[0]) => {
+      if (race.meanwhile) await race.meanwhile()
+      return real.assertEmailMoveAllowed(opts)
+    },
+  }
+})
 
 import { updatePortalUserProfile } from '../user.update'
 import { findDuplicatesForPrincipal } from '../user.dedup'
@@ -93,7 +122,10 @@ async function seedLead(opts: {
 }
 
 describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
-  beforeEach(() => fixture.begin())
+  beforeEach(() => {
+    race.meanwhile = null
+    return fixture.begin()
+  })
   afterEach(() => fixture.rollback())
   afterAll(() => fixture.close())
 
@@ -241,7 +273,7 @@ describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
   // An admin can type any address. Leaving it marked verified would let a
   // provider that matches on verified addresses sign someone else in to this
   // account, on nothing but the admin's word.
-  it('clears emailVerified when an admin changes the address', async () => {
+  it('clears emailVerified when an admin changes the address (E4)', async () => {
     const person = await seedUser({
       name: 'Verified Person',
       email: `verified-${runSuffix()}@example.com`,
@@ -260,7 +292,7 @@ describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
     expect(row.emailVerified).toBe(false)
   })
 
-  it('keeps emailVerified when the address is unchanged or only the name moves', async () => {
+  it('keeps emailVerified when the address is unchanged or only the name moves (E4)', async () => {
     const address = `same-${runSuffix()}@example.com`
     const person = await seedUser({ name: 'Same Person', email: address, emailVerified: true })
 
@@ -289,7 +321,7 @@ describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
       sso.providers = []
     })
 
-    it('refuses to move someone off a managed address', async () => {
+    it('refuses to move someone off a managed address (no number: beyond E3)', async () => {
       const person = await seedUser({ name: 'Sam', email: `sam-${runSuffix()}@acme.com` })
 
       await expect(
@@ -300,7 +332,7 @@ describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
       ).rejects.toThrow(/single sign-on/i)
     })
 
-    it('refuses to move someone onto a managed domain they do not sign in through', async () => {
+    it('refuses to move someone onto a managed domain they do not sign in through (E3)', async () => {
       const person = await seedUser({ name: 'Pat', email: `pat-${runSuffix()}@example.com` })
 
       await expect(
@@ -311,7 +343,7 @@ describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
       ).rejects.toThrow(/single sign-on/i)
     })
 
-    it('lets someone who signs in through the owning provider get an address there', async () => {
+    it('lets someone who signs in through the owning provider get an address there (no number: conflicts with E3)', async () => {
       const person = await seedUser({ name: 'Lee', email: null })
       await testDb.insert(account).values({
         accountId: `sub-${runSuffix()}`,
@@ -331,7 +363,7 @@ describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
       expect(row.email).toBe(address)
     })
 
-    it('lets an admin correct an address within the domain for someone on its provider', async () => {
+    it('lets an admin correct an address within the domain for someone on its provider (no number: conflicts with E3)', async () => {
       const person = await seedUser({ name: 'Jon', email: `jhon-${runSuffix()}@acme.com` })
       await testDb.insert(account).values({
         accountId: `sub-${runSuffix()}`,
@@ -351,7 +383,7 @@ describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
       expect(row.email).toBe(corrected)
     })
 
-    it('still renames someone at a managed address', async () => {
+    it('still renames someone at a managed address (E3)', async () => {
       const address = `kim-${runSuffix()}@acme.com`
       const person = await seedUser({ name: 'Kim', email: address })
 
@@ -366,6 +398,107 @@ describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
         .from(user)
         .where(eq(user.id, person.userId))
       expect(row).toEqual({ name: 'Kim Lee', email: address })
+    })
+
+    // The rename half of E3 when the address is typed back in a different
+    // case, by an admin, for someone who does not sign in through the domain's
+    // provider: the address has not changed, so there is nothing to refuse,
+    // and its verification stays (E4).
+    it('still renames someone whose managed address is typed back in another case (E3, E4)', async () => {
+      const address = `ana-${runSuffix()}@acme.com`
+      const person = await seedUser({ name: 'Ana', email: address, emailVerified: true })
+
+      await updatePortalUserProfile({
+        principalId: person.principalId,
+        name: 'Ana Lee',
+        email: address.toUpperCase(),
+      })
+
+      const [row] = await testDb
+        .select({ name: user.name, email: user.email, emailVerified: user.emailVerified })
+        .from(user)
+        .where(eq(user.id, person.userId))
+      expect(row).toEqual({ name: 'Ana Lee', email: address, emailVerified: true })
+    })
+  })
+
+  it('leaves no verified address behind when an admin clears it (E4)', async () => {
+    const person = await seedUser({
+      name: 'Cleared Person',
+      email: `cleared-${runSuffix()}@example.com`,
+      emailVerified: true,
+    })
+
+    await updatePortalUserProfile({ principalId: person.principalId, email: null })
+
+    const [row] = await testDb
+      .select({ email: user.email, emailVerified: user.emailVerified })
+      .from(user)
+      .where(eq(user.id, person.userId))
+    expect(row).toEqual({ email: null, emailVerified: false })
+  })
+
+  // E6, staged: the person's address changes between the edit reading it and
+  // writing over it. The edit must refuse, and the address written in between
+  // must be the one that stays. Both write branches: a new address, and none.
+  describe('an edit that crosses a concurrent change (E6)', () => {
+    async function personWhoseAddressChangesMeanwhile() {
+      const person = await seedUser({
+        name: 'Moving Person',
+        email: `before-${runSuffix()}@example.com`,
+        emailVerified: true,
+      })
+      const meanwhile = `meanwhile-${runSuffix()}@example.com`
+      race.meanwhile = async () => {
+        race.meanwhile = null
+        await testDb.update(user).set({ email: meanwhile }).where(eq(user.id, person.userId))
+      }
+      return { person, meanwhile }
+    }
+
+    async function storedEmail(userId: UserId) {
+      const [row] = await testDb
+        .select({ email: user.email, emailVerified: user.emailVerified })
+        .from(user)
+        .where(eq(user.id, userId))
+      return row
+    }
+
+    it('refuses an admin-typed address and keeps the concurrent one', async () => {
+      const { person, meanwhile } = await personWhoseAddressChangesMeanwhile()
+
+      await expect(
+        updatePortalUserProfile({
+          principalId: person.principalId,
+          email: `typed-${runSuffix()}@example.com`,
+        })
+      ).rejects.toMatchObject({ code: 'EMAIL_CHANGED' })
+
+      expect(await storedEmail(person.userId)).toEqual({ email: meanwhile, emailVerified: true })
+    })
+
+    it('refuses clearing the address and keeps the concurrent one', async () => {
+      const { person, meanwhile } = await personWhoseAddressChangesMeanwhile()
+
+      await expect(
+        updatePortalUserProfile({ principalId: person.principalId, email: null })
+      ).rejects.toMatchObject({ code: 'EMAIL_CHANGED' })
+
+      expect(await storedEmail(person.userId)).toEqual({ email: meanwhile, emailVerified: true })
+    })
+
+    // The control: the same edit with nothing happening in between is
+    // written, so the refusals above are the race and not the edit.
+    it('writes the same edit when nothing changed in between', async () => {
+      const person = await seedUser({
+        name: 'Still Person',
+        email: `still-${runSuffix()}@example.com`,
+      })
+      const typed = `typed-${runSuffix()}@example.com`
+
+      await updatePortalUserProfile({ principalId: person.principalId, email: typed })
+
+      expect((await storedEmail(person.userId)).email).toBe(typed)
     })
   })
 

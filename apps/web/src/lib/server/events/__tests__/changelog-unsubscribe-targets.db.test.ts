@@ -6,6 +6,20 @@
  * post has no `changelog_subscriptions` row, so unsubscribing from changelog
  * email has to create one (with `unsubscribedAt` set) for the opt-out to
  * reach them; stamping an existing row alone left them on the list.
+ *
+ * Contract (upstream #687), verbatim:
+ *
+ *   U1 Opening an unsubscribe link never unsubscribes anyone. It shows what would happen and asks for confirmation.
+ *   U2 The unsubscribe happens only on an explicit confirmation, or on a one-click request from the mail provider.
+ *   U3 A malformed, unknown, used or expired token shows the expired-link page, never a server error.
+ *   U4 A one-click request in the RFC 8058 form is answered with success for every token, whether live, used, unknown or malformed. A request without the one-click body is refused. A body larger than 1 KB is refused after reading no more than that.
+ *   U5 A token is spent only once the opt-out has actually happened. If the opt-out fails, the link keeps working and a retry succeeds exactly once.
+ *   U6 Unsubscribing from the changelog also stops the changelog mail that reaches a person through posts they follow, even if they never subscribed to the changelog.
+ *   U7 Every notification email that has an unsubscribe link carries List-Unsubscribe. It offers one-click only when the link is HTTPS. An email without a link carries neither header.
+ *   U8 The unsubscribe page is in the language the rest of the site resolved for the request, in all nine languages, and the German addresses the reader formally.
+ *   U9 The unsubscribe page's strings are not loaded into the portal or the widget.
+ *
+ * This module holds U6.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -26,6 +40,7 @@ import {
   postSubscriptions,
   posts,
   principal,
+  unsubscribeTokens,
   user,
 } from '@/lib/server/db'
 import { DEFAULT_BOARD_ACCESS } from '@/lib/shared/db-types'
@@ -49,6 +64,7 @@ vi.mock('@/lib/server/domains/channel-accounts/channel-account.service', () => (
 
 import { getChangelogSubscriberTargets } from '../targets'
 import { unsubscribeChangelog } from '@/lib/server/domains/changelog/changelog-subscription.service'
+import { processUnsubscribeToken } from '@/lib/server/domains/subscriptions/subscription.service'
 import type { EventData } from '../types'
 
 const fixture = await createDbTestFixture({
@@ -132,7 +148,7 @@ describe.skipIf(!fixture.available)(
     afterEach(fixture.rollback)
     afterAll(fixture.close)
 
-    it('stops changelog email for someone who only follows a linked post', async () => {
+    it('(U6) stops changelog email for someone who only follows a linked post', async () => {
       const email = `follower-${suffix()}@example.com`
       const follower = await seedPrincipal(email)
       const entryId = await seedLinkedEntry(follower)
@@ -144,7 +160,7 @@ describe.skipIf(!fixture.available)(
       expect(await emailedAddresses(entryId)).not.toContain(email)
     })
 
-    it('stamps an existing subscription without rewriting how it began', async () => {
+    it('(U6) stamps an existing subscription without rewriting how it began', async () => {
       const follower = await seedPrincipal(`csv-${suffix()}@example.com`)
       await testDb
         .insert(changelogSubscriptions)
@@ -162,6 +178,31 @@ describe.skipIf(!fixture.available)(
       expect(rows).toHaveLength(1)
       expect(rows[0].source).toBe('csv_import')
       expect(rows[0].unsubscribedAt).not.toBeNull()
+    })
+
+    it('(U6) the emailed changelog link reaches the linked-post source too', async () => {
+      const email = `link-${suffix()}@example.com`
+      const follower = await seedPrincipal(email)
+      const entryId = await seedLinkedEntry(follower)
+      const token = crypto.randomUUID()
+      await testDb.insert(unsubscribeTokens).values({
+        token,
+        principalId: follower,
+        postId: null,
+        action: 'unsubscribe_changelog',
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      })
+      expect(await emailedAddresses(entryId)).toContain(email)
+
+      const result = await processUnsubscribeToken(token)
+
+      expect(result).toMatchObject({ action: 'unsubscribe_changelog', principalId: follower })
+      expect(await emailedAddresses(entryId)).not.toContain(email)
+      const rows = await testDb
+        .select({ source: changelogSubscriptions.source })
+        .from(changelogSubscriptions)
+        .where(eq(changelogSubscriptions.principalId, follower))
+      expect(rows).toEqual([{ source: 'self_serve' }])
     })
   }
 )

@@ -19,6 +19,18 @@
  * props. The auth broadcast is real too: it is the seam a completed sign-in
  * actually crosses, and a stubbed one cannot tell a screen that answers from a
  * screen that ignores it.
+ *
+ * Contract (upstream #656), confirmed:
+ *
+ * O1 While setup is still open, the first person who signs in can claim the workspace and becomes its admin.
+ * O2 Once setup is complete, nobody can claim the workspace through the onboarding step: not a portal user and not a teammate, even when no human admin is left.
+ * O3 A refused claim changes nothing: the workspace's name, slug and modules stay as they were, and the caller keeps the role they had.
+ * O4 A workspace that was marked complete by its config file before its owner ever arrived still counts as open, so its first person can claim it.
+ * O5 When the setup state cannot be read unambiguously, the workspace counts as closed.
+ *
+ * Tests without a number predate #656. The claim itself (O1-O5 end to end) is
+ * `functions/__tests__/onboarding-bootstrap-claim.db.test.ts`; this suite holds
+ * the screens and routing that must agree with it.
  */
 /**
  * Contract group M — MCP scoped OAuth on Better Auth 1.7 (upstream #540, #550, #541, #551)
@@ -354,7 +366,7 @@ describe('account step — a finished install with no admin left', () => {
     return props
   }
 
-  it('offers sign-in only and says the workspace is already set up', () => {
+  it('offers sign-in only and says the workspace is already set up (O2)', () => {
     renderStep(finishedOwnerless())
 
     expect(screen.getByText(/already set up/i)).toBeInTheDocument()

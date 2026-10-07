@@ -9,6 +9,16 @@
  *
  * Runs inside the db-test-fixture rollback transaction; the global `db` is
  * rebound to it so the real UPDATE runs unmodified.
+ *
+ * Contract (confirmed list for batch K, upstream #644; the full list is in
+ * session-audience.test.ts):
+ *
+ *   S5 A portal visitor whose anonymous session was tagged as a widget session
+ *      is retagged as a portal session the next time they make a request,
+ *      provided it arrives as the site's session cookie, without a bearer
+ *      token, and belongs to an anonymous user.
+ *   S6 An identified widget session, and any session presented as a bearer
+ *      token, is never retagged.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createId, type UserId } from '@quackback/ids'
@@ -67,7 +77,7 @@ describe.skipIf(!fixture.available)('healStrandedPortalSession (real DB, rolled 
   afterEach(fixture.rollback)
   afterAll(fixture.close)
 
-  it('retags a cookie-borne anonymous widget session as portal', async () => {
+  it('retags a cookie-borne anonymous widget session as portal (S5)', async () => {
     const { token, resolved } = await seed({ anonymous: true, scope: 'widget' })
 
     const healed = await healStrandedPortalSession(resolved, viaCookie(token))
@@ -76,7 +86,7 @@ describe.skipIf(!fixture.available)('healStrandedPortalSession (real DB, rolled 
     expect(await storedScope(resolved.session.id)).toBe('portal')
   })
 
-  it('recognises the secure-prefixed cookie name', async () => {
+  it('recognises the secure-prefixed cookie name (S5)', async () => {
     const { token, resolved } = await seed({ anonymous: true, scope: 'widget' })
 
     const healed = await healStrandedPortalSession(
@@ -88,7 +98,7 @@ describe.skipIf(!fixture.available)('healStrandedPortalSession (real DB, rolled 
     expect(await storedScope(resolved.session.id)).toBe('portal')
   })
 
-  it('leaves a widget Bearer session as widget', async () => {
+  it('leaves a widget Bearer session as widget (S6)', async () => {
     const { token, resolved } = await seed({ anonymous: true, scope: 'widget' })
 
     const result = await healStrandedPortalSession(resolved, viaBearer(token))
@@ -97,7 +107,7 @@ describe.skipIf(!fixture.available)('healStrandedPortalSession (real DB, rolled 
     expect(await storedScope(resolved.session.id)).toBe('widget')
   })
 
-  it('leaves an identified widget session as widget even when sent as a cookie', async () => {
+  it('leaves an identified widget session as widget even when sent as a cookie (S6)', async () => {
     const { token, resolved } = await seed({ anonymous: false, scope: 'widget' })
 
     const result = await healStrandedPortalSession(resolved, viaCookie(token))
@@ -106,7 +116,7 @@ describe.skipIf(!fixture.available)('healStrandedPortalSession (real DB, rolled 
     expect(await storedScope(resolved.session.id)).toBe('widget')
   })
 
-  it('leaves dashboard and portal sessions untouched', async () => {
+  it('leaves dashboard and portal sessions untouched (S5)', async () => {
     for (const scope of ['dashboard', 'portal']) {
       const { token, resolved } = await seed({ anonymous: true, scope })
 
@@ -115,5 +125,16 @@ describe.skipIf(!fixture.available)('healStrandedPortalSession (real DB, rolled 
       expect(result).toBe(resolved)
       expect(await storedScope(resolved.session.id)).toBe(scope)
     }
+  })
+
+  it('leaves a session presented as a Bearer alone even when the site cookie rides along (S6)', async () => {
+    const { token, resolved } = await seed({ anonymous: true, scope: 'widget' })
+    const headers = viaCookie(token)
+    headers.set('authorization', `Bearer ${token}`)
+
+    const result = await healStrandedPortalSession(resolved, headers)
+
+    expect(result).toBe(resolved)
+    expect(await storedScope(resolved.session.id)).toBe('widget')
   })
 })

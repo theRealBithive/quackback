@@ -10,6 +10,19 @@
  * in-process calls still reach the handler. That is asserted here rather than
  * described, so a version that moves the check fails this instead of quietly
  * breaking the email change.
+ *
+ * Contract (upstream #689), confirmed:
+ *
+ * E1 When an address's domain requires SSO, the person cannot sign in by email link or code either. The refusal depends only on the domain, never on whether an account exists.
+ * E2 A person changes their email address only through the confirmed flow. The library's direct change endpoints cannot be reached over HTTP.
+ * E3 An address at a domain that requires SSO cannot be taken by the person's own change or by an admin's edit. Renaming someone whose address stays the same still works.
+ * E4 When an admin enters a new address, it is not treated as verified. An unchanged address keeps its verification.
+ * E5 When a domain's enforcing provider signs someone in with an address at that domain, that sign-in verifies the account it lands on, so the account links instead of staying stuck. Whoever held an unlinked account before loses their sessions.
+ * E6 An admin's edit that crosses with a concurrent change to the same address is refused, not silently overwritten.
+ *
+ * This suite holds E2's second sentence against the library itself; that the
+ * app's own instance is configured with this list is
+ * `email-change-wiring.test.ts`.
  */
 import { describe, it, expect } from 'vitest'
 import { betterAuth } from 'better-auth'
@@ -45,7 +58,7 @@ function post(path: string, body: unknown): Request {
 
 describe('email-change endpoints', () => {
   it.each(['/email-otp/request-email-change', '/email-otp/change-email'])(
-    'answers 404 to an HTTP request for %s',
+    'answers 404 to an HTTP request for %s (E2)',
     async (path) => {
       const res = await auth.handler(post(path, { newEmail: 'new@example.com', otp: '123456' }))
 
@@ -55,7 +68,7 @@ describe('email-change endpoints', () => {
 
   // The control: the same router still serves a sibling path, so the 404s
   // above are the disabled list and not a wrong base path.
-  it('still serves a sibling email-OTP path over HTTP', async () => {
+  it('still serves a sibling email-OTP path over HTTP (E2)', async () => {
     const res = await auth.handler(
       post('/email-otp/send-verification-otp', { email: 'someone@example.com', type: 'sign-in' })
     )
@@ -65,7 +78,7 @@ describe('email-change endpoints', () => {
 
   // In process the endpoint runs: with no session it refuses as unauthorized,
   // which only the handler itself can say.
-  it('still reaches the handler in process', async () => {
+  it('still reaches the handler in process (E2)', async () => {
     await expect(
       auth.api.requestEmailChangeEmailOTP({ body: { newEmail: 'new@example.com' } })
     ).rejects.toMatchObject({ status: 'UNAUTHORIZED' })

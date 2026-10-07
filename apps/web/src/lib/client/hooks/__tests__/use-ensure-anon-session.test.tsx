@@ -1,9 +1,19 @@
 // @vitest-environment happy-dom
 /**
- * Every post card in a list calls useEnsureAnonSession. The root route hands
- * the tree a fresh context object on each navigation, so reading the whole
- * context rendered every card again for a navigation that changed nothing
- * they show. Only whether a session exists matters to the hook.
+ * The portal's lazy anonymous sign-in, which every post card reaches through
+ * useEnsureAnonSession.
+ *
+ * Contract (confirmed list for batch K, upstream #644; the full list is in
+ * lib/server/auth/__tests__/session-audience.test.ts):
+ *
+ *   S8 The portal's sign-in sends the marker. The widget's does not.
+ *
+ * The widget half of S8 is held in
+ * components/widget/__tests__/widget-auth-provider-audience.test.tsx.
+ *
+ * Upstream's version of this suite also pinned that a navigation does not
+ * render the card again; that is a performance change this fork has not
+ * picked, so the test is not carried here.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
@@ -29,11 +39,9 @@ afterEach(() => {
   anonymousSignIn.mockClear()
 })
 
-let cardRenders = 0
 let ensure: () => Promise<boolean> = async () => false
 
 function Card() {
-  cardRenders++
   ensure = useEnsureAnonSession()
   return <p>card</p>
 }
@@ -58,20 +66,6 @@ function buildRouter(user: { id: string } | null) {
 }
 
 describe('useEnsureAnonSession', () => {
-  it('does not render its caller again for a navigation', async () => {
-    cardRenders = 0
-    const router = buildRouter({ id: 'user_1' })
-    render(<RouterProvider router={router} />)
-    await screen.findByText('card')
-    const settled = cardRenders
-
-    await act(() => router.navigate({ to: '/', search: { page: '2' } as never }))
-    await act(() => router.navigate({ to: '/', search: { page: '3' } as never }))
-
-    expect(router.state.location.search).toEqual({ page: '3' })
-    expect(cardRenders).toBe(settled)
-  })
-
   it('reports an existing session without signing in', async () => {
     const router = buildRouter({ id: 'user_1' })
     render(<RouterProvider router={router} />)
@@ -94,7 +88,7 @@ describe('useEnsureAnonSession', () => {
 
   // Without the marker the server tags the session for the widget, and every
   // portal write (post, vote, comment) is then refused by requireAuth.
-  it('marks its anonymous mint as the portal audience', async () => {
+  it('marks its anonymous mint as the portal audience (S8)', async () => {
     const router = buildRouter(null)
     render(<RouterProvider router={router} />)
     await screen.findByText('card')
