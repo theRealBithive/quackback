@@ -53,7 +53,18 @@ describe('the portal renders in the locale it is given (V5)', () => {
     expect(keys.filter((k) => /^(admin|settings|automation|activation)\./.test(k))).toEqual([])
   })
 
-  it('offers no way to resolve a locale of its own (V5)', () => {
-    expect(Object.keys(locale)).toEqual(['loadPortalIntl'])
+  // This used to assert that `loadPortalIntl` is the module's only export,
+  // which stated the guarantee too narrowly: #687 added a loader for the
+  // standalone /unsubscribe page that resolves nothing either. What V5 needs
+  // is that no export decides a language, so every export is handed one and
+  // must answer in exactly that one. The list stays explicit so a new export
+  // still has to be looked at.
+  it('offers no way to resolve a locale of its own (V5)', async () => {
+    expect(Object.keys(locale).sort()).toEqual(['loadPortalIntl', 'loadUnsubscribeIntl'])
+
+    for (const load of [locale.loadPortalIntl, locale.loadUnsubscribeIntl]) {
+      expect((await load('de')).locale).toBe('de')
+      expect((await load('fr')).locale).toBe('fr')
+    }
   })
 })
