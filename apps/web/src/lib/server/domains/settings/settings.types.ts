@@ -351,6 +351,11 @@ export interface PortalConfig {
   openSignup?: boolean
   /** Welcome message on the portal index. Optional — absent / empty body = hidden. */
   welcomeCard?: PortalWelcomeCard
+  /**
+   * The description a new post starts with on boards that have no template of
+   * their own. A suggestion, never enforced. Absent / empty = no template.
+   */
+  postTemplate?: TiptapContent
   /** Workspace-wide approval policy; applies to every board. */
   moderationDefault: ModerationDefault
   /** Portal-level access control (visibility gate). */
@@ -975,6 +980,8 @@ export interface UpdatePortalConfigInput {
   /** The portal's own signup answer; see {@link PortalConfig.openSignup}. */
   openSignup?: boolean
   welcomeCard?: Partial<PortalWelcomeCard>
+  /** Replaced wholesale; see {@link PortalConfig.postTemplate}. */
+  postTemplate?: TiptapContent
   moderationDefault?: ModerationDefault
   access?: Partial<PortalAccessConfig>
   /** Replaced wholesale (items is an ordered array — never merged). */
@@ -1019,6 +1026,8 @@ export interface PublicPortalConfig {
   oidcProviders?: OidcSignInButton[]
   /** Welcome message on the portal index. Absent / empty body = nothing rendered. */
   welcomeCard?: PortalWelcomeCard
+  /** Workspace default description template; absent when it has no visible text. */
+  postTemplate?: TiptapContent
   /**
    * Client-safe access control indicator. `isPrivate` and `widgetSignIn`
    * are exposed so the widget can decide whether to show the "Go to portal"

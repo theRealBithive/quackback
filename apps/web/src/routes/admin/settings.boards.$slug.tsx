@@ -18,6 +18,7 @@ import { BackLink } from '@/components/ui/back-link'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { BoardSettingsCrumb } from '@/components/admin/settings/channel-settings-crumb'
 import { BoardGeneralForm } from '@/components/admin/settings/boards/board-general-form'
+import { BoardDescriptionTemplateForm } from '@/components/admin/settings/boards/board-description-template-form'
 import { BoardAccessForm } from '@/components/admin/settings/boards/board-access-form'
 import { BoardModerationForm } from '@/components/admin/settings/boards/board-moderation-form'
 import { BoardImportSection } from '@/components/admin/settings/boards/board-import-section'
@@ -136,6 +137,17 @@ function BoardSettingsPage() {
         <TabsContent value="general" className="space-y-6">
           <SettingsCard>
             <BoardGeneralForm key={currentBoard.id} board={currentBoard} />
+          </SettingsCard>
+
+          <SettingsCard
+            title="Description template"
+            description="What a new post on this board starts with — the details your team would like to see. Authors can change or delete it. Leave empty to use the workspace default from Portal settings."
+          >
+            <BoardDescriptionTemplateForm
+              key={currentBoard.id}
+              boardId={currentBoard.id}
+              template={currentBoard.settings?.descriptionTemplate}
+            />
           </SettingsCard>
 
           <SettingsCard title="Danger Zone" variant="danger">

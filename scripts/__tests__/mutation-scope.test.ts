@@ -367,6 +367,17 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/lib/server/policy/__tests__/message-edit-delete.contract.test.ts',
         ],
       },
+      {
+        file: 'apps/web/src/lib/shared/post-template.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/post-template.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/client/hooks/use-post-template-prefill.ts',
+        suites: [
+          'apps/web/src/lib/client/hooks/__tests__/use-post-template-prefill.test.tsx',
+          'apps/web/src/components/admin/settings/__tests__/post-template-real-editor.test.tsx',
+        ],
+      },
     ])
   })
 

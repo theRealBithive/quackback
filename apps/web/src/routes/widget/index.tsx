@@ -36,7 +36,7 @@ import { useWidgetAuth } from '@/components/widget/widget-auth-provider'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { widgetChangelogListQuery } from '@/components/widget/widget-changelog-query'
 import { widgetHelpCategoriesQuery } from '@/components/widget/widget-help-query'
-import { fetchBoardCapabilitiesFn } from '@/lib/server/functions/portal'
+import { fetchBoardCapabilitiesFn, type WidgetVisibleBoard } from '@/lib/server/functions/portal'
 import { getShowPoweredByFn } from '@/lib/server/functions/powered-by'
 import { listPublicArticlesFn } from '@/lib/server/functions/help-center'
 import { getWidgetAuthHeaders } from '@/lib/client/widget-auth'
@@ -246,11 +246,14 @@ export const Route = createFileRoute('/widget/')({
       // the signed identity token). Re-filtering by audience.kind here
       // would silently drop authenticated/segment boards that the actor
       // is legitimately allowed to see.
-      boards: portalData.boards.map((b) => ({
+      boards: portalData.boards.map((b): WidgetVisibleBoard => ({
         id: b.id as string,
         name: b.name,
         slug: b.slug,
+        descriptionTemplate: b.settings?.descriptionTemplate,
       })),
+      // Workspace default description template, for boards without their own.
+      postTemplate: settings?.publicPortalConfig?.postTemplate,
       orgSlug: settings?.slug ?? '',
       // Per-board submit/vote capability for the request actor, server-computed
       // (boardCapabilitiesForActor composes each board's access tier with the
@@ -387,6 +390,7 @@ function WidgetPage() {
     postsHasMore,
     statuses,
     boards,
+    postTemplate,
     orgSlug,
     boardPermissions,
     tabs,
@@ -1107,6 +1111,7 @@ function WidgetPage() {
             initialHasMore={postsHasMore}
             statuses={statuses}
             boards={liveBoards}
+            workspacePostTemplate={postTemplate}
             boardPermissions={livePermissions}
             defaultBoard={defaultBoard}
             initialBoardSlug={initialBoardSlug}

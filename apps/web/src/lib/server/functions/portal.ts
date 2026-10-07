@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { TiptapContent } from '@/lib/shared/db-types'
 import { createServerFn } from '@tanstack/react-start'
 import {
   type PostId,
@@ -765,8 +766,15 @@ export const fetchBoardCapabilitiesFn = createServerFn({ method: 'GET' }).handle
       id: String(board.id),
       name: board.name,
       slug: board.slug,
+      descriptionTemplate: board.settings?.descriptionTemplate,
     })),
   }
 })
 
-export type WidgetVisibleBoard = { id: string; name: string; slug: string }
+export type WidgetVisibleBoard = {
+  id: string
+  name: string
+  slug: string
+  /** The board's own description template; the widget resolves the fallback. */
+  descriptionTemplate?: TiptapContent
+}

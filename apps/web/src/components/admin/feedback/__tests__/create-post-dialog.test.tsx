@@ -14,6 +14,11 @@ import type { CurrentUser } from '@/lib/shared/types/inbox'
 
 const createPost = vi.hoisted(() => ({ mutate: vi.fn(), reset: vi.fn() }))
 
+// The dialog reads the workspace's default post template from the root route.
+vi.mock('@tanstack/react-router', () => ({
+  useRouteContext: () => ({ settings: null }),
+}))
+
 // The editor stands in for TipTap: a textarea that reports what it holds
 // through the same (json, html, markdown) callback the real one uses.
 vi.mock('@/components/ui/rich-text-editor', () => ({

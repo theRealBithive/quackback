@@ -23,6 +23,8 @@ import type { BoardSettings } from '@/lib/shared/db-types'
 import { signOut } from '@/lib/client/auth-client'
 import { removeViewerScopedPortalQueries } from '@/lib/client/queries/portal'
 import { resolveSubmitState } from '@/components/public/feedback/submit-permission'
+import { resolvePostTemplate } from '@/lib/shared/post-template'
+import { usePostTemplatePrefill } from '@/lib/client/hooks/use-post-template-prefill'
 import type { JSONContent } from '@tiptap/react'
 
 interface BoardOption {
@@ -63,7 +65,7 @@ export function FeedbackHeaderAnimated({
   const intl = useIntl()
   const router = useRouter()
   const queryClient = useQueryClient()
-  const { session } = useRouteContext({ from: '__root__' })
+  const { session, settings } = useRouteContext({ from: '__root__' })
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState('')
   const { openAuthPopover } = useAuthPopover()
@@ -117,6 +119,16 @@ export function FeedbackHeaderAnimated({
   // these client-side (same rules the server enforces on write).
   const selectedBoard = boards.find((b) => b.id === selectedBoardId)
   const boardCustomFields = selectedBoard?.settings?.customFields ?? []
+
+  const descriptionTemplate = resolvePostTemplate(
+    selectedBoard?.settings?.descriptionTemplate,
+    settings?.publicPortalConfig?.postTemplate
+  )
+  const descriptionPrefill = usePostTemplatePrefill({
+    template: descriptionTemplate,
+    description: contentJson,
+    setDescription: setContentJson,
+  })
 
   // Focus title input when form expands
   useEffect(() => {
@@ -245,7 +257,7 @@ export function FeedbackHeaderAnimated({
   function resetForm() {
     setSelectedBoardId(defaultBoardId || '')
     setTitle('')
-    setContentJson(null)
+    descriptionPrefill.reset()
     setContentMarkdown('')
     setCustomFieldValues({})
     setError('')

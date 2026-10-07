@@ -319,6 +319,19 @@ export function publicWelcomeCard(
 }
 
 /**
+ * Project the workspace default post template for public consumption: present
+ * only when it has visible text, so readers never receive an empty shell.
+ *
+ * @internal
+ */
+export function publicPostTemplate(template: TiptapContent | undefined): {
+  postTemplate?: TiptapContent
+} {
+  if (isEmptyTiptapDoc(template)) return {}
+  return { postTemplate: template }
+}
+
+/**
  * Normalize a partial `welcomeCard` update before it's merged into stored
  * portalConfig. Runs the TipTap body through the standard sanitizer.
  *
