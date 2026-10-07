@@ -34,6 +34,8 @@ const hoisted = vi.hoisted(() => ({
 
 // The exported const stays callable, so the suite reaches toggleVoteFn by name.
 vi.mock('@tanstack/react-start', () => ({
+  // #555 moved handler bodies into createServerOnlyFn helpers; run them as-is.
+  createServerOnlyFn: <T>(fn: T) => fn,
   createServerFn: () => {
     const chain = {
       validator: () => chain,

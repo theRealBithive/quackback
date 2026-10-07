@@ -51,9 +51,9 @@ vi.mock('../widget-vote-button', () => ({ WidgetVoteButton: () => null }))
 vi.mock('@/lib/client/hooks/use-infinite-scroll', () => ({
   useInfiniteScroll: () => ({ current: null }),
 }))
-vi.mock('@/lib/server/functions/public-posts', () => ({
-  listPublicPostsFn: vi.fn(async () => ({ items: [], total: 0, hasMore: false })),
-  createPublicPostFn: mockCreatePublicPost,
+vi.mock('@/lib/server/functions/widget/posts', () => ({
+  widgetListPublicPostsFn: vi.fn(async () => ({ items: [], total: 0, hasMore: false })),
+  widgetCreatePublicPostFn: mockCreatePublicPost,
 }))
 
 import { WidgetHomeAnimated } from '../widget-home-animated'

@@ -23,6 +23,8 @@ type AnyHandler = (ctx: { data: unknown }) => Promise<unknown>
 
 const handlers: AnyHandler[] = []
 vi.mock('@tanstack/react-start', () => ({
+  // #555 moved handler bodies into createServerOnlyFn helpers; run them as-is.
+  createServerOnlyFn: <T>(fn: T) => fn,
   createServerFn: () => {
     const chain = {
       validator() {

@@ -29,9 +29,17 @@ vi.mock('@/lib/server/functions/conversation', () => ({
   mintConversationStreamTokenFn: vi.fn(async () => ({ token: null })),
   submitCsatFn: vi.fn(),
   markConversationReadFn: vi.fn(),
+  // #555 reaches these through the visitor RPC module, which loads them all.
+  sendConversationTypingFn: vi.fn(async () => ({})),
 }))
 vi.mock('@/lib/server/functions/tickets', () => ({
   getConversationLinkedTicketFn: vi.fn(async () => null),
+  createMyTicketFn: vi.fn(),
+  getMyTicketStageLabelsFn: vi.fn(async () => ({})),
+  getMyTicketFormFn: vi.fn(async () => null),
+  getMyTicketWatchStatusFn: vi.fn(async () => ({ watching: false })),
+  watchMyTicketFn: vi.fn(),
+  unwatchMyTicketFn: vi.fn(),
 }))
 vi.mock('@/lib/server/functions/widget-capabilities', () => ({
   getWidgetCapabilitiesFn: vi.fn(async () => ({

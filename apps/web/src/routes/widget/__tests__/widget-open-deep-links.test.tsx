@@ -49,11 +49,11 @@ const fetchBoardCapabilitiesFn = vi.fn(async () => ({
   permissions: {} as Record<string, unknown>,
   boards: [] as Array<{ id: string; name: string; slug: string }>,
 }))
-vi.mock('@/lib/server/functions/portal', () => ({
-  fetchBoardCapabilitiesFn: (...args: unknown[]) => fetchBoardCapabilitiesFn(...(args as [])),
+vi.mock('@/lib/server/functions/widget/posts', () => ({
+  widgetFetchBoardCapabilitiesFn: (...args: unknown[]) => fetchBoardCapabilitiesFn(...(args as [])),
 }))
 vi.mock('@/lib/server/functions/powered-by', () => ({ getShowPoweredByFn: vi.fn() }))
-vi.mock('@/lib/server/functions/help-center', () => ({ listPublicArticlesFn: vi.fn() }))
+vi.mock('@/lib/server/functions/widget/help', () => ({ widgetListPublicArticlesFn: vi.fn() }))
 vi.mock('@/components/widget/use-messenger-presence', () => ({
   CONVERSATION_PRESENCE_QUERY_KEY: ['presence'],
   useConversationPresence: () => ({ agentsOnline: 0, withinOfficeHours: true, nextOpenAt: null }),

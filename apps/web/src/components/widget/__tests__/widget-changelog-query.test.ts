@@ -20,8 +20,8 @@ const listPublicChangelogsFn = vi.fn(async () => ({
   items: [{ id: 'chg_1' }],
   nextCursor: 'cursor-2',
 }))
-vi.mock('@/lib/server/functions/changelog', () => ({
-  listPublicChangelogsFn: (...args: unknown[]) => listPublicChangelogsFn(...(args as [])),
+vi.mock('@/lib/server/functions/widget/changelog', () => ({
+  widgetListPublicChangelogsFn: (...args: unknown[]) => listPublicChangelogsFn(...(args as [])),
 }))
 
 const widgetAuthHeaders = { Authorization: 'Bearer widget-token' }

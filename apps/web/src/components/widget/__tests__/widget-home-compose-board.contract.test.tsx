@@ -92,9 +92,9 @@ vi.mock('@/components/ui/rich-text-editor', () => ({
   RichTextEditor: () => <div data-testid="editor" />,
 }))
 vi.mock('@/components/ui/select', async () => import('@/test/radix-select'))
-vi.mock('@/lib/server/functions/public-posts', () => ({
-  listPublicPostsFn: vi.fn(async () => ({ items: [], hasMore: false, total: 0 })),
-  createPublicPostFn: (...args: unknown[]) => createPost(...args),
+vi.mock('@/lib/server/functions/widget/posts', () => ({
+  widgetListPublicPostsFn: vi.fn(async () => ({ items: [], hasMore: false, total: 0 })),
+  widgetCreatePublicPostFn: (...args: unknown[]) => createPost(...args),
 }))
 
 import { WidgetHomeAnimated } from '../widget-home-animated'
