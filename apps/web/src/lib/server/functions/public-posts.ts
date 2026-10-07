@@ -33,7 +33,6 @@ import {
 import { createPost } from '@/lib/server/domains/posts/post.service'
 import { voteOnPost } from '@/lib/server/domains/posts/post.voting'
 import { checkAnonVoteRateLimit } from '@/lib/server/utils/anon-rate-limit'
-import { getClientIp } from '@/lib/server/domains/api/rate-limit'
 import { getPostPermissions } from '@/lib/server/domains/posts/post.permissions'
 import { userEditPost, softDeletePost } from '@/lib/server/domains/posts/post.user-actions'
 import { getPublicBoardById } from '@/lib/server/domains/boards/board.public'
@@ -397,9 +396,11 @@ export const toggleVoteFn = createServerFn({ method: 'POST' })
           throw new Error('Anonymous interaction is not enabled')
         }
 
-        // Rate limit anonymous voters by IP. Resolved the same way as the
-        // `ipAddress` Better Auth records on the anonymous sessions it counts.
-        const ip = getClientIp(getRequestHeaders())
+        // Rate limit anonymous voters by IP. The limiter counts anonymous
+        // sessions by their stored `ipAddress`, so it must be handed that exact
+        // form. 'unknown' matches no stored session when there is no address.
+        const { sessionIpAddressOf } = await import('@/lib/server/auth/client-ip')
+        const ip = sessionIpAddressOf(getRequestHeaders()) ?? 'unknown'
         if (!(await checkAnonVoteRateLimit(ip))) {
           throw new Error('Too many votes, please try again later')
         }

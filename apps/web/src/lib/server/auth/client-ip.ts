@@ -19,6 +19,7 @@
  * picks the address.
  */
 import { isIP } from 'node:net'
+import { getIP } from 'better-auth/api'
 import { getClientIp } from '@/lib/server/domains/api/rate-limit'
 
 export const CLIENT_IP_HEADER = 'x-quackback-client-ip'
@@ -40,6 +41,21 @@ export function withTrustedClientIp(source: HeadersInit): Headers {
   const ip = getClientIp(headers)
   if (isIP(ip)) headers.set(CLIENT_IP_HEADER, ip)
   return headers
+}
+
+/**
+ * The `ipAddress` Better Auth stores on a session minted by a request with
+ * these headers, in the exact form it stores it, or `null` when it resolves
+ * none.
+ *
+ * The form matters to anything that compares an address with stored sessions:
+ * Better Auth reduces an IPv6 address to its /64 network and unwraps an
+ * IPv4-mapped one (`::ffff:192.0.2.1` is stored as `192.0.2.1`), so the raw
+ * resolved address never equals the stored one for those clients. Asking the
+ * library rather than repeating its rules keeps the two from drifting apart.
+ */
+export function sessionIpAddressOf(source: HeadersInit): string | null {
+  return getIP(withTrustedClientIp(source), { advanced: { ipAddress: betterAuthIpAddressOptions } })
 }
 
 /**
