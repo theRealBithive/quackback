@@ -393,6 +393,37 @@
     {
       "file": "apps/web/src/lib/shared/widget-visible-board.ts",
       "suites": ["apps/web/src/lib/shared/__tests__/widget-visible-board.test.ts"]
+    },
+    {
+      "file": "apps/web/src/lib/shared/utils/date.ts",
+      "suites": [
+        "apps/web/src/lib/shared/utils/__tests__/date.test.ts",
+        "apps/web/src/components/ui/__tests__/calendar-date.batch-l.contract.test.tsx",
+        "apps/web/src/components/portal/status/__tests__/status-page.batch-l.contract.test.tsx"
+      ]
+    },
+    {
+      "file": "apps/web/src/components/ui/format-number.ts",
+      "suites": [
+        "apps/web/src/components/ui/__tests__/format-number.test.tsx",
+        "apps/web/src/components/ui/__tests__/format-number.batch-l.contract.test.tsx"
+      ]
+    },
+    {
+      "file": "apps/web/src/components/ui/local-date.tsx",
+      "suites": [
+        "apps/web/src/components/ui/__tests__/local-date.batch-l.contract.test.tsx",
+        "apps/web/src/components/ui/__tests__/local-date-hydration.test.tsx",
+        "apps/web/src/components/ui/__tests__/calendar-date.batch-l.contract.test.tsx"
+      ]
+    },
+    {
+      "file": "apps/web/src/components/ui/time-ago.tsx",
+      "suites": [
+        "apps/web/src/components/ui/__tests__/time-ago.batch-l.contract.test.tsx",
+        "apps/web/src/components/ui/__tests__/time-ago.contract.test.tsx",
+        "apps/web/src/components/ui/__tests__/time-ago-hydration.test.tsx"
+      ]
     }
   ],
   "equivalents": [

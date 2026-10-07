@@ -2362,6 +2362,21 @@ through the library's own `getIP` (`sessionIpAddressOf` in `auth/client-ip.ts`).
 The library reads `NODE_ENV` once at module load, so the production-only
 fallback cannot be stubbed per test.
 
+## 1x — A fresh `git worktree` has no `node_modules`, and every tool fails as if the code were broken
+
+A second worktree for a parallel batch shares the git objects but not the
+install. Until `bun install` runs inside it, vitest, tsc and the gates fail
+with module-resolution errors that read like a broken pick. Run `bun install`
+first in any new worktree.
+
+## 1x — A date fixture that happens to fall on the real "today" collides with the preset labels
+
+Date pickers and filters render presets ("Today", "Yesterday") next to the
+formatted dates. A fixture date written as a literal can coincide with the
+machine's current day, and the query by text then finds two matches, or none
+once the date passes. Pin the clock (`vi.setSystemTime`) to a day far from any
+fixture, or derive fixtures from the pinned clock.
+
 ## Resolved
 
 Entries that were actually fixed, with what fixed them.
