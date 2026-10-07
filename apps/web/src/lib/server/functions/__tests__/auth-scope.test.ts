@@ -61,6 +61,27 @@
  *   R9        lib/server/functions/__tests__/workspace-api-access.test.ts and
  *             onboarding-bootstrap-claim.db.test.ts
  *   R13       lib/client/mutations/__tests__/inbox-list-cache.test.ts
+ *
+ * Batch K (upstream #644) adds the audience of anonymous sessions. The full
+ * S list is in auth/__tests__/session-audience.test.ts; the clauses pinned
+ * here, through the helpers every gate goes through, are:
+ *
+ *   S1 An anonymous session minted by the portal is a portal session. One
+ *      minted by the widget, or by any client that does not say, is a widget
+ *      session.
+ *   S4 Neither anonymous audience carries any team authority: no team role and
+ *      no permissions, whichever audience it is.
+ *   S5 A portal visitor whose anonymous session was tagged as a widget session
+ *      is retagged as a portal session the next time they make a request,
+ *      provided it arrives as the site's session cookie, without a bearer
+ *      token, and belongs to an anonymous user.
+ *   S6 An identified widget session, and any session presented as a bearer
+ *      token, is never retagged.
+ *   S7 If the retag cannot be written, the session stays as it was and the
+ *      request goes on.
+ *
+ * In this fork `requireAuth` does not refuse a widget session outright (that
+ * is upstream #555, not picked), so S4 is pinned as authority, not refusal.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
@@ -71,19 +92,26 @@ vi.mock('@/lib/server/auth', () => ({
   auth: { api: { getSession: (...args: unknown[]) => mockGetSession(...args) } },
 }))
 
+const request = vi.hoisted(() => ({ headers: new Headers() }))
 vi.mock('@tanstack/react-start/server', () => ({
-  getRequestHeaders: () => new Headers(),
+  getRequestHeaders: () => request.headers,
 }))
 
 const mockPrincipalFindFirst = vi.fn()
+// The retag of a stranded portal session (S5) writes through `db.update`.
+const mockRetagWhere = vi.fn()
+const mockDbUpdate = vi.fn(() => ({ set: () => ({ where: mockRetagWhere }) }))
 vi.mock('@/lib/server/db', () => ({
   db: {
     query: {
       principal: { findFirst: (...args: unknown[]) => mockPrincipalFindFirst(...args) },
     },
+    update: () => mockDbUpdate(),
   },
   principal: {},
+  session: { id: 'session.id', scope: 'session.scope' },
   eq: vi.fn(),
+  and: vi.fn(),
 }))
 
 vi.mock('../auth-request-cache', () => ({
@@ -118,7 +146,13 @@ import {
   requireAuth,
 } from '../auth-helpers'
 import { ensurePrincipalForUser } from '@/lib/server/domains/principals/principal.factory'
-import { isTeamMember, sessionRole, toSessionScope } from '@/lib/shared/roles'
+import {
+  SESSION_AUDIENCE_HEADER,
+  isTeamMember,
+  sessionRole,
+  toSessionScope,
+} from '@/lib/shared/roles'
+import { assignSessionScope } from '@/lib/server/auth/session-audience'
 
 /** The three audiences a session may legitimately carry. */
 const KNOWN_SCOPES = ['dashboard', 'widget', 'portal'] as const
@@ -152,6 +186,8 @@ function sessionWithScope(scope: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  request.headers = new Headers()
+  mockRetagWhere.mockResolvedValue(undefined)
   mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_1', role: 'admin', type: 'user' })
   vi.mocked(ensurePrincipalForUser).mockResolvedValue({
     principal: { id: 'principal_1', role: 'admin', type: 'user' } as never,
@@ -239,6 +275,166 @@ describe('requireAuth without a permission (R2, R7)', () => {
       ),
       { numRuns: 200 }
     )
+  })
+})
+
+// The mint decision and the gate, end to end: the scope assignSessionScope
+// stamps on a fresh anonymous session is the scope requireAuth then reads.
+describe('anonymous sessions minted by each surface', () => {
+  async function mintedAnonymousSession(headers: Record<string, string>) {
+    const minted = await assignSessionScope(
+      { userId: 'user_anon', token: 'tok' },
+      { path: '/sign-in/anonymous', headers: new Headers(headers) }
+    )
+    return {
+      session: { id: 'sess_anon', scope: minted?.data.scope },
+      user: { id: 'user_anon', email: 'temp-x@anon.invalid', name: 'Anon', image: null },
+    }
+  }
+
+  beforeEach(() => {
+    mockPrincipalFindFirst.mockResolvedValue({
+      id: 'principal_anon',
+      role: 'user',
+      type: 'anonymous',
+    })
+  })
+
+  it('lets a portal anonymous session through requireAuth as an anonymous portal user (S1, S4)', async () => {
+    mockGetSession.mockResolvedValue(
+      await mintedAnonymousSession({ [SESSION_AUDIENCE_HEADER]: 'portal' })
+    )
+
+    const auth = await requireAuth()
+    expect(auth.scope).toBe('portal')
+    expect(auth.principal).toEqual({ id: 'principal_anon', role: 'user', type: 'anonymous' })
+    expect(auth.permissions).toEqual([])
+  })
+
+  it('refuses a portal anonymous session at a permission gate (S4)', async () => {
+    mockGetSession.mockResolvedValue(
+      await mintedAnonymousSession({ [SESSION_AUDIENCE_HEADER]: 'portal' })
+    )
+
+    await expect(requireAuth({ permission: PERMISSIONS.SETTINGS_MANAGE })).rejects.toThrow(
+      /dashboard session/
+    )
+  })
+})
+
+describe('anonymous sessions carry no team authority, whichever surface minted them (S4)', () => {
+  it('holds for any marker, any surface, and any role the principal row claims', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.option(fc.constantFrom('portal', 'widget', 'Portal', ''), { nil: undefined }),
+        fc.constantFrom('admin', 'member', 'user'),
+        async (marker, rowRole) => {
+          const headers: Record<string, string> = {}
+          if (marker !== undefined) headers[SESSION_AUDIENCE_HEADER] = marker
+          const minted = await assignSessionScope(
+            { userId: 'user_anon', token: 'tok' },
+            { path: '/sign-in/anonymous', headers: new Headers(headers) }
+          )
+          mockGetSession.mockResolvedValue({
+            session: { id: 'sess_anon', scope: minted?.data.scope },
+            user: { id: 'user_anon', email: 'temp-x@anon.invalid', name: 'Anon', image: null },
+          })
+          mockPrincipalFindFirst.mockResolvedValue({
+            id: 'principal_anon',
+            role: rowRole,
+            type: 'anonymous',
+          })
+
+          const auth = await requireAuth()
+
+          expect(['portal', 'widget']).toContain(auth.scope)
+          expect(isTeamMember(auth.principal.role)).toBe(false)
+          expect(auth.permissions).toEqual([])
+          await expect(requireAuth({ permission: PERMISSIONS.SETTINGS_MANAGE })).rejects.toThrow(
+            /dashboard session/
+          )
+        }
+      ),
+      { numRuns: 60 }
+    )
+  })
+})
+
+// The retag runs where the session is read for every gate (getSessionDirect),
+// which is fork-specific placement: upstream heals in getRequestSession.
+describe('a portal visitor stranded on a widget-tagged anonymous session (S5, S6, S7)', () => {
+  function anonymousSession(scope: string, isAnonymous: boolean) {
+    return {
+      session: { id: 'sess_anon', scope },
+      user: {
+        id: 'user_anon',
+        email: 'temp-x@anon.invalid',
+        name: 'Anon',
+        image: null,
+        isAnonymous,
+      },
+    }
+  }
+
+  beforeEach(() => {
+    mockPrincipalFindFirst.mockResolvedValue({
+      id: 'principal_anon',
+      role: 'user',
+      type: 'anonymous',
+    })
+  })
+
+  it('is read as a portal session on the request that carries the site cookie (S5)', async () => {
+    request.headers = new Headers({ cookie: 'better-auth.session_token=tok.sig' })
+    mockGetSession.mockResolvedValue(anonymousSession('widget', true))
+
+    const auth = await requireAuth()
+
+    expect(auth.scope).toBe('portal')
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1)
+    expect(mockGetSession).toHaveBeenCalledWith({ headers: request.headers })
+  })
+
+  it('stays widget when the same session is presented as a Bearer (S6)', async () => {
+    request.headers = new Headers({
+      cookie: 'better-auth.session_token=tok.sig',
+      authorization: 'Bearer tok',
+    })
+    mockGetSession.mockResolvedValue(anonymousSession('widget', true))
+
+    const auth = await requireAuth()
+
+    expect(auth.scope).toBe('widget')
+    expect(mockDbUpdate).not.toHaveBeenCalled()
+  })
+
+  it('stays widget for an identified widget user, cookie or not (S6)', async () => {
+    request.headers = new Headers({ cookie: 'better-auth.session_token=tok.sig' })
+    mockGetSession.mockResolvedValue(anonymousSession('widget', false))
+
+    const auth = await requireAuth()
+
+    expect(auth.scope).toBe('widget')
+    expect(mockDbUpdate).not.toHaveBeenCalled()
+  })
+
+  it('goes on as a widget session when the retag cannot be written (S7)', async () => {
+    request.headers = new Headers({ cookie: 'better-auth.session_token=tok.sig' })
+    mockGetSession.mockResolvedValue(anonymousSession('widget', true))
+    mockRetagWhere.mockRejectedValue(new Error('connection terminated'))
+
+    const auth = await requireAuth()
+
+    expect(auth.scope).toBe('widget')
+    expect(auth.principal.id).toBe('principal_anon')
+  })
+
+  it('answers as signed out, without a retag, when there is no session at all', async () => {
+    request.headers = new Headers({ cookie: 'better-auth.session_token=tok.sig' })
+    mockGetSession.mockResolvedValue(null)
+
+    await expect(getOptionalAuth()).resolves.toBeNull()
+    expect(mockDbUpdate).not.toHaveBeenCalled()
   })
 })
 

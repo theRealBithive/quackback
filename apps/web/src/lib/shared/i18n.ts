@@ -148,6 +148,29 @@ export function loadMessages(locale: SupportedLocale): Promise<Record<string, st
 }
 
 /**
+ * Key prefix for the standalone /unsubscribe page. That page seeds only these
+ * (see {@link loadUnsubscribeMessages}), and no other surface renders them; the
+ * portal slice leaves them out because none of its prefixes match.
+ */
+export const UNSUBSCRIBE_MESSAGE_PREFIX = 'unsubscribe.'
+
+export function isUnsubscribeMessage(key: string): boolean {
+  return key.startsWith(UNSUBSCRIBE_MESSAGE_PREFIX)
+}
+
+/** The /unsubscribe page's strings in a locale, which is all that page renders. */
+export async function loadUnsubscribeMessages(
+  locale: SupportedLocale
+): Promise<Record<string, string>> {
+  const all = await loadMessages(locale)
+  const subset: Record<string, string> = {}
+  for (const [key, value] of Object.entries(all)) {
+    if (isUnsubscribeMessage(key)) subset[key] = value
+  }
+  return subset
+}
+
+/**
  * Key prefixes the widget surface renders (widget views plus the shared
  * Ask-AI / ui / common strings they embed). Everything else in the catalog is
  * portal/admin copy the iframe never shows.

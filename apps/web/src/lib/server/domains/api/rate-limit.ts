@@ -134,8 +134,13 @@ export function getClientIp(source: Request | Headers): string {
       .split(',')
       .map((part) => part.trim())
       .filter(Boolean)
-    const candidate = chain[Math.max(0, chain.length - trustedHops)]
-    if (candidate && isIP(candidate)) return candidate
+    // A chain shorter than the trusted hop count has no entry a trusted proxy
+    // wrote at that position; its first entry may be the client's own.
+    const chainReachesTrustedPosition = chain.length >= trustedHops
+    if (chainReachesTrustedPosition) {
+      const candidate = chain[chain.length - trustedHops]
+      if (isIP(candidate)) return candidate
+    }
   }
 
   // No usable X-Forwarded-For entry at the trusted-hop position.

@@ -94,8 +94,47 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         ],
       },
       {
-        file: 'apps/web/src/lib/server/auth/session-scope.ts',
-        suites: ['apps/web/src/lib/server/auth/__tests__/session-scope-on-create.test.ts'],
+        file: 'apps/web/src/lib/server/auth/session-audience.ts',
+        suites: [
+          'apps/web/src/lib/server/auth/__tests__/session-scope-on-create.test.ts',
+          'apps/web/src/lib/server/auth/__tests__/session-audience.test.ts',
+          'apps/web/src/lib/server/auth/__tests__/session-audience-heal.db.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/auth/client-ip.ts',
+        suites: [
+          'apps/web/src/lib/server/auth/__tests__/client-ip.test.ts',
+          'apps/web/src/lib/server/auth/__tests__/client-ip-wiring.test.ts',
+          'apps/web/src/lib/server/functions/__tests__/anon-vote-client-ip.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/auth/http-disabled-paths.ts',
+        suites: ['apps/web/src/lib/server/auth/__tests__/http-disabled-paths.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/auth/sso-managed-email.ts',
+        suites: [
+          'apps/web/src/lib/server/auth/__tests__/sso-managed-email.test.ts',
+          'apps/web/src/lib/server/domains/users/__tests__/user-update.db.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/runtime-error-log.ts',
+        suites: ['apps/web/src/lib/server/__tests__/runtime-error-log.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/shared/unsubscribe-token.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/unsubscribe-token.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/one-click-unsubscribe.ts',
+        suites: ['apps/web/src/lib/server/functions/__tests__/one-click-unsubscribe.test.ts'],
+      },
+      {
+        file: 'packages/email/src/list-unsubscribe.ts',
+        suites: ['packages/email/src/__tests__/list-unsubscribe.test.ts'],
       },
       {
         file: 'apps/web/src/lib/server/realtime/stream-token.ts',
@@ -1004,6 +1043,69 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: 'if (description === null) return true',
         replacement: 'false',
         why: 'isEmptyTiptapDoc treats a missing document as empty, so for a null description the next line returns true as well. This line exists for the type checker, which needs description narrowed to a document before hasSameVisibleContent; no input can tell the two paths apart.',
+      },
+      {
+        file: 'apps/web/src/lib/server/runtime-error-log.ts',
+        mutator: 'ConditionalExpression',
+        line: "if (original && typeof original === 'object' && accountedFor.has(original)) return",
+        replacement: 'true',
+        why: expect.stringContaining('The two type checks only narrow `original` for the'),
+      },
+      {
+        file: 'apps/web/src/lib/server/runtime-error-log.ts',
+        mutator: 'LogicalOperator',
+        line: "if (original && typeof original === 'object' && accountedFor.has(original)) return",
+        replacement: "original || typeof original === 'object'",
+        why: expect.stringContaining('Same line, same reason: `original` is never nullis'),
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/one-click-unsubscribe.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (!request.body) return new Uint8Array()',
+        replacement: 'false',
+        why: expect.stringContaining('A request with no body is not a one-click request '),
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/one-click-unsubscribe.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (!body) return false',
+        replacement: 'false',
+        why: expect.stringContaining('A null body (over the cap) goes on to TextDecoder.'),
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/one-click-unsubscribe.ts',
+        mutator: 'StringLiteral',
+        line: "const contentType = request.headers.get('content-type') ?? ''",
+        replacement: '"Stryker was here!"',
+        why: expect.stringContaining("The fallback is read only by startsWith('multipart"),
+      },
+      {
+        file: 'apps/web/src/lib/server/functions/one-click-unsubscribe.ts',
+        mutator: 'BlockStatement',
+        line: '} catch {',
+        replacement: '{}',
+        why: expect.stringContaining('With the block emptied the function resolves to un'),
+      },
+      {
+        file: 'packages/email/src/list-unsubscribe.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (!unsubscribeUrl) return {}',
+        replacement: 'false',
+        why: expect.stringContaining('The guard spares a throw the catch below absorbs: '),
+      },
+      {
+        file: 'apps/web/src/lib/server/auth/session-audience.ts',
+        mutator: 'StringLiteral',
+        line: "return /(?:^|;)\\s*(?:__Secure-)?better-auth\\.session_token=/.test(headers.get('cookie') ?? '')",
+        replacement: '"Stryker was here!"',
+        why: expect.stringContaining('The fallback stands in for a missing Cookie header'),
+      },
+      {
+        file: 'apps/web/src/lib/server/auth/sso-managed-email.ts',
+        mutator: 'BooleanLiteral',
+        line: 'columns: { id: true },',
+        replacement: 'false',
+        why: expect.stringContaining('The lookup is read only for whether a row came bac'),
       },
     ])
   })

@@ -20,6 +20,18 @@
  * The control that keeps this honest is `sees the two worlds as different`: it
  * proves the policy really did decide differently underneath. Without it, an
  * accidentally-inert gate would satisfy every equality assertion here.
+ *
+ * Contract (upstream #689), confirmed:
+ *
+ * E1 When an address's domain requires SSO, the person cannot sign in by email link or code either. The refusal depends only on the domain, never on whether an account exists.
+ * E2 A person changes their email address only through the confirmed flow. The library's direct change endpoints cannot be reached over HTTP.
+ * E3 An address at a domain that requires SSO cannot be taken by the person's own change or by an admin's edit, unless the account already signs in through that domain's provider. Renaming someone whose address stays the same still works.
+ * E4 When an admin enters a new address, it is not treated as verified. An unchanged address keeps its verification.
+ * E5 When a domain's enforcing provider signs someone in with an address at that domain, that sign-in verifies the account it lands on, so the account links instead of staying stuck. Whoever held an unlinked account before loses their sessions.
+ * E6 An admin's edit that crosses with a concurrent change to the same address is refused, not silently overwritten.
+ * E7 An address at a domain that requires SSO cannot be given up for one the provider does not manage.
+ *
+ * Only E1 is held here, in the describe at the end.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -35,6 +47,7 @@ const hoisted = vi.hoisted(() => ({
   createVerificationOTP: vi.fn(async () => '123456'),
   createVerificationValue: vi.fn(async () => ({ id: 'v_1' })),
   rateLimitCalls: [] as Array<{ ip: string; email: string }>,
+  providers: [] as unknown[],
 }))
 
 vi.mock('@/lib/server/db', async (importOriginal) => ({
@@ -55,6 +68,8 @@ vi.mock('@/lib/server/domains/settings/settings.service', () => ({
 vi.mock('@/lib/server/domains/principals/bootstrap-admin', () => ({
   findHumanAdmin: (...a: unknown[]) => hoisted.findHumanAdmin(...a),
   isOpenToBootstrapClaim: (...a: unknown[]) => hoisted.isOpenToBootstrapClaim(...a),
+  // Setup still open; a finished install is covered against real Postgres.
+  isSetupOpenToClaim: async () => true,
 }))
 
 vi.mock('@/lib/server/auth/index', () => ({
@@ -71,6 +86,12 @@ vi.mock('@quackback/email', () => ({
 }))
 
 vi.mock('@/lib/server/storage/s3', () => ({ getEmailSafeUrl: () => null }))
+vi.mock('@/lib/server/domains/settings/identity-providers.service', () => ({
+  listIdentityProviders: async () => hoisted.providers,
+}))
+vi.mock('@/lib/server/auth/registered-providers', () => ({
+  getRegisteredOidcProviderIds: async () => new Set(['oidc_acme']),
+}))
 vi.mock('@/lib/server/config', () => ({
   config: { baseUrl: 'https://acme.quackback.io', trustedProxyHops: 1 },
 }))
@@ -123,6 +144,7 @@ async function ask(email: string): Promise<Seen> {
 beforeEach(() => {
   vi.clearAllMocks()
   hoisted.rateLimitCalls.length = 0
+  hoisted.providers = []
   // The steady state: an owner exists, nobody can claim it by arriving, and its
   // admin has closed self-service sign-ups. The only workspace in which the
   // per-address answer is interesting at all.
@@ -232,5 +254,50 @@ describe('POST /api/auth/portal-signin — metered', () => {
     expect(res.headers.get('Retry-After')).toBe('42')
     vi.doUnmock('@/lib/server/auth/signin-rate-limit')
     vi.resetModules()
+  })
+})
+
+// "Require SSO" depends on the address's domain, never on whether it holds an
+// account, so this refusal may be named: the sign-in form already routes the
+// domain to its provider for anyone who types it.
+describe('POST /api/auth/portal-signin: a domain that requires SSO', () => {
+  async function askAt(email: string, holdsAccount: boolean) {
+    hoisted.userFindFirst.mockResolvedValue(holdsAccount ? { id: 'user_1' } : null)
+    const res = await handlePortalSignin(post(email))
+    return { status: res.status, body: await res.text() }
+  }
+
+  beforeEach(() => {
+    hoisted.providers = [
+      {
+        id: 'idp_acme',
+        registrationId: 'oidc_acme',
+        showButton: true,
+        domains: [{ name: 'acme.com', enforced: true, verifiedAt: '2026-01-01T00:00:00Z' }],
+      },
+    ]
+  })
+
+  it('refuses with the SSO code and mints nothing (E1)', async () => {
+    const seen = await askAt('sam@acme.com', true)
+
+    expect(seen.status).toBe(403)
+    expect(JSON.parse(seen.body)).toMatchObject({ code: 'verified_domain_requires_sso' })
+    expect(hoisted.createVerificationValue).not.toHaveBeenCalled()
+    expect(hoisted.sendMagicLinkEmail).not.toHaveBeenCalled()
+  })
+
+  it('answers a stranger at that domain the same way as an account holder (E1)', async () => {
+    const holder = await askAt('sam@acme.com', true)
+    const stranger = await askAt('someone-new@acme.com', false)
+
+    expect(stranger).toEqual(holder)
+  })
+
+  it('still sends to an address at another domain (E1)', async () => {
+    const seen = await askAt(KNOWN, true)
+
+    expect(seen.status).toBe(200)
+    expect(hoisted.sendMagicLinkEmail).toHaveBeenCalledTimes(1)
   })
 })

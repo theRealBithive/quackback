@@ -960,6 +960,63 @@ in production only through the route loader — the same mock can stash `fn` on 
 `createServerOnlyFn` as an identity function in the same factory, or the route's
 other exports disappear.
 
+## 2x — A manifest entry can name a subset of a file's suites, and the gap reads as survivors
+
+`scripts/mutation-manifest.json` pairs a graded file with the suites that pin
+it, and nothing checks that the pairing is complete. When a second suite was
+added for `next-position.ts` — a `.db.test.ts` beside the existing mock-based
+one — the entry still named only the first, so the gate re-ran the file against
+half its coverage and reported the SQL fragment's two mutants as survivors. They
+were not survivors. They were mutants the selected suites never reached, which
+is exactly the failure mode the `NoCoverage` handling exists to catch, except
+that here the suite that covers them was on disk and simply unlisted.
+
+The sweep that finds it is three lines: for every graded file, list the
+`__tests__` directory beside it and flag any `<name>.*.test.ts` the entry does
+not name. Run against the whole manifest it turned up one more, pre-existing:
+`gitlab/server/inbound.ts` is graded against `inbound.test.ts` and
+`signature-matrix.test.ts`, and `inbound.properties.test.ts` sits unlisted
+beside them. That file was untouched by the branch, so the gate never graded it
+and never said anything.
+
+Two fixes, either would do. `mutation-scope.test.ts` already asserts the whole
+manifest and reads each named suite off disk; it could also assert that no
+sibling suite matching the graded file's name is missing from the entry. Or the
+gate could print unlisted siblings the way it prints files with no entry at
+all — naming the gap rather than failing on it, since a co-located name is a
+guess and the manifest is the assertion.
+
+Hit again in batch K, in the worse direction: the unlisted suite was not a
+sibling. `sso-managed-email.ts` was graded against its own mock-based suite
+only, and the mutant `columns: { id: true }` -> `{}` survived there because the
+stub ignores the projection. Real drizzle refuses it (`No fields selected for
+table "account"`), and `domains/users/__tests__/user-update.db.test.ts` runs the
+real check against Postgres and fails on it — three directories away, so the
+sibling sweep above would not have found it either. The survivor looked like
+an equivalent until it was probed against the real database; recorded as one,
+it would have been a false excuse. Before writing an equivalence reason about
+what a library does, measure the library, not the stub in front of it.
+
+## 2x — A picked upstream suite is written against module names from commits we skipped
+
+Three suites in upstream batch F failed for reasons that had nothing to do with
+the fix they came with. `widget-home-compose-board.test.tsx` (#577) mocked
+`useWidgetMediaUpload` and `widget/posts`' `widgetCreatePublicPostFn`, names
+upstream introduced later with #566 and the widget-posts move; here they are
+`useWidgetImageUpload` and `public-posts`' `createPublicPostFn`, so the mock
+answered nothing and the submit never reached it. `rich-text-editor-enter.test.tsx`
+(#567) rendered without an `IntlProvider`, which the fork's editor needs. And
+the typecheck, not any test, found three fork-only fixtures that build an
+`IdentityProvider` without the field #609 added. Each looked like a broken fix
+until the mock or fixture was read. After a pick, run its own suites first and
+read a failure's first line before the fix's code: `No "X" export is defined on
+the mock` and `Could not find required intl object` are the tells.
+
+Hit again in batch K: `@/test/server-fns-in-process`, `use-widget-file-upload`
+and `finishIdentityOnboarding` came with #688, #644 and #656 from commits we
+had not picked. Typecheck finds them at once (`Cannot find module`); grep the
+picked test files for imports before running anything.
+
 ## 1x — `afterAll(fixture.close)` inside a `describe` shuts the connection for every later `describe` in the file
 
 The DB fixture's three hooks read as a set, and every suite in the repository
@@ -1022,32 +1079,6 @@ widget had minted, which the contract says is impossible — the fixture had bee
 passing on the permissive default, and the expectation was wrong rather than the
 code. A fixture that omits the field is not a dashboard session; it is a session
 nobody stamped, and only a default hides the difference.
-
-## 1x — A manifest entry can name a subset of a file's suites, and the gap reads as survivors
-
-`scripts/mutation-manifest.json` pairs a graded file with the suites that pin
-it, and nothing checks that the pairing is complete. When a second suite was
-added for `next-position.ts` — a `.db.test.ts` beside the existing mock-based
-one — the entry still named only the first, so the gate re-ran the file against
-half its coverage and reported the SQL fragment's two mutants as survivors. They
-were not survivors. They were mutants the selected suites never reached, which
-is exactly the failure mode the `NoCoverage` handling exists to catch, except
-that here the suite that covers them was on disk and simply unlisted.
-
-The sweep that finds it is three lines: for every graded file, list the
-`__tests__` directory beside it and flag any `<name>.*.test.ts` the entry does
-not name. Run against the whole manifest it turned up one more, pre-existing:
-`gitlab/server/inbound.ts` is graded against `inbound.test.ts` and
-`signature-matrix.test.ts`, and `inbound.properties.test.ts` sits unlisted
-beside them. That file was untouched by the branch, so the gate never graded it
-and never said anything.
-
-Two fixes, either would do. `mutation-scope.test.ts` already asserts the whole
-manifest and reads each named suite off disk; it could also assert that no
-sibling suite matching the graded file's name is missing from the entry. Or the
-gate could print unlisted siblings the way it prints files with no entry at
-all — naming the gap rather than failing on it, since a co-located name is a
-guess and the manifest is the assertion.
 
 ## 1x — Replacing a whole `describe` block drops the tests inside it, and nothing counts
 
@@ -1914,21 +1945,6 @@ budget has to fit the foreground call's ten-minute ceiling, so pass
 `MUTATION_BUDGET_SECONDS=570`; the runs here took 2m40s–4m40s for nine to
 eleven graded files.
 
-## 1x — A picked upstream suite is written against module names from commits we skipped
-
-Three suites in upstream batch F failed for reasons that had nothing to do with
-the fix they came with. `widget-home-compose-board.test.tsx` (#577) mocked
-`useWidgetMediaUpload` and `widget/posts`' `widgetCreatePublicPostFn`, names
-upstream introduced later with #566 and the widget-posts move; here they are
-`useWidgetImageUpload` and `public-posts`' `createPublicPostFn`, so the mock
-answered nothing and the submit never reached it. `rich-text-editor-enter.test.tsx`
-(#567) rendered without an `IntlProvider`, which the fork's editor needs. And
-the typecheck, not any test, found three fork-only fixtures that build an
-`IdentityProvider` without the field #609 added. Each looked like a broken fix
-until the mock or fixture was read. After a pick, run its own suites first and
-read a failure's first line before the fix's code: `No "X" export is defined on
-the mock` and `Could not find required intl object` are the tells.
-
 ## 1x — happy-dom's `Headers` loses a `__Secure-` cookie, so an OAuth round trip fails with `state_mismatch`
 
 The batch F OIDC contract suites run real Better Auth against a stub identity
@@ -2319,6 +2335,32 @@ The way through was a separate dependency PR first, then merging the new
 `main` into the feature branch and waiting for a second full CI run. When
 `check` fails, look at the audit step before reading anything else, and fix it
 on its own branch from `main`.
+
+## 1x — A line reached only by a random fast-check draw grades differently run to run
+
+`session-audience.ts`' cookie fallback (`headers.get('cookie') ?? ''`) was
+reported "never executed" although the suite's property draws a null cookie.
+The property reaches that line only when three other drawn conditions line up
+first (widget scope, anonymous user, no bearer): about 0.2% per run, so about
+one hit in 500 runs, and some seeds have none. Stryker's per-test coverage then
+recorded the line as unreached on one gate run. Nothing seeds fast-check
+globally here (no `fc.configureGlobal` in `vitest.setup.ts`), so a later run
+can reach it and grade the same mutant `Survived` instead; that flip was not
+observed, only the one `NoCoverage` result. A fixed example for every short-circuited branch a property reaches
+rarely makes the grade deterministic; checking the reach rate before trusting
+a property as the line's only coverage would have saved a gate cycle.
+
+## 1x — Better Auth stores a normalised `ipAddress`, so a raw address never matches it
+
+Better Auth 1.7 does not store the client address it resolved: an IPv6 address
+becomes its fully expanded /64 network, and an IPv4-mapped one (`::ffff:1.2.3.4`)
+becomes plain IPv4. Under `NODE_ENV` development or test it records `127.0.0.1`
+when it resolves nothing. The anonymous vote limiter compared the raw address
+from `getClientIp` against `session.ip_address` and so never counted an IPv6
+voter. Anything that compares an address with stored sessions has to go
+through the library's own `getIP` (`sessionIpAddressOf` in `auth/client-ip.ts`).
+The library reads `NODE_ENV` once at module load, so the production-only
+fallback cannot be stubbed per test.
 
 ## Resolved
 

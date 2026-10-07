@@ -13,6 +13,7 @@ import { db, principal, eq, type PermissionKey } from '@/lib/server/db'
 import { ensurePrincipalForUser } from '@/lib/server/domains/principals/principal.factory'
 import { permissionsForPrincipal } from '@/lib/server/policy/permissions'
 import { requireSettingsCached } from '@/lib/server/domains/settings/settings.helpers'
+import { healStrandedPortalSession } from '@/lib/server/auth/session-audience'
 import { memoizePerRequest } from './auth-request-cache'
 import { logger } from '@/lib/server/logger'
 
@@ -54,7 +55,10 @@ async function getSessionDirect(): Promise<SessionResult | null> {
   // repeat for every requireAuth/getOptionalAuth call in the request.
   return memoizePerRequest('session', async () => {
     try {
-      return await auth.api.getSession({ headers: getRequestHeaders() })
+      const headers = getRequestHeaders()
+      const session = await auth.api.getSession({ headers })
+      if (!session) return null
+      return await healStrandedPortalSession(session, headers)
     } catch (error) {
       log.error({ err: error }, 'get session failed')
       return null

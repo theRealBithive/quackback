@@ -396,12 +396,11 @@ export const toggleVoteFn = createServerFn({ method: 'POST' })
           throw new Error('Anonymous interaction is not enabled')
         }
 
-        // Rate limit anonymous voters by IP
-        const headers = getRequestHeaders()
-        const ip =
-          headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-          headers.get('x-real-ip') ||
-          '0.0.0.0'
+        // Rate limit anonymous voters by IP. The limiter counts anonymous
+        // sessions by their stored `ipAddress`, so it must be handed that exact
+        // form. 'unknown' matches no stored session when there is no address.
+        const { sessionIpAddressOf } = await import('@/lib/server/auth/client-ip')
+        const ip = sessionIpAddressOf(getRequestHeaders()) ?? 'unknown'
         if (!(await checkAnonVoteRateLimit(ip))) {
           throw new Error('Too many votes, please try again later')
         }

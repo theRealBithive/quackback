@@ -1,3 +1,21 @@
+/**
+ * The changelog subscription service, with the database stubbed.
+ *
+ * Contract (upstream #687), verbatim:
+ *
+ *   U1 Opening an unsubscribe link never unsubscribes anyone. It shows what would happen and asks for confirmation.
+ *   U2 The unsubscribe happens only on an explicit confirmation, or on a one-click request from the mail provider.
+ *   U3 A malformed, unknown, used or expired token shows the expired-link page, never a server error.
+ *   U4 A one-click request in the RFC 8058 form is answered with success for every token, whether live, used, unknown or malformed. A request without the one-click body is refused. A body larger than 1 KB is refused without reading more than the chunk that crosses 1 KB.
+ *   U5 A token is spent only once the opt-out has actually happened. If the opt-out fails, the link keeps working and a retry succeeds exactly once.
+ *   U6 Unsubscribing from the changelog also stops the changelog mail that reaches a person through posts they follow, even if they never subscribed to the changelog.
+ *   U7 Every notification email that has a tokenised unsubscribe link carries List-Unsubscribe. It offers one-click only when the link is HTTPS. An email without such a link carries neither header; a link to the notification preferences is not an unsubscribe link.
+ *   U8 The unsubscribe page is in the language the rest of the site resolved for the request, in all nine languages, and the German addresses the reader formally.
+ *   U9 The unsubscribe page's strings are not loaded into the portal or the widget.
+ *
+ * Only the unsubscribeChangelog test here belongs to that contract (U6); the
+ * behaviour against real rows is in events/__tests__/changelog-unsubscribe-targets.db.test.ts.
+ */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { PrincipalId } from '@quackback/ids'
 
@@ -94,12 +112,21 @@ describe('subscribeSelfServe / subscribeAdmin', () => {
 })
 
 describe('unsubscribeChangelog', () => {
-  it('stamps unsubscribedAt without deleting the row', async () => {
+  // Behaviour against real rows (a principal with no row, and keeping an
+  // existing row's source) is covered by changelog-unsubscribe-targets.db.test.ts.
+  it('(U6) upserts an opted-out row, stamping only unsubscribedAt on conflict', async () => {
     const { unsubscribeChangelog } = await import('../changelog-subscription.service')
 
     await unsubscribeChangelog(PRINCIPAL_ID)
 
-    expect(mockUpdateSet).toHaveBeenCalledWith({ unsubscribedAt: expect.any(Date) })
+    expect(mockInsertValues).toHaveBeenCalledWith({
+      principalId: PRINCIPAL_ID,
+      source: 'self_serve',
+      unsubscribedAt: expect.any(Date),
+    })
+    expect(mockOnConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ set: { unsubscribedAt: expect.any(Date) } })
+    )
   })
 })
 
@@ -149,9 +176,8 @@ describe('getChangelogSubscriptionStatus', () => {
 
 describe('importChangelogSubscribersFromEmails', () => {
   it('returns all-zero result for an empty input', async () => {
-    const { importChangelogSubscribersFromEmails } = await import(
-      '../changelog-subscription.service'
-    )
+    const { importChangelogSubscribersFromEmails } =
+      await import('../changelog-subscription.service')
 
     const result = await importChangelogSubscribersFromEmails([])
 

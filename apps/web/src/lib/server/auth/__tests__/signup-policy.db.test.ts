@@ -32,11 +32,25 @@
  * holds it until rollback, which is the whole test, so two suites doing it at
  * once deadlock each other. The second provisioned case needs no schema at all:
  * it stamps the metadata bag, the stamp's original home.
+ *
+ * Contract (upstream #656), confirmed. The first-user exemption is the account
+ * half of the onboarding claim, so it follows the same promises:
+ *
+ * O1 While setup is still open, the first person who signs in can claim the workspace and becomes its admin.
+ * O2 Once setup is complete, nobody can claim the workspace through the onboarding step: not a portal user and not a teammate, even when no human admin is left.
+ * O3 A refused claim changes nothing: the workspace's name, slug and modules stay as they were, and the caller keeps the role they had.
+ * O4 A workspace that was marked complete by its config file before its owner ever arrived still counts as open, so its first person can claim it.
+ * O5 When the setup state cannot be read unambiguously, the workspace counts as closed.
+ *
+ * O3 is held by `functions/__tests__/onboarding-bootstrap-claim.db.test.ts`.
+ * Tests without a number predate #656.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
 import { createId, type PrincipalId, type UserId } from '@quackback/ids'
 import { createDbTestFixture, testDb } from '@/lib/server/__tests__/db-test-fixture'
-import { settings, principal, user, invitation, sql } from '@/lib/server/db'
+import { settings, principal, user, invitation, sql, DEFAULT_SETUP_STATE } from '@/lib/server/db'
+import { applyDeferredLaunchStartingPoint } from '@/lib/server/setup-state'
+import { mergeSetupState } from '@/lib/server/config-file/reconciler'
 
 vi.mock('@/lib/server/db', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/db')>()),
@@ -60,12 +74,15 @@ const fixture = await createDbTestFixture({
   },
 })
 
-async function seedSettings(opts: { stamp?: string; metadataStamp?: string } = {}): Promise<void> {
+async function seedSettings(
+  opts: { stamp?: string; metadataStamp?: string; setupState?: string } = {}
+): Promise<void> {
   await testDb.insert(settings).values({
     id: createId('workspace'),
     name: 'Acme',
     slug: `acme-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: new Date(),
+    setupState: opts.setupState ?? null,
     metadata: opts.metadataStamp
       ? JSON.stringify({ cloudTenant: { v: 1, workspaceKey: opts.metadataStamp, stampedAt: '' } })
       : null,
@@ -333,13 +350,13 @@ describe.skipIf(!fixture.available)('isAccountCreationAllowed', () => {
     // file may already have written a settings row whose absent authConfig
     // parses as openSignup:false. Refusing here would leave a workspace that
     // can never be set up.
-    it('lets the very first user create an account with sign-ups closed', async () => {
+    it('lets the very first user create an account with sign-ups closed (O1)', async () => {
       await seedSettings()
 
       expect(await isAccountCreationAllowed('first@acme.example', 'portal')).toBe(true)
     })
 
-    it('lets the first user in when there is no settings row at all', async () => {
+    it('lets the first user in when there is no settings row at all (O1)', async () => {
       hoisted.getWorkspaceSettings.mockResolvedValue(null)
 
       expect(await isAccountCreationAllowed('first@acme.example', 'portal')).toBe(true)
@@ -356,7 +373,7 @@ describe.skipIf(!fixture.available)('isAccountCreationAllowed', () => {
 
     // A service principal is not a human owner — the same rule the bootstrap
     // promoter uses — so it must not close the door on the first real person.
-    it('is still open to its first human when only a service admin exists', async () => {
+    it('is still open to its first human when only a service admin exists (O1)', async () => {
       await seedSettings()
       await testDb.insert(principal).values({
         id: createId('principal') as PrincipalId,
@@ -367,6 +384,45 @@ describe.skipIf(!fixture.available)('isAccountCreationAllowed', () => {
       })
 
       expect(await isAccountCreationAllowed('first@acme.example', 'portal')).toBe(true)
+    })
+
+    // A finished install whose human admins are gone is not waiting for a
+    // first user. Its closed setting stands, as the workspace step would
+    // refuse the claim anyway.
+    it('keeps sign-ups closed on a finished install with only a service admin (O2)', async () => {
+      await seedSettings({
+        setupState: JSON.stringify(
+          applyDeferredLaunchStartingPoint(
+            { ...DEFAULT_SETUP_STATE, steps: { ...DEFAULT_SETUP_STATE.steps, workspace: true } },
+            'product_feedback'
+          )
+        ),
+      })
+      await testDb.insert(principal).values({
+        id: createId('principal') as PrincipalId,
+        userId: null,
+        role: 'admin',
+        type: 'service',
+        createdAt: new Date(),
+      })
+
+      expect(await isAccountCreationAllowed('stranger@evil.example', 'portal')).toBe(false)
+    })
+
+    it('is still open to its first human when the config file stamped setup complete (O4)', async () => {
+      await seedSettings({
+        setupState: JSON.stringify(
+          mergeSetupState(null, { name: 'Acme', onboardingComplete: true })
+        ),
+      })
+
+      expect(await isAccountCreationAllowed('first@acme.example', 'portal')).toBe(true)
+    })
+
+    it('keeps sign-ups closed when the stored setup state cannot be parsed (O5)', async () => {
+      await seedSettings({ setupState: 'not json' })
+
+      expect(await isAccountCreationAllowed('stranger@evil.example', 'portal')).toBe(false)
     })
 
     it('lets an existing account sign in on a closed workspace', async () => {

@@ -14,6 +14,18 @@
  * value and the `to_jsonb` read are all the real ones and all roll back.
  *
  * Every write rolls back with the fixture transaction.
+ *
+ * Contract (upstream #656), confirmed:
+ *
+ * O1 While setup is still open, the first person who signs in can claim the workspace and becomes its admin.
+ * O2 Once setup is complete, nobody can claim the workspace through the onboarding step: not a portal user and not a teammate, even when no human admin is left.
+ * O3 A refused claim changes nothing: the workspace's name, slug and modules stay as they were, and the caller keeps the role they had.
+ * O4 A workspace that was marked complete by its config file before its owner ever arrived still counts as open, so its first person can claim it.
+ * O5 When the setup state cannot be read unambiguously, the workspace counts as closed.
+ *
+ * Tests without a number predate #656. The claim itself (O1-O5 end to end) is
+ * `functions/__tests__/onboarding-bootstrap-claim.db.test.ts`; this suite holds
+ * the screens and routing that must agree with it.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
 import { createId, type PrincipalId, type UserId } from '@quackback/ids'
@@ -146,7 +158,12 @@ describe.skipIf(!fixture.available)('getWorkspaceClaimFn', () => {
 
     const claim = await getWorkspaceClaimFn()
 
-    expect(claim).toEqual({ claimed: true, setupComplete: false, openToClaim: false })
+    expect(claim).toEqual({
+      claimed: true,
+      setupComplete: false,
+      openToClaim: false,
+      closedReason: 'provisioned',
+    })
     const wire = JSON.stringify(claim)
     expect(wire).not.toContain(OWNER_EMAIL)
     expect(wire).not.toContain('jane.doe')
@@ -162,16 +179,26 @@ describe.skipIf(!fixture.available)('getWorkspaceClaimFn', () => {
 
     const claim = await getWorkspaceClaimFn()
 
-    expect(claim).toEqual({ claimed: false, setupComplete: false, openToClaim: false })
+    expect(claim).toEqual({
+      claimed: false,
+      setupComplete: false,
+      openToClaim: false,
+      closedReason: 'provisioned',
+    })
     // Nothing about the customer it was created for, on a payload any visitor
     // of a guessable hostname can fetch with no cookie.
     expect(JSON.stringify(claim)).not.toContain('acme')
   })
 
-  it('reads a self-hosted install with nobody seeded as unclaimed and open', async () => {
+  it('reads a self-hosted install with nobody seeded as unclaimed and open (O1)', async () => {
     const claim = await getWorkspaceClaimFn()
 
-    expect(claim).toEqual({ claimed: false, setupComplete: false, openToClaim: true })
+    expect(claim).toEqual({
+      claimed: false,
+      setupComplete: false,
+      openToClaim: true,
+      closedReason: null,
+    })
   })
 
   // The control for the two above: the same settings row without the stamp is
@@ -204,7 +231,36 @@ describe.skipIf(!fixture.available)('getWorkspaceClaimFn', () => {
 
     const claim = await getWorkspaceClaimFn()
 
-    expect(claim).toEqual({ claimed: true, setupComplete: true, openToClaim: false })
+    expect(claim).toEqual({
+      claimed: true,
+      setupComplete: true,
+      openToClaim: false,
+      closedReason: 'provisioned',
+    })
+  })
+
+  // A finished install whose human admins are gone, with only an API
+  // principal left. Unclaimed, but its setup is not waiting for anyone, so the
+  // screen must not offer the claim the workspace step would refuse.
+  it('reads a finished install with no human admin as not open to claim (O2)', async () => {
+    await testDb.insert(settings).values({
+      id: createId('workspace'),
+      name: 'Acme',
+      slug: `acme-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: new Date(),
+      setupState: FINISHED_SETUP,
+    })
+    hoisted.getSettings.mockResolvedValue({ setupState: FINISHED_SETUP })
+    await seedPrincipal({ role: 'admin', type: 'service' })
+
+    const claim = await getWorkspaceClaimFn()
+
+    expect(claim).toEqual({
+      claimed: false,
+      setupComplete: true,
+      openToClaim: false,
+      closedReason: 'setupComplete',
+    })
   })
 
   // The claim tracks the principal, not the user row: an admin whose user row

@@ -19,6 +19,18 @@
  * props. The auth broadcast is real too: it is the seam a completed sign-in
  * actually crosses, and a stubbed one cannot tell a screen that answers from a
  * screen that ignores it.
+ *
+ * Contract (upstream #656), confirmed:
+ *
+ * O1 While setup is still open, the first person who signs in can claim the workspace and becomes its admin.
+ * O2 Once setup is complete, nobody can claim the workspace through the onboarding step: not a portal user and not a teammate, even when no human admin is left.
+ * O3 A refused claim changes nothing: the workspace's name, slug and modules stay as they were, and the caller keeps the role they had.
+ * O4 A workspace that was marked complete by its config file before its owner ever arrived still counts as open, so its first person can claim it.
+ * O5 When the setup state cannot be read unambiguously, the workspace counts as closed.
+ *
+ * Tests without a number predate #656. The claim itself (O1-O5 end to end) is
+ * `functions/__tests__/onboarding-bootstrap-claim.db.test.ts`; this suite holds
+ * the screens and routing that must agree with it.
  */
 /**
  * Contract group M — MCP scoped OAuth on Better Auth 1.7 (upstream #540, #550, #541, #551)
@@ -137,7 +149,7 @@ function provisioned(): AccountStepProps {
     ssoEnabled: false,
     // A control plane created this one, so arriving is never how its admin is
     // decided — true whether or not its owner has signed in yet.
-    claim: { claimed: true, setupComplete: false, openToClaim: false },
+    claim: { claimed: true, setupComplete: false, openToClaim: false, closedReason: 'provisioned' },
     workspaceName: 'Acme',
     authConfig: {
       found: true,
@@ -157,7 +169,12 @@ function provisioned(): AccountStepProps {
  */
 function provisionedOwnerless(): AccountStepProps {
   const props = provisioned()
-  props.claim = { claimed: false, setupComplete: false, openToClaim: false }
+  props.claim = {
+    claimed: false,
+    setupComplete: false,
+    openToClaim: false,
+    closedReason: 'provisioned',
+  }
   return props
 }
 
@@ -170,7 +187,7 @@ function provisionedOwnerless(): AccountStepProps {
 function selfHosted(): AccountStepProps {
   return {
     ssoEnabled: false,
-    claim: { claimed: false, setupComplete: false, openToClaim: true },
+    claim: { claimed: false, setupComplete: false, openToClaim: true, closedReason: null },
     workspaceName: undefined,
     authConfig: {
       found: false,
@@ -277,14 +294,24 @@ describe('account step — someone who is not the owner', () => {
     cleanup()
 
     const done = provisioned()
-    done.claim = { claimed: true, setupComplete: true, openToClaim: false }
+    done.claim = {
+      claimed: true,
+      setupComplete: true,
+      openToClaim: false,
+      closedReason: 'provisioned',
+    }
     renderStep(done)
     expect(screen.getByRole('link', { name: /request access/i })).toBeInTheDocument()
   })
 
   it('still refuses passwords when setup is finished', () => {
     const props = provisioned()
-    props.claim = { claimed: true, setupComplete: true, openToClaim: false }
+    props.claim = {
+      claimed: true,
+      setupComplete: true,
+      openToClaim: false,
+      closedReason: 'provisioned',
+    }
     const { container } = renderStep(props)
 
     expect(container.querySelector('input[type="password"]')).toBeNull()
@@ -317,6 +344,35 @@ describe('account step — a provisioned workspace nobody has claimed', () => {
     expect(screen.queryByText(/already has an owner/i)).toBeNull()
     expect(container.innerHTML).not.toContain(OWNER_EMAIL)
     expect(container.innerHTML).not.toContain('acme.example')
+  })
+})
+
+// A finished install whose human admins are all gone. The workspace step
+// refuses to hand it to anyone, so this screen must not offer a first-user
+// signup either, and it must not claim the workspace was made for someone.
+describe('account step — a finished install with no admin left', () => {
+  function finishedOwnerless(): AccountStepProps {
+    const props = selfHosted()
+    props.workspaceName = 'Acme'
+    props.authConfig.found = true
+    props.authConfig.oauth = { ...DEFAULT_AUTH_CONFIG.oauth, google: true }
+    props.authConfig.registeredAuthProviders = ['google']
+    props.claim = {
+      claimed: false,
+      setupComplete: true,
+      openToClaim: false,
+      closedReason: 'setupComplete',
+    }
+    return props
+  }
+
+  it('offers sign-in only and says the workspace is already set up (O2)', () => {
+    renderStep(finishedOwnerless())
+
+    expect(screen.getByText(/already set up/i)).toBeInTheDocument()
+    expect(screen.queryByText(/created for a specific account/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /sign up with google/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /sign in with google/i })).toBeInTheDocument()
   })
 })
 

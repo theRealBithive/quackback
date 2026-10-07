@@ -1,5 +1,19 @@
+/**
+ * How a failing server function is logged.
+ *
+ * Contract (confirmed list for batch K, upstream #688; the full list is in
+ * lib/server/__tests__/runtime-error-log.test.ts). The clause held here:
+ *
+ *   L4 A server-function call rejected for invalid input is logged as a
+ *      warning, not an error.
+ *
+ * Tests without a number predate batch K.
+ */
 import { describe, it, expect, vi } from 'vitest'
 import { redirect, notFound } from '@tanstack/react-router'
+import { execValidator } from '@tanstack/react-start'
+import { z } from 'zod'
+import fc from 'fast-check'
 import { classifyServerFnError, runWithServerFnLogging } from '../server-fn-log'
 import {
   ForbiddenError,
@@ -32,7 +46,7 @@ describe('classifyServerFnError', () => {
     expect(classifyServerFnError(new InternalError('DB', 'db down'))).toBe('error')
   })
 
-  it('logs validator rejections at warn, not error', () => {
+  it('logs validator rejections at warn, not error (L4)', () => {
     // Validators run upstream of the handler, so a stale client or a bot
     // hitting the endpoint with a malformed payload surfaces here.
     const zodish = Object.assign(new Error('Invalid input'), {
@@ -45,6 +59,27 @@ describe('classifyServerFnError', () => {
       issues: [{ message: 'Required' }],
     })
     expect(classifyServerFnError(standardSchemaish)).toBe('warn')
+  })
+
+  it('logs a rejection from the framework validator path at warn (L4)', async () => {
+    // createServerFn().validator(zodSchema) runs through execValidator, which
+    // does not rethrow the ZodError: it throws a plain Error whose message is
+    // the JSON-serialised issue list. Capture the real thrown value.
+    const schema = z.object({ token: z.string().uuid(), title: z.string().min(3) })
+    const thrown = await execValidator(schema, { token: 'nope', title: 'x' }).then(
+      () => undefined,
+      (error: unknown) => error
+    )
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).name).toBe('Error')
+    expect(classifyServerFnError(thrown)).toBe('warn')
+  })
+
+  it('does not mistake an ordinary error with a JSON message for a validation failure (L4)', () => {
+    expect(classifyServerFnError(new Error('[]'))).toBe('error')
+    expect(classifyServerFnError(new Error('[1, 2, 3]'))).toBe('error')
+    expect(classifyServerFnError(new Error('{"message":"upstream said no"}'))).toBe('error')
+    expect(classifyServerFnError(new Error('[not json'))).toBe('error')
   })
 
   it('logs auth denials at warn', () => {
@@ -136,5 +171,89 @@ describe('runWithServerFnLogging', () => {
 
     expect(log.warn).toHaveBeenCalledTimes(1)
     expect(log.error).not.toHaveBeenCalled()
+  })
+})
+
+describe('invalid input to a server function (L4)', () => {
+  const schema = z.object({ token: z.string().uuid(), title: z.string().min(3), count: z.number() })
+
+  it('logs every rejection the framework validator produces at warn', async () => {
+    const invalidPayload = fc
+      .oneof(
+        fc.anything(),
+        fc.record(
+          { token: fc.string(), title: fc.string(), count: fc.anything() },
+          { requiredKeys: [] }
+        )
+      )
+      .filter((payload) => !schema.safeParse(payload).success)
+    await fc.assert(
+      fc.asyncProperty(invalidPayload, async (payload) => {
+        const thrown = await execValidator(schema, payload).then(
+          () => 'accepted',
+          (error: unknown) => error
+        )
+
+        expect(classifyServerFnError(thrown)).toBe('warn')
+      }),
+      { numRuns: 200 }
+    )
+  })
+
+  /** A standard-schema issue as the validator serialises it. */
+  const issue = fc.record(
+    {
+      message: fc.string(),
+      path: fc.array(fc.oneof(fc.string(), fc.nat())),
+      code: fc.string(),
+    },
+    { requiredKeys: ['message'] }
+  )
+
+  it('logs a serialised issue list at warn, however it is padded', () => {
+    fc.assert(
+      fc.property(
+        fc.array(issue, { minLength: 1, maxLength: 5 }),
+        fc.constantFrom('', ' ', '\n  '),
+        (issues, padding) => {
+          const error = new Error(padding + JSON.stringify(issues))
+
+          expect(classifyServerFnError(error)).toBe('warn')
+        }
+      )
+    )
+  })
+
+  it('logs at error what only resembles an issue list', () => {
+    const notAnIssue = fc.oneof(
+      fc.record({ message: fc.oneof(fc.integer(), fc.constant(null), fc.boolean()) }),
+      fc.record({ path: fc.array(fc.string()) }),
+      fc.string(),
+      fc.integer(),
+      fc.constant(null)
+    )
+    const resemblance = fc.oneof(
+      // An empty list is not a rejection.
+      fc.constant({ name: 'Error', text: '[]' }),
+      // One entry that is not an issue spoils the list.
+      fc
+        .tuple(fc.array(issue, { maxLength: 3 }), notAnIssue, fc.array(issue, { maxLength: 3 }))
+        .map(([before, odd, after]) => ({
+          name: 'Error',
+          text: JSON.stringify([...before, odd, ...after]),
+        })),
+      // A real issue list on an error the validator does not throw.
+      fc.array(issue, { minLength: 1, maxLength: 3 }).map((issues) => ({
+        name: 'TypeError',
+        text: JSON.stringify(issues),
+      }))
+    )
+    fc.assert(
+      fc.property(resemblance, ({ name, text }) => {
+        const error = name === 'TypeError' ? new TypeError(text) : new Error(text)
+
+        expect(classifyServerFnError(error)).toBe('error')
+      })
+    )
   })
 })
