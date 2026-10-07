@@ -86,7 +86,11 @@ export function useUpdateBoard() {
 
       // Optimistic update for list
       // Cast settings to BoardSettings since input uses string[] but Board expects PostStatusId[]
-      const optimisticSettings = input.settings as Board['settings'] | undefined
+      const settingsUpdate = input.settings as Board['settings'] | undefined
+      // The server merges a settings update into what the board holds; mirror that.
+      function mergedSettings(current: Board['settings']): Board['settings'] {
+        return { ...current, ...settingsUpdate }
+      }
       queryClient.setQueryData<Board[]>(boardKeys.lists(), (old) =>
         old?.map((board) => {
           if (board.id !== input.id) return board
@@ -94,7 +98,7 @@ export function useUpdateBoard() {
             ...board,
             ...(input.name !== undefined && { name: input.name }),
             ...(input.description !== undefined && { description: input.description }),
-            ...(optimisticSettings !== undefined && { settings: optimisticSettings }),
+            ...(settingsUpdate !== undefined && { settings: mergedSettings(board.settings) }),
             updatedAt: new Date(),
           }
         })
@@ -106,7 +110,9 @@ export function useUpdateBoard() {
           ...previousDetail,
           ...(input.name !== undefined && { name: input.name }),
           ...(input.description !== undefined && { description: input.description }),
-          ...(optimisticSettings !== undefined && { settings: optimisticSettings }),
+          ...(settingsUpdate !== undefined && {
+            settings: mergedSettings(previousDetail.settings),
+          }),
           updatedAt: new Date(),
         })
       }

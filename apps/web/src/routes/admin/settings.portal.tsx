@@ -33,6 +33,10 @@ import { cn } from '@/lib/shared/utils'
 import { BackLink } from '@/components/ui/back-link'
 import { PageHeader } from '@/components/shared/page-header'
 import { SettingsCard } from '@/components/admin/settings/settings-card'
+import {
+  EMPTY_POST_TEMPLATE,
+  PostTemplateEditor,
+} from '@/components/admin/settings/post-template-editor'
 import { PreviewToggleButton } from '@/components/admin/settings/preview-toggle'
 import { PortalPreview } from '@/components/admin/settings/branding/portal-preview'
 import {
@@ -154,6 +158,11 @@ function PortalPage() {
   )
   const welcomeBaseline = useRef(JSON.stringify(welcomeBody))
 
+  const [postTemplate, setPostTemplate] = useState<TiptapContent>(
+    config.postTemplate ?? EMPTY_POST_TEMPLATE
+  )
+  const postTemplateBaseline = useRef(JSON.stringify(postTemplate))
+
   const [navItems, setNavItems] = useState<PortalNavItemConfig[]>(() =>
     seedNavEditorItems(config.nav)
   )
@@ -165,8 +174,9 @@ function PortalPage() {
   const themeDirty =
     state.cssText !== themeBaseline.current.css || state.themeMode !== themeBaseline.current.mode
   const welcomeDirty = JSON.stringify(welcomeBody) !== welcomeBaseline.current
+  const postTemplateDirty = JSON.stringify(postTemplate) !== postTemplateBaseline.current
   const navDirty = JSON.stringify(navItems) !== navBaseline.current
-  const isDirty = themeDirty || welcomeDirty || navDirty
+  const isDirty = themeDirty || welcomeDirty || postTemplateDirty || navDirty
 
   // Navigating away with unsaved edits prompts; closing the tab warns too.
   useBlocker({
@@ -194,14 +204,16 @@ function PortalPage() {
         await state.saveTheme()
         themeBaseline.current = { css: state.cssText, mode: state.themeMode }
       }
-      if (welcomeDirty || navDirty) {
+      if (welcomeDirty || postTemplateDirty || navDirty) {
         // Placeholder link rows (no URL yet) are drafts, not config.
         const items = navItems.filter((i) => i.type !== 'link' || !!i.url)
         await updatePortalConfig.mutateAsync({
           ...(welcomeDirty ? { welcomeCard: { body: welcomeBody } } : {}),
+          ...(postTemplateDirty ? { postTemplate } : {}),
           ...(navDirty ? { nav: { items } } : {}),
         })
         welcomeBaseline.current = JSON.stringify(welcomeBody)
+        postTemplateBaseline.current = JSON.stringify(postTemplate)
         navBaseline.current = JSON.stringify(navItems)
       }
 
@@ -224,6 +236,7 @@ function PortalPage() {
     state.setCssText(themeBaseline.current.css)
     state.setThemeMode(themeBaseline.current.mode)
     setWelcomeBody(JSON.parse(welcomeBaseline.current) as TiptapContent)
+    setPostTemplate(JSON.parse(postTemplateBaseline.current) as TiptapContent)
     setNavItems(JSON.parse(navBaseline.current) as PortalNavItemConfig[])
   }
 
@@ -437,6 +450,17 @@ function PortalPage() {
             description="Shown above the post list on your portal home. Leave empty to show nothing."
           >
             <WelcomeBodyEditor value={welcomeBody} onChange={setWelcomeBody} />
+          </SettingsCard>
+
+          <SettingsCard
+            title="Default post template"
+            description="What a new post starts with on boards that have no template of their own — the details your team would like to see. Authors can change or delete it. Leave empty for no template."
+          >
+            <PostTemplateEditor
+              value={postTemplate}
+              onChange={setPostTemplate}
+              placeholder="e.g. What are you trying to do? What would help?"
+            />
           </SettingsCard>
         </div>
 

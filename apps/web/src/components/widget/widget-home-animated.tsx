@@ -36,6 +36,8 @@ import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import { useWidgetImageUpload, WidgetSessionError } from './use-widget-image-upload'
 import type { JSONContent } from '@tiptap/react'
 import type { TiptapContent } from '@/lib/shared/schemas/posts'
+import { resolvePostTemplate } from '@/lib/shared/post-template'
+import { usePostTemplatePrefill } from '@/lib/client/hooks/use-post-template-prefill'
 import {
   composeBodyFromPlainText,
   resolveComposeBoardId,
@@ -75,6 +77,7 @@ interface BoardInfo {
   id: string
   name: string
   slug: string
+  descriptionTemplate?: TiptapContent
 }
 
 export interface WidgetHomeProps {
@@ -82,6 +85,8 @@ export interface WidgetHomeProps {
   initialHasMore?: boolean
   statuses: StatusInfo[]
   boards: BoardInfo[]
+  /** Workspace default description template, for boards without their own. */
+  workspacePostTemplate?: TiptapContent
   /**
    * Server-computed per-board submit/vote capability for the request actor,
    * keyed by board id (boardCapabilitiesForActor: each board's access tier
@@ -263,6 +268,7 @@ export function WidgetHomeAnimated({
   initialHasMore = false,
   statuses,
   boards,
+  workspacePostTemplate,
   boardPermissions,
   defaultBoard,
   initialBoardSlug,
@@ -298,6 +304,15 @@ export function WidgetHomeAnimated({
   }, [])
   const [contentJson, setContentJson] = useState<JSONContent | null>(null)
   const [contentHtml, setContentHtml] = useState('')
+  const descriptionTemplate = resolvePostTemplate(
+    boards.find((board) => board.id === selectedBoardId)?.descriptionTemplate,
+    workspacePostTemplate
+  )
+  const descriptionPrefill = usePostTemplatePrefill({
+    template: descriptionTemplate,
+    description: contentJson,
+    setDescription: setContentJson,
+  })
   const handleEditorChange = useCallback((json: JSONContent, html: string) => {
     setContentJson(json)
     setContentHtml(html)
@@ -590,7 +605,7 @@ export function WidgetHomeAnimated({
   function collapseForm() {
     setExpanded(false)
     setTitle('')
-    setContentJson(null)
+    descriptionPrefill.reset()
     setContentHtml('')
     setError(null)
   }

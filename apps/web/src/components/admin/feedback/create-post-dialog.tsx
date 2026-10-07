@@ -1,4 +1,5 @@
 import { useState, useCallback, lazy, Suspense } from 'react'
+import { useRouteContext } from '@tanstack/react-router'
 import { useKeyboardSubmit } from '@/lib/client/hooks/use-keyboard-submit'
 import { ModalFooter } from '@/components/shared/modal-footer'
 import { useForm, Controller } from 'react-hook-form'
@@ -33,6 +34,8 @@ import { TitleInput } from '@/components/shared/title-input'
 import { AuthorSelector, type NewAuthor } from '@/components/shared/author-selector'
 import { useCreatePortalUser, useUpdatePortalUser } from '@/lib/client/mutations'
 import { cn } from '@/lib/shared/utils'
+import { resolvePostTemplate } from '@/lib/shared/post-template'
+import { usePostTemplatePrefill } from '@/lib/client/hooks/use-post-template-prefill'
 import type { JSONContent } from '@tiptap/react'
 import type { Board, PostTag, PostStatusEntity } from '@/lib/shared/db-types'
 import type { CurrentUser } from '@/lib/shared/types/inbox'
@@ -99,6 +102,18 @@ export function CreatePostDialog({
     },
   })
 
+  const { settings } = useRouteContext({ from: '__root__' })
+  const watchedBoardId = form.watch('boardId')
+  const descriptionTemplate = resolvePostTemplate(
+    boards.find((board) => board.id === watchedBoardId)?.settings?.descriptionTemplate,
+    settings?.publicPortalConfig?.postTemplate
+  )
+  const descriptionPrefill = usePostTemplatePrefill({
+    template: descriptionTemplate,
+    description: contentJson,
+    setDescription: setContentJson,
+  })
+
   const handleContentChange = useCallback(
     (json: JSONContent, _html: string, markdown: string) => {
       setContentJson(json)
@@ -122,7 +137,7 @@ export function CreatePostDialog({
         onSuccess: () => {
           setOpen(false)
           form.reset()
-          setContentJson(null)
+          descriptionPrefill.reset()
           setAuthorPrincipalId(currentUser.principalId)
           onPostCreated?.()
         },
@@ -134,7 +149,7 @@ export function CreatePostDialog({
     setOpen(isOpen)
     if (!isOpen) {
       form.reset()
-      setContentJson(null)
+      descriptionPrefill.reset()
       setAuthorPrincipalId(currentUser.principalId)
       createPostMutation.reset()
     }
@@ -143,7 +158,6 @@ export function CreatePostDialog({
   const handleKeyDown = useKeyboardSubmit(handleSubmit)
 
   const watchedTitle = form.watch('title')
-  const watchedBoardId = form.watch('boardId')
   const watchedStatusId = form.watch('statusId')
 
   const { posts: similarPosts } = useSimilarPosts({

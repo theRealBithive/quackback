@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { createServerFn } from '@tanstack/react-start'
 import { tiptapContentSchema } from '@/lib/shared/schemas/posts'
+import { postTemplateSchema } from '@/lib/shared/post-template'
 // Import types from barrel export (client-safe)
 import {
   DEFAULT_PORTAL_CONFIG,
@@ -360,6 +361,8 @@ export const updatePortalConfigSchema = z.object({
       body: tiptapContentSchema.optional(),
     })
     .optional(),
+  // Re-sanitized server-side in updatePortalConfig, like the welcome card.
+  postTemplate: postTemplateSchema.optional(),
   support: z
     .object({
       enabled: z.boolean().optional(),

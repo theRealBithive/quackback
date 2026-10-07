@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 14x — Test suites are flaky under parallel load
+## 15x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -149,6 +149,12 @@ real failure: `events/__tests__/process-integration.test.ts` counts the jobs in
 the queue database-wide, and a full parallel run leaves about 100 behind. After
 that run it fails alone too, on `main` as well (`expected 100 to be 1`). Check
 it against `main` on the same database before you read it as yours.
+
+Fifteenth, on the description-template feature: a coverage run over 227 suites
+went red on `mutations/__tests__/settings.test.ts` again (the 20s timeout),
+and the next run, with that one file left out, on a `socket hang up` in an
+unrelated suite. Both green alone. Two coverage runs lost before the third
+wrote a report.
 
 ## 6x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -776,6 +782,60 @@ event plumbing rather than a bad fixture. The rule generalises past `toThrow()`:
 id turns every negative assertion into a tautology.** Build them with
 `generateId(prefix)`.
 
+## 3x — The coverage and mutation gates read HEAD, not the working tree
+
+Both gates ask git for the diff between the merge base and `HEAD`
+(`git diff -U0 <merge-base> HEAD` in `scripts/mutation-check.ts`, the same in
+`diff-coverage-check.ts`). So running either one over uncommitted work does not
+grade that work: it grades the previous commit and reports a confident PASS.
+
+That is exactly how it reads on screen. The run said `3 file(s), 80 line(s) — 12
+executed, 0 never executed` and `PASS: every line this change added was executed
+by a test` — while the new module, its suite and the component it rewired were
+all still unstaged. Nothing in the output says "your change is not in this
+measurement", because from the gate's point of view there is no change.
+
+The cost is a wasted 60-second coverage run and, worse, a moment of believing an
+untested file was covered. Committing first turned the same command into
+`5 file(s), 209 line(s) — 57 executed, 1 never executed` and named the line.
+
+Either would fix it: have both gates refuse to run with a dirty tree, or have
+them diff the working tree (`git diff <merge-base>` without `HEAD`) and say which
+of the two they did in the line they already print about the merge base.
+
+Hit again on a one-line serializer fix: the run over an unstaged change printed
+`Judged 0 file(s), 0 line(s) — 0 executed` and still ended in `PASS: every line
+this change added was executed by a test`. Zero lines judged is the clearest
+possible sign that the gate saw no change, and it is printed as a pass.
+
+Third hit, on the description-template feature, and it cost more than a run:
+`Judged 0 file(s), 0 line(s)` over 26 uncommitted files again read as PASS, and
+the workaround tried before committing (pointing `HEAD` at a throwaway
+`commit-tree` snapshot with `update-ref`) worked but is exactly the kind of
+trick that should not be needed. Commit on the feature branch first; the gates
+are then one plain command each.
+
+## 3x — A red test means no coverage report at all, which reads as a broken setup
+
+vitest's `coverage.reportOnFailure` defaults to false. So a single flaky
+`beforeEach` timeout in a 439-file run left `coverage/local/` empty, and the
+diff gate said `no coverage report was found under coverage` -- the same
+message a wrong `reportsDirectory` would produce. One full 250-second rerun
+went into finding that out. Locally, pass `--coverage.reportOnFailure=true`
+whenever the run is there to measure coverage; CI never sees this because its
+coverage job only runs after the unit shards are green.
+
+Second hit, from a subagent that had deliberately left a property red to report a
+production bug and then could not measure the rest of its suite:
+`--coverage.reportOnFailure=true` makes vitest write the report anyway. Only
+for a probe, never for the gate — the gate reading a report over a red suite is
+exactly the quiet failure the entry above describes.
+
+Third hit: the same flaky `settings.test.ts` timeout, the same
+`no coverage report was found under coverage`, on a run whose purpose was the
+diff gate. Leaving the known flaky files out of the measuring run and running
+them alone as a control is still the only reliable sequence.
+
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
 `scripts/mutation-manifest.json` and the `toEqual` in
@@ -843,48 +903,6 @@ same run had just run. Re-running the identical suites from the repo root
 turned that into `12 executed, 0 never executed`. The tell held: a file the run
 definitely executed was listed under "out of scope, although they look like
 source". Read that line before reading the holes.
-
-## 2x — The coverage and mutation gates read HEAD, not the working tree
-
-Both gates ask git for the diff between the merge base and `HEAD`
-(`git diff -U0 <merge-base> HEAD` in `scripts/mutation-check.ts`, the same in
-`diff-coverage-check.ts`). So running either one over uncommitted work does not
-grade that work: it grades the previous commit and reports a confident PASS.
-
-That is exactly how it reads on screen. The run said `3 file(s), 80 line(s) — 12
-executed, 0 never executed` and `PASS: every line this change added was executed
-by a test` — while the new module, its suite and the component it rewired were
-all still unstaged. Nothing in the output says "your change is not in this
-measurement", because from the gate's point of view there is no change.
-
-The cost is a wasted 60-second coverage run and, worse, a moment of believing an
-untested file was covered. Committing first turned the same command into
-`5 file(s), 209 line(s) — 57 executed, 1 never executed` and named the line.
-
-Either would fix it: have both gates refuse to run with a dirty tree, or have
-them diff the working tree (`git diff <merge-base>` without `HEAD`) and say which
-of the two they did in the line they already print about the merge base.
-
-Hit again on a one-line serializer fix: the run over an unstaged change printed
-`Judged 0 file(s), 0 line(s) — 0 executed` and still ended in `PASS: every line
-this change added was executed by a test`. Zero lines judged is the clearest
-possible sign that the gate saw no change, and it is printed as a pass.
-
-## 2x — A red test means no coverage report at all, which reads as a broken setup
-
-vitest's `coverage.reportOnFailure` defaults to false. So a single flaky
-`beforeEach` timeout in a 439-file run left `coverage/local/` empty, and the
-diff gate said `no coverage report was found under coverage` -- the same
-message a wrong `reportsDirectory` would produce. One full 250-second rerun
-went into finding that out. Locally, pass `--coverage.reportOnFailure=true`
-whenever the run is there to measure coverage; CI never sees this because its
-coverage job only runs after the unit shards are green.
-
-Second hit, from a subagent that had deliberately left a property red to report a
-production bug and then could not measure the rest of its suite:
-`--coverage.reportOnFailure=true` makes vitest write the report anyway. Only
-for a probe, never for the gate — the gate reading a report over a red suite is
-exactly the quiet failure the entry above describes.
 
 ## 2x — Parallel coverage runs share `coverage/.tmp` and delete each other's
 
@@ -2211,27 +2229,6 @@ the word is allowed to appear in prose. What must not appear is a _string_ — a
 import path or a route path — and the comment saying why the gate is gone is
 exactly what stops the next sync putting it back silently.
 
-## Resolved
-
-Entries that were actually fixed, with what fixed them.
-
-### `packages/ids` was the one workspace nothing typechecked
-
-`packages/ids/package.json` has had a `typecheck` script since the package was
-created and no job ever ran it. The root `typecheck` covers `apps/web` and its
-workspace probe; CI's `check` job adds `packages/widget`, `packages/db`,
-`packages/email` and `scripts/`. `packages/ids` was in neither list, so the id
-helpers and their suite compiled nowhere — the root vitest run executes those
-tests, but vitest strips types rather than checking them.
-
-It was not theoretical: the first run of `bun run --cwd packages/ids typecheck`
-rejected a cast in a suite that had been green for a full session, because
-drizzle's `PgCustomColumnBuilder.config` is `protected` and a direct
-object-literal cast onto it needs to go through `unknown`.
-
-Fixed in the batch C pull request by adding `bun run --cwd packages/ids
-typecheck` to the `check` job, next to the other package typechecks.
-
 ## 1x — A `lazy()` boundary makes a suite pass in file order and fail alone
 
 Upstream #553 put the rich text editor behind `lazy()` in two dialogs. Both
@@ -2272,3 +2269,74 @@ unzip -q run.zip -d runlogs && grep -nE "FAIL |Failed Tests" "runlogs/7_test (4_
 Go to the zip first whenever a job's log ends without a summary line. The job
 step list (`gh api .../actions/jobs/<id>`) says which step failed and is worth
 reading either way, but it cannot say which test.
+
+## 1x — The post editor has a different feature set on every surface
+
+`RichTextEditor` takes a `features` object, and the three places a post is
+written pass three different ones: the portal's submit form passes almost
+nothing (`images`, `quackbackEmbeds`), while the widget composer and the admin
+"create post" dialog enable headings, checklists, quotes, code blocks, dividers
+and tables. So a document that is valid in one surface silently loses blocks in
+another — TipTap drops nodes its schema does not have.
+
+This decided the design of description templates: a template written with a
+heading looked fine in the admin dialog and would have lost the heading in the
+portal. It was found by reading the three call sites side by side, after every
+form test had passed with the editor stubbed out — a stub accepts any document.
+Anything that pre-fills or moves content between surfaces has to restrict itself
+to the smallest of the three sets (asserted in
+`components/admin/settings/__tests__/post-template-real-editor.test.tsx`), and a
+named constant per surface would make the difference visible instead of buried
+in three JSX literals.
+
+## 1x — A manual walkthrough in the dev server has no recipe, and every step of it fails quietly
+
+Driving the running app with Playwright for a pre-merge check cost about ten
+extra turns, and none of the failures named itself:
+
+- `bun --env-file=.env --cwd apps/web vite dev` resolves `--env-file` after the
+  `--cwd`, so a relative path loads nothing. Pass `$PWD/.env`.
+- Signing in through the UI is slow to script. A POST to
+  `/api/auth/sign-in/email` with an `Origin` header, saved as Playwright
+  `storageState`, works for every later script.
+- Typing into the page before hydration does nothing and raises no error. Wait
+  for `networkidle` and about two more seconds.
+- The board pickers in the portal, widget and admin dialog are Radix `Select`s.
+  `locator('select')` matches nothing; use `getByRole('combobox')` and
+  `getByRole('option', { name })`.
+- `pkill -f vite` matches the shell that runs it and kills it. Stop the dev
+  server through the background-task handle instead.
+
+A checked-in Playwright login helper plus a short README section would make
+this a two-minute step.
+
+## 1x — A newly published advisory turns `check` red on main and on every open pull request
+
+The audit gate grades the current advisory database, not the diff. Three
+advisories published against unchanged dependencies made `check`, a required
+status check, fail on `main` and on an unrelated feature PR at the same time.
+The way through was a separate dependency PR first, then merging the new
+`main` into the feature branch and waiting for a second full CI run. When
+`check` fails, look at the audit step before reading anything else, and fix it
+on its own branch from `main`.
+
+## Resolved
+
+Entries that were actually fixed, with what fixed them.
+
+### `packages/ids` was the one workspace nothing typechecked
+
+`packages/ids/package.json` has had a `typecheck` script since the package was
+created and no job ever ran it. The root `typecheck` covers `apps/web` and its
+workspace probe; CI's `check` job adds `packages/widget`, `packages/db`,
+`packages/email` and `scripts/`. `packages/ids` was in neither list, so the id
+helpers and their suite compiled nowhere — the root vitest run executes those
+tests, but vitest strips types rather than checking them.
+
+It was not theoretical: the first run of `bun run --cwd packages/ids typecheck`
+rejected a cast in a suite that had been green for a full session, because
+drizzle's `PgCustomColumnBuilder.config` is `protected` and a direct
+object-literal cast onto it needs to go through `unknown`.
+
+Fixed in the batch C pull request by adding `bun run --cwd packages/ids
+typecheck` to the `check` job, next to the other package typechecks.

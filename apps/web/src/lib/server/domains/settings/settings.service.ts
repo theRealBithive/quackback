@@ -63,7 +63,9 @@ import {
   normalizeWelcomeCardInput,
   mergeWelcomeCard,
   publicWelcomeCard,
+  publicPostTemplate,
 } from './settings.helpers'
+import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import type { SettingsRecord } from './settings.helpers'
 import { withCurrentStorageReadTokens } from '@/lib/server/content/storage-read-urls'
 
@@ -634,12 +636,18 @@ export async function updatePortalConfig(input: UpdatePortalConfigInput): Promis
     const normalizedWelcome = normalizeWelcomeCardInput(input.welcomeCard)
     const inputWithoutWelcome: UpdatePortalConfigInput = { ...input }
     delete inputWithoutWelcome.welcomeCard
+    delete inputWithoutWelcome.postTemplate
     const org = await requireSettings()
     const existing = parsePortalConfig(org.portalConfig)
     const updated = deepMerge(existing, inputWithoutWelcome as Partial<PortalConfig>)
     // welcomeCard.body must replace, not deep-merge — see mergeWelcomeCard.
     if (normalizedWelcome) {
       updated.welcomeCard = mergeWelcomeCard(existing.welcomeCard, normalizedWelcome)
+    }
+    // A template replaces the stored one wholesale: deep-merging a document
+    // whose `content` is absent would keep the old text.
+    if (input.postTemplate !== undefined) {
+      updated.postTemplate = sanitizeTiptapContent(input.postTemplate)
     }
 
     await db
@@ -858,6 +866,7 @@ export async function getPublicPortalConfig(): Promise<PublicPortalConfig> {
       },
       ...(oidcProviders.length > 0 && { oidcProviders }),
       ...(welcome && { welcomeCard: liveWelcomeCard(welcome) }),
+      ...publicPostTemplate(portalConfig.postTemplate),
       portalAccess: {
         isPrivate: portalConfig.access?.visibility === 'private',
         widgetSignIn: portalConfig.access?.widgetSignIn ?? false,
@@ -958,6 +967,7 @@ export async function getWorkspaceSettings(): Promise<WorkspaceSettings | null> 
           features: portalConfig.features,
           ...(portalOidcProviders.length > 0 && { oidcProviders: portalOidcProviders }),
           ...(welcome && { welcomeCard: welcome }),
+          ...publicPostTemplate(portalConfig.postTemplate),
           portalAccess: {
             isPrivate: portalConfig.access?.visibility === 'private',
             widgetSignIn: portalConfig.access?.widgetSignIn ?? false,

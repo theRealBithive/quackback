@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { PencilIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
+import { PORTAL_POST_EDITOR_FEATURES } from '@/components/public/feedback/portal-post-editor-features'
 import { usePortalImageUpload } from '@/lib/client/hooks/use-image-upload'
 import { useCreatePublicPost } from '@/lib/client/mutations/portal-posts'
 import { useAuthPopover } from '@/components/auth/auth-popover-context'
@@ -23,6 +24,8 @@ import type { BoardSettings } from '@/lib/shared/db-types'
 import { signOut } from '@/lib/client/auth-client'
 import { removeViewerScopedPortalQueries } from '@/lib/client/queries/portal'
 import { resolveSubmitState } from '@/components/public/feedback/submit-permission'
+import { resolvePostTemplate } from '@/lib/shared/post-template'
+import { usePostTemplatePrefill } from '@/lib/client/hooks/use-post-template-prefill'
 import type { JSONContent } from '@tiptap/react'
 
 interface BoardOption {
@@ -63,7 +66,7 @@ export function FeedbackHeaderAnimated({
   const intl = useIntl()
   const router = useRouter()
   const queryClient = useQueryClient()
-  const { session } = useRouteContext({ from: '__root__' })
+  const { session, settings } = useRouteContext({ from: '__root__' })
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState('')
   const { openAuthPopover } = useAuthPopover()
@@ -117,6 +120,16 @@ export function FeedbackHeaderAnimated({
   // these client-side (same rules the server enforces on write).
   const selectedBoard = boards.find((b) => b.id === selectedBoardId)
   const boardCustomFields = selectedBoard?.settings?.customFields ?? []
+
+  const descriptionTemplate = resolvePostTemplate(
+    selectedBoard?.settings?.descriptionTemplate,
+    settings?.publicPortalConfig?.postTemplate
+  )
+  const descriptionPrefill = usePostTemplatePrefill({
+    template: descriptionTemplate,
+    description: contentJson,
+    setDescription: setContentJson,
+  })
 
   // Focus title input when form expands
   useEffect(() => {
@@ -245,7 +258,7 @@ export function FeedbackHeaderAnimated({
   function resetForm() {
     setSelectedBoardId(defaultBoardId || '')
     setTitle('')
-    setContentJson(null)
+    descriptionPrefill.reset()
     setContentMarkdown('')
     setCustomFieldValues({})
     setError('')
@@ -383,7 +396,7 @@ export function FeedbackHeaderAnimated({
                 minHeight="150px"
                 borderless
                 toolbarPosition="bottom"
-                features={{ images: canUploadImages, quackbackEmbeds: true }}
+                features={{ ...PORTAL_POST_EDITOR_FEATURES, images: canUploadImages }}
                 onImageUpload={canUploadImages ? uploadImage : undefined}
               />
             </motion.div>

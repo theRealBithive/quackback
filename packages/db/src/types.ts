@@ -83,6 +83,7 @@ export type NewBoard = InferInsertModel<typeof boards>
 export interface BoardSettings {
   roadmapStatusIds?: PostStatusId[] // Status IDs to show on roadmap
   customFields?: BoardCustomField[] // Extra intake fields the submission form renders
+  descriptionTemplate?: TiptapContent // Text a new post's description starts with; a suggestion, never enforced
 }
 
 /** The input controls a board custom field can render as on the public

@@ -151,4 +151,41 @@ describe('board mutations cache invalidation', () => {
       slug: 'kirillica',
     })
   })
+
+  // V11 (see lib/shared/__tests__/post-template.test.ts): saving a board's
+  // template never discards its other settings. The server merges; the
+  // optimistic cache has to show the same result, or the custom fields
+  // disappear from the page until the refetch lands.
+  it('useUpdateBoard.onMutate merges a settings update into the cached board (V11)', async () => {
+    const customFields = [{ key: 'version', label: 'Version', type: 'text', required: false }]
+    const template = { type: 'doc', content: [{ type: 'paragraph' }] }
+    const cachedBoard = { id: 'board_test123', name: 'Bugs', settings: { customFields } }
+    getQueryData.mockImplementation((key: unknown[]) =>
+      key[1] === 'detail' ? cachedBoard : [cachedBoard]
+    )
+    const { useUpdateBoard } = await import('../boards')
+    const mutation = useUpdateBoard() as {
+      onMutate?: (input: { id: string; settings: Record<string, unknown> }) => Promise<unknown>
+    }
+
+    await mutation.onMutate?.({ id: 'board_test123', settings: { descriptionTemplate: template } })
+
+    const listCall = setQueryData.mock.calls.find(
+      (call: unknown[]) => JSON.stringify(call[0]) === JSON.stringify(['boards', 'list'])
+    )
+    const updateList = listCall![1] as (old: unknown[]) => Array<{ settings: unknown }>
+    expect(updateList([cachedBoard])[0].settings).toEqual({
+      customFields,
+      descriptionTemplate: template,
+    })
+
+    const detailCall = setQueryData.mock.calls.find(
+      (call: unknown[]) =>
+        JSON.stringify(call[0]) === JSON.stringify(['boards', 'detail', 'board_test123'])
+    )
+    expect((detailCall![1] as { settings: unknown }).settings).toEqual({
+      customFields,
+      descriptionTemplate: template,
+    })
+  })
 })

@@ -14,8 +14,11 @@ import {
   getBoardById,
   createBoard,
   updateBoard,
+  updateBoardSettings,
   deleteBoard,
 } from '@/lib/server/domains/boards/board.service'
+import { postTemplateSchema } from '@/lib/shared/post-template'
+import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import { boardAccessSchema, boardPresetSchema, accessForPreset } from '@/lib/shared/schemas/boards'
 import { PERMISSIONS } from '@/lib/shared/permissions'
 import { logger } from '@/lib/server/logger'
@@ -52,6 +55,7 @@ const getBoardSchema = z.object({
 const boardSettingsSchema = z
   .object({
     roadmapStatusIds: z.array(z.string()).optional(),
+    descriptionTemplate: postTemplateSchema.optional(),
   })
   .strict()
 
@@ -69,6 +73,14 @@ const updateBoardSchema = z.object({
 const deleteBoardSchema = z.object({
   id: z.string(),
 })
+
+function sanitizeBoardSettings(settings: z.infer<typeof boardSettingsSchema>): BoardSettings {
+  const sanitized = { ...settings } as BoardSettings
+  if (settings.descriptionTemplate !== undefined) {
+    sanitized.descriptionTemplate = sanitizeTiptapContent(settings.descriptionTemplate)
+  }
+  return sanitized
+}
 
 // ============================================
 // Type Exports
@@ -175,11 +187,16 @@ export const updateBoardFn = createServerFn({ method: 'POST' })
     log.debug({ board_id: data.id }, 'update board')
     await requireAuth({ permission: PERMISSIONS.BOARD_MANAGE })
 
-    const board = await updateBoard(data.id as BoardId, {
+    const boardId = data.id as BoardId
+    let board = await updateBoard(boardId, {
       name: data.name,
       description: data.description,
-      settings: data.settings as BoardSettings | undefined,
     })
+    // Settings are merged into what the board already holds, so saving one
+    // key (a template) never discards another (roadmap statuses, custom fields).
+    if (data.settings !== undefined) {
+      board = await updateBoardSettings(boardId, sanitizeBoardSettings(data.settings))
+    }
 
     log.info({ board_id: board.id }, 'board updated')
     return serializeBoard(board)

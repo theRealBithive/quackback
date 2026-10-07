@@ -367,6 +367,21 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/lib/server/policy/__tests__/message-edit-delete.contract.test.ts',
         ],
       },
+      {
+        file: 'apps/web/src/lib/shared/post-template.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/post-template.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/client/hooks/use-post-template-prefill.ts',
+        suites: [
+          'apps/web/src/lib/client/hooks/__tests__/use-post-template-prefill.test.tsx',
+          'apps/web/src/components/admin/settings/__tests__/post-template-real-editor.test.tsx',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/shared/widget-visible-board.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/widget-visible-board.test.ts'],
+      },
     ])
   })
 
@@ -975,6 +990,20 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: "const parent = message.ticketId ? 'ticket' : 'conversation'",
         replacement: '""',
         why: expect.stringContaining('writePermissionFor asks only whether the parent is'),
+      },
+      {
+        file: 'apps/web/src/lib/client/hooks/use-post-template-prefill.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (previous === undefined || next === undefined) return previous === next',
+        replacement: 'false',
+        why: "This branch answers only when at least one template is undefined. Its value differs from `false` only when both are, and the effect runs with both undefined only on mount or when setDescription changes identity (the hook requires a stable setter). There the description is either null, empty or the author's own text with nothing inserted; mayReplaceDescription then writes null into an already empty description or refuses. No reader can tell an empty description from null, and no text is ever touched.",
+      },
+      {
+        file: 'apps/web/src/lib/shared/post-template.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (description === null) return true',
+        replacement: 'false',
+        why: 'isEmptyTiptapDoc treats a missing document as empty, so for a null description the next line returns true as well. This line exists for the type checker, which needs description narrowed to a document before hasSameVisibleContent; no input can tell the two paths apart.',
       },
     ])
   })

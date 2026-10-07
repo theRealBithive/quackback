@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { toWidgetVisibleBoard, type WidgetVisibleBoard } from '@/lib/shared/widget-visible-board'
 import { createServerFn } from '@tanstack/react-start'
 import {
   type PostId,
@@ -761,12 +762,8 @@ export const fetchBoardCapabilitiesFn = createServerFn({ method: 'GET' }).handle
     permissions: await buildBoardPermissions(actor, boards, allowAnonymous),
     // Same visitor-visible list as the permissions map, so identify can
     // surface segment/members boards the anonymous SSR seed omitted.
-    boards: boards.map((board): WidgetVisibleBoard => ({
-      id: String(board.id),
-      name: board.name,
-      slug: board.slug,
-    })),
+    boards: boards.map(toWidgetVisibleBoard),
   }
 })
 
-export type WidgetVisibleBoard = { id: string; name: string; slug: string }
+export type { WidgetVisibleBoard }
