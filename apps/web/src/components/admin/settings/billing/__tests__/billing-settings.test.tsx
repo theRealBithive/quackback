@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { renderInGerman } from '@/test/render-with-intl'
+import { formatIn, restoreRuntimeLocale, setRuntimeLocale } from '@/test/runtime-locale'
 import type { BillingCatalogue } from '@/lib/server/control-plane/client'
 import type { BillingProjectionOverview } from '@/lib/server/domains/billing/projection-overview'
 import { BillingPlansView } from '../billing-settings'
@@ -113,6 +115,50 @@ function renderView(
     />
   )
 }
+
+afterEach(restoreRuntimeLocale)
+
+describe('BillingPlansView dates', () => {
+  // 23:00 UTC on 12 September is already the 13th in Kiritimati (UTC+14).
+  const PAID_THROUGH = '2026-09-12T23:00:00.000Z'
+  const DAY: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'short', day: 'numeric' }
+  const cancelling = { ...paidOverview, cancellationAt: PAID_THROUGH }
+
+  it('writes "Paid through" in the page language and the viewer zone (T2, T3)', () => {
+    setRuntimeLocale('en-US', 'Pacific/Kiritimati')
+    renderInGerman(
+      <BillingPlansView
+        overview={cancelling}
+        catalogue={catalogue}
+        catalogueError={null}
+        invoices={[]}
+        invoicesError={null}
+      />
+    )
+    const german = formatIn('de', 'Pacific/Kiritimati', PAID_THROUGH, DAY)
+    const english = formatIn('en', 'Pacific/Kiritimati', PAID_THROUGH, DAY)
+    expect(german).not.toBe(english)
+    expect(screen.getByText(`Paid through ${german}`, { exact: false })).toBeInTheDocument()
+  })
+
+  it('writes it in English outside a language provider (T10)', () => {
+    setRuntimeLocale('de-DE', 'UTC')
+    render(
+      <BillingPlansView
+        overview={cancelling}
+        catalogue={catalogue}
+        catalogueError={null}
+        invoices={[]}
+        invoicesError={null}
+      />
+    )
+    expect(
+      screen.getByText(`Paid through ${formatIn('en-US', 'UTC', PAID_THROUGH, DAY)}`, {
+        exact: false,
+      })
+    ).toBeInTheDocument()
+  })
+})
 
 describe('BillingPlansView', () => {
   it('renders the active paid plan, seat meter, and invoices', () => {
