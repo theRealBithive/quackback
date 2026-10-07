@@ -129,6 +129,11 @@ export async function isSetupOpenToClaim(exec: Executor): Promise<boolean> {
   if (rows.length === 0) return true
   // Not a singleton: no honest answer, so refuse rather than open.
   if (rows.length > 1) return false
-  const state = getSetupState(rows[0]!.setup_state ?? null)
+  const storedState = rows[0]!.setup_state ?? null
+  const state = getSetupState(storedState)
+  // A stored state that does not parse is not "never started": it may be a
+  // finished install whose row was damaged, so it gets the same refusal.
+  const storedStateUnreadable = storedState !== null && state === null
+  if (storedStateUnreadable) return false
   return !isOnboardingComplete(state) || needsCloudOnboardingWizard(state)
 }
