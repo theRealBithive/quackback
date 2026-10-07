@@ -845,6 +845,36 @@ Third hit: the same flaky `settings.test.ts` timeout, the same
 diff gate. Leaving the known flaky files out of the measuring run and running
 them alone as a control is still the only reliable sequence.
 
+## 3x — A picked upstream suite is written against module names from commits we skipped
+
+Three suites in upstream batch F failed for reasons that had nothing to do with
+the fix they came with. `widget-home-compose-board.test.tsx` (#577) mocked
+`useWidgetMediaUpload` and `widget/posts`' `widgetCreatePublicPostFn`, names
+upstream introduced later with #566 and the widget-posts move; here they are
+`useWidgetImageUpload` and `public-posts`' `createPublicPostFn`, so the mock
+answered nothing and the submit never reached it. `rich-text-editor-enter.test.tsx`
+(#567) rendered without an `IntlProvider`, which the fork's editor needs. And
+the typecheck, not any test, found three fork-only fixtures that build an
+`IdentityProvider` without the field #609 added. Each looked like a broken fix
+until the mock or fixture was read. After a pick, run its own suites first and
+read a failure's first line before the fix's code: `No "X" export is defined on
+the mock` and `Could not find required intl object` are the tells.
+
+Hit again in batch K: `@/test/server-fns-in-process`, `use-widget-file-upload`
+and `finishIdentityOnboarding` came with #688, #644 and #656 from commits we
+had not picked. Typecheck finds them at once (`Cannot find module`); grep the
+picked test files for imports before running anything.
+
+The reverse hit in batch J: upstream #555 renamed the widget's server
+functions (`widget/posts`, `widget/changelog`, `widget/help`, a visitor RPC
+module) and moved handler bodies into `createServerOnlyFn`. Thirteen _fork_
+suites mocked the old names and went red at once, with no typecheck error
+to point at them, because a `vi.mock` of a module nobody imports any more
+is legal. The tells were the same two first lines, plus
+`No "createServerOnlyFn" export is defined on the "@tanstack/react-start"
+mock`. After a pick that renames modules, grep the fork's suites for the
+old module paths before running the batch.
+
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
 `scripts/mutation-manifest.json` and the `toEqual` in
@@ -1006,25 +1036,15 @@ an equivalent until it was probed against the real database; recorded as one,
 it would have been a false excuse. Before writing an equivalence reason about
 what a library does, measure the library, not the stub in front of it.
 
-## 2x — A picked upstream suite is written against module names from commits we skipped
+## 1x — Upstream fixtures without a session audience read as dashboard upstream and as portal here
 
-Three suites in upstream batch F failed for reasons that had nothing to do with
-the fix they came with. `widget-home-compose-board.test.tsx` (#577) mocked
-`useWidgetMediaUpload` and `widget/posts`' `widgetCreatePublicPostFn`, names
-upstream introduced later with #566 and the widget-posts move; here they are
-`useWidgetImageUpload` and `public-posts`' `createPublicPostFn`, so the mock
-answered nothing and the submit never reached it. `rich-text-editor-enter.test.tsx`
-(#567) rendered without an `IntlProvider`, which the fork's editor needs. And
-the typecheck, not any test, found three fork-only fixtures that build an
-`IdentityProvider` without the field #609 added. Each looked like a broken fix
-until the mock or fixture was read. After a pick, run its own suites first and
-read a failure's first line before the fix's code: `No "X" export is defined on
-the mock` and `Could not find required intl object` are the tells.
-
-Hit again in batch K: `@/test/server-fns-in-process`, `use-widget-file-upload`
-and `finishIdentityOnboarding` came with #688, #644 and #656 from commits we
-had not picked. Typecheck finds them at once (`Cannot find module`); grep the
-picked test files for imports before running anything.
+The fork reads a session with no `scope` as `portal` (R12); upstream reads it
+as `dashboard`. Upstream suites build sessions as `{ user: { id } }` and
+expect them to pass a dashboard-only gate, so every new dashboard-only check
+an upstream pick adds turns its own fixtures red here (batch J:
+`/api/devices`, three tests answering 403). The fix is to give the fixture
+`session: { scope: 'dashboard' }`, never to relax the gate. Expect it on
+every pick that adds a scope check.
 
 ## 2x — A date fixture that happens to fall on the real "today" collides with the preset labels
 
