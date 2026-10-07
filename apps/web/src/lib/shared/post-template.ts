@@ -61,18 +61,11 @@ export function resolvePostTemplate(
  * untouched template would otherwise never compare equal to itself.
  */
 function visibleOutline(node: DescriptionDoc): unknown {
-  const markTypes: string[] = []
-  for (const mark of node.marks ?? []) {
-    markTypes.push(mark.type)
-  }
-  markTypes.sort()
-
-  const children: unknown[] = []
-  for (const child of node.content ?? []) {
-    children.push(visibleOutline(child))
-  }
-
-  return { type: node.type ?? '', text: node.text ?? '', marks: markTypes, content: children }
+  const marks = node.marks ?? []
+  const markTypes = marks.map((mark) => mark.type).sort()
+  const children = node.content ?? []
+  const childOutlines = children.map(visibleOutline)
+  return { type: node.type, text: node.text, marks: markTypes, content: childOutlines }
 }
 
 export function hasSameVisibleContent(first: DescriptionDoc, second: DescriptionDoc): boolean {
@@ -90,8 +83,8 @@ export function mayReplaceDescription(
   description: DescriptionDoc | null,
   insertedTemplate: DescriptionDoc | undefined
 ): boolean {
-  if (description === null) return true
-  if (isEmptyTiptapDoc(description as TiptapContent)) return true
+  const descriptionDoc = (description ?? undefined) as TiptapContent | undefined
+  if (isEmptyTiptapDoc(descriptionDoc)) return true
   if (insertedTemplate === undefined) return false
   return hasSameVisibleContent(description, insertedTemplate)
 }

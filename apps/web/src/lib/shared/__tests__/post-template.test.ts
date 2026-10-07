@@ -299,6 +299,25 @@ describe('whether a board switch may replace the description', () => {
   })
 })
 
+describe('what counts as the same visible content', () => {
+  /** The same document, with every absent list written out as an empty one. */
+  function withEmptyListsSpelledOut(node: TiptapContent): TiptapContent {
+    const spelled: TiptapContent = { ...node, marks: node.marks ?? [] }
+    spelled.content = (node.content ?? []).map(withEmptyListsSpelledOut)
+    return spelled
+  }
+
+  it('reads an absent mark or child list like an empty one (V5)', () => {
+    fc.assert(
+      fc.property(visibleDoc, (template) => {
+        const spelledOut = withEmptyListsSpelledOut(template)
+        expect(mayReplaceDescription(spelledOut, template)).toBe(true)
+        expect(hasSameVisibleContent(template, spelledOut)).toBe(true)
+      })
+    )
+  })
+})
+
 describe('the size limit on a saved template', () => {
   function docOfLength(textLength: number): TiptapContent {
     return {

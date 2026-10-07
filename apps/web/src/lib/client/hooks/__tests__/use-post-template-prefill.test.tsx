@@ -8,6 +8,8 @@
  *   V3  With neither, the description starts empty — exactly today's behaviour.
  *   V5  Switching boards replaces the description only while the author has not
  *       changed it; once they have typed, a board switch never discards their text.
+ *   V6  The template is never enforced: a post is accepted and stored unchanged
+ *       whether the template was kept, edited, partly filled or deleted.
  *   V7  After a successful submit or cancel, the next empty form starts again
  *       with the template of the selected board.
  */
@@ -110,6 +112,17 @@ describe('a post form prefilling its description', () => {
     form.rerender({ template: BUG_TEMPLATE })
 
     expect(form.result.current.description).toEqual(BUG_TEMPLATE)
+  })
+
+  it('does not put back a template the author deleted when it arrives again unchanged (V6, V5)', () => {
+    const form = renderForm(BUG_TEMPLATE)
+    const emptied: TiptapContent = { type: 'doc', content: [{ type: 'paragraph' }] }
+    act(() => form.result.current.setDescription(emptied))
+
+    // The board's settings were refetched: same template, new object.
+    form.rerender({ template: structuredClone(BUG_TEMPLATE) })
+
+    expect(form.result.current.description).toEqual(emptied)
   })
 
   it('starts the next post with the template again after a reset (V7)', () => {
