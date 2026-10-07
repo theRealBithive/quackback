@@ -3,6 +3,11 @@
  * The members table shows a date whose format switches once the page has
  * hydrated. The switch must re-render only the date labels: a formatter in the
  * columns memo would rebuild every column and re-render every row.
+ *
+ * Corrected 2026-10-07 for batch L contract T10 and T3: the tab renders here
+ * without a language provider, so the label stays English after hydration and
+ * only the zone switches (1/5 in Los Angeles, 1/6 in Kiritimati). Upstream
+ * expected the browser's runtime locale.
  */
 import { act } from 'react'
 import { hydrateRoot } from 'react-dom/client'
@@ -107,7 +112,8 @@ describe('MembersTab hydration', () => {
 
     expect(errors).toEqual([])
     // The label switched to the viewer's format...
-    expect(container.textContent).toContain(formatIn(VIEWER.locale, VIEWER.timeZone, OLD_SIGN_IN))
+    expect(container.textContent).toContain(formatIn('en-US', VIEWER.timeZone, OLD_SIGN_IN))
+    expect(container.textContent).toContain('1/6/2026')
     // ...and each row rendered once, in the hydrating pass, as it did on the server.
     expect(rowRenders.current).toBe(serverRenders)
   })

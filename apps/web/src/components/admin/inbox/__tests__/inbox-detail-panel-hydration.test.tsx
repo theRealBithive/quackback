@@ -3,7 +3,12 @@
  * A deep-linked conversation (/admin/inbox?i=...) server-renders its detail
  * panel, whose "First seen" and "Created" rows show absolute dates. The server
  * and the agent's browser format dates in different locales and time zones;
- * the panel must still hydrate without error, then show the agent's format.
+ * the panel must still hydrate without error, then show the agent's zone.
+ *
+ * Corrected 2026-10-07 for batch L contract T10 and T3: the panel renders
+ * here without a language provider, so the dates stay English after
+ * hydration and only the zone becomes the agent's. Upstream expected the
+ * browser's runtime locale.
  */
 import { act } from 'react'
 import { hydrateRoot } from 'react-dom/client'
@@ -121,8 +126,8 @@ describe('InboxDetailPanel hydration', () => {
     })
 
     expect(errors).toEqual([])
-    const viewerDate = formatIn(VIEWER.locale, VIEWER.timeZone, CREATED_AT, DAY)
-    expect(viewerDate).toBe('2. Okt. 2026')
+    const viewerDate = formatIn('en-US', VIEWER.timeZone, CREATED_AT, DAY)
+    expect(viewerDate).toBe('Oct 2, 2026')
     // "First seen" (the visitor's earliest date) and "Created" both read it.
     expect(container.textContent?.split(viewerDate).length).toBe(3)
     expect(container.textContent).not.toContain('Oct 1, 2026')

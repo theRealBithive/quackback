@@ -11,6 +11,14 @@
  * allowlist with the reason; a listed file that no longer offends fails the
  * guard, so the lists only shrink.
  *
+ * Contract for batch L (upstream #625 372fcb6f2, #627 f560647f7, #630
+ * 16938dc59), confirmed 2026-10-07 -- the item this guard pins, verbatim:
+ *
+ *   T9 A component or route that formats a date or number in the runtime's
+ *      default locale or time zone, outside the shared primitives, fails a
+ *      guard. Files allowed to do so are listed with a reason, and the list
+ *      can only shrink.
+ *
  * Sources are parsed with @babel/parser, so calls split over lines are seen
  * and comments are not. The parser does not know types, so a call is read as
  * a date or a number format from what the syntax shows:
@@ -329,22 +337,41 @@ function scan(): Map<Rule, Map<string, number[]>> {
   return result
 }
 
+/** Offending files the allowlist does not excuse, as `file:line,line`. */
+function unlistedOffenders(
+  found: Map<string, number[]>,
+  allowed: Record<string, string>
+): string[] {
+  const unlisted: string[] = []
+  for (const [file, lines] of found) {
+    const excused = file in allowed
+    if (!excused) unlisted.push(`${file}:${lines.join(',')}`)
+  }
+  return unlisted
+}
+
+/** Allowlisted files that no longer offend: entries that must be removed. */
+function staleAllowlistEntries(
+  found: Map<string, number[]>,
+  allowed: Record<string, string>
+): string[] {
+  return Object.keys(allowed).filter((file) => !found.has(file))
+}
+
 const offenders = scan()
 
 describe.each(Object.keys(FIX) as Rule[])('SSR formats: %s', (rule) => {
   const found = offenders.get(rule)!
   const allowed = ALLOWLIST[rule]
 
-  it('has no offenders outside the allowlist', () => {
-    const unlisted = [...found]
-      .filter(([file]) => !(file in allowed))
-      .map(([file, lines]) => `${file}:${lines.join(',')}`)
-    expect(unlisted, FIX[rule]).toEqual([])
+  it('has no offenders outside the allowlist (T9)', () => {
+    expect(unlistedOffenders(found, allowed), FIX[rule]).toEqual([])
   })
 
-  it('has no stale allowlist entries', () => {
-    const stale = Object.keys(allowed).filter((file) => !found.has(file))
-    expect(stale, 'remove these files from the allowlist').toEqual([])
+  it('has no stale allowlist entries (T9)', () => {
+    expect(staleAllowlistEntries(found, allowed), 'remove these files from the allowlist').toEqual(
+      []
+    )
   })
 })
 
@@ -369,7 +396,7 @@ describe('offences', () => {
     ['Intl.DateTimeFormat()', 'Intl.DateTimeFormat().resolvedOptions().timeZone'],
     ['a call split over lines', 'd.toLocaleDateString(\n  undefined,\n  { year: "numeric" }\n)'],
     ['an optional call', 'd?.toLocaleDateString()'],
-  ])('reads %s as a default-locale date', (_name, src) => {
+  ])('reads %s as a default-locale date (T9)', (_name, src) => {
     expect(rules(src)).toEqual(['default-locale-date'])
   })
 
@@ -380,7 +407,7 @@ describe('offences', () => {
     ['number options', 'n.toLocaleString(undefined, { maximumFractionDigits: 1 })'],
     ['new Intl.NumberFormat()', 'new Intl.NumberFormat().format(n)'],
     ['Intl.NumberFormat(undefined, ...)', "Intl.NumberFormat(undefined, { style: 'percent' })"],
-  ])('reads %s as a default-locale number', (_name, src) => {
+  ])('reads %s as a default-locale number (T9)', (_name, src) => {
     expect(rules(src)).toEqual(['default-locale-number'])
   })
 
@@ -391,7 +418,7 @@ describe('offences', () => {
     ['toLocaleString on a Date', "new Date(at).toLocaleString('en-US', { hour: 'numeric' })"],
     ['an Intl formatter', "new Intl.DateTimeFormat('en-US', { month: 'short' })"],
     ['options bound to a name', "const O = { day: 'numeric' }\nd.toLocaleDateString('en-US', O)"],
-  ])('reads %s with no time zone as unzoned', (_name, src) => {
+  ])('reads %s with no time zone as unzoned (T9)', (_name, src) => {
     expect(rules(src)).toEqual(['unzoned-date'])
   })
 
@@ -401,7 +428,7 @@ describe('offences', () => {
     ['formatISO', "import { formatISO } from 'date-fns'\nformatISO(d)"],
     ['a namespace import', "import * as dfns from 'date-fns'\ndfns.format(d, 'MMM d')"],
     ['a default import of the module', "import format from 'date-fns/format'\nformat(d, 'p')"],
-  ])('reads date-fns %s as a runtime-zone format', (_name, src) => {
+  ])('reads date-fns %s as a runtime-zone format (T9)', (_name, src) => {
     expect(rules(src)).toEqual(['date-fns-format'])
   })
 
@@ -421,12 +448,163 @@ describe('offences', () => {
     ['a local function named format', "const format = (d: Date) => ''\nformat(d)"],
     ['a comment', '// d.toLocaleDateString()\nconst x = 1'],
     ['a string', "const s = 'toLocaleDateString()'"],
-  ])('passes %s', (_name, src) => {
+  ])('passes %s (T9)', (_name, src) => {
     expect(rules(src)).toEqual([])
   })
 
-  it('reports the line of each offending call', () => {
+  it('reports the line of each offending call (T9)', () => {
     const src = 'const a = 1\nnew Date(x).toLocaleDateString()\nconst b = 2\nd.toLocaleTimeString()'
     expect(offences('example.ts', src).get('default-locale-date')).toEqual([2, 4])
+  })
+})
+
+describe('T9 the guard decides on fixture sources', () => {
+  /** The guard's verdict for one fixture file under one allowlist. */
+  function verdict(src: string, allowed: Record<Rule, Record<string, string>>, file = 'x.tsx') {
+    const found = offences(file, src)
+    const unlisted: string[] = []
+    const stale: string[] = []
+    for (const rule of Object.keys(FIX) as Rule[]) {
+      const foundForRule = new Map<string, number[]>()
+      const lines = found.get(rule)
+      if (lines) foundForRule.set(file, lines)
+      unlisted.push(...unlistedOffenders(foundForRule, allowed[rule]))
+      stale.push(...staleAllowlistEntries(foundForRule, allowed[rule]))
+    }
+    return { unlisted, stale }
+  }
+
+  const NOTHING_ALLOWED: Record<Rule, Record<string, string>> = {
+    'default-locale-date': {},
+    'default-locale-number': {},
+    'unzoned-date': {},
+    'date-fns-format': {},
+  }
+
+  it.each([
+    ['Date#toLocaleString without a locale', 'export const a = new Date(at).toLocaleString()'],
+    ['Date#toLocaleDateString without a locale', 'export const a = d.toLocaleDateString()'],
+    [
+      'Date#toLocaleDateString with a locale and no zone',
+      "export const a = d.toLocaleDateString('de-DE', { month: 'long' })",
+    ],
+    [
+      'Date#toLocaleTimeString with an empty locale list',
+      "export const a = d.toLocaleTimeString([], { hour: '2-digit' })",
+    ],
+    [
+      'Intl.DateTimeFormat without a time zone',
+      "export const f = new Intl.DateTimeFormat('en-US', { month: 'short' })",
+    ],
+    ['Intl.DateTimeFormat with no locale', 'export const f = new Intl.DateTimeFormat()'],
+    [
+      'date-fns format in rendered code',
+      "import { format } from 'date-fns'\nexport const C = () => <p>{format(d, 'MMM d')}</p>",
+    ],
+    ['Number#toLocaleString', 'export const C = () => <p>{count.toLocaleString()}</p>'],
+    ['Intl.NumberFormat with no locale', 'export const n = new Intl.NumberFormat().format(x)'],
+  ])('fails a file that uses %s (T9)', (_name, src) => {
+    const { unlisted } = verdict(src, NOTHING_ALLOWED)
+    expect(unlisted).toHaveLength(1)
+    expect(unlisted[0]).toMatch(/^x\.tsx:\d+$/)
+  })
+
+  it.each([
+    ['<LocalDate>', "export const C = () => <LocalDate date={at} options={{ month: 'short' }} />"],
+    [
+      'the useLocalDateFormatter hook',
+      "export function C() { const f = useLocalDateFormatter(); return <p title={f(at, { day: 'numeric' })} /> }",
+    ],
+    ['<CalendarDate>', 'export const C = () => <CalendarDate value="2026-10-01" />'],
+    [
+      'formatCalendarDate',
+      "export const a = formatCalendarDate(v, { month: 'long' }, intl.locale)",
+    ],
+    ['formatMonthYear', 'export const a = formatMonthYear(eta, intl.locale)'],
+    [
+      'the useFormatNumber hook',
+      'export function C() { const n = useFormatNumber(); return <p>{n(count)}</p> }',
+    ],
+    ['formatNumberIn', "export const a = formatNumberIn('en', 12345)"],
+    [
+      'a date with a locale and a named zone',
+      "export const a = d.toLocaleDateString(intl.locale, { month: 'long', timeZone: 'UTC' })",
+    ],
+  ])('passes a file that uses %s (T9)', (_name, src) => {
+    expect(verdict(src, NOTHING_ALLOWED)).toEqual({ unlisted: [], stale: [] })
+  })
+
+  it('excuses an offending file the allowlist names (T9)', () => {
+    const allowed = {
+      ...NOTHING_ALLOWED,
+      'default-locale-date': { 'x.tsx': 'Formats only inside a dialog opened after hydration.' },
+    }
+    const { unlisted, stale } = verdict('export const a = d.toLocaleDateString()', allowed)
+    expect(unlisted).toEqual([])
+    expect(stale).toEqual([])
+  })
+
+  it('fails on an allowlist entry whose file no longer offends (T9)', () => {
+    const allowed = {
+      ...NOTHING_ALLOWED,
+      'default-locale-date': { 'x.tsx': 'Formats only inside a dialog opened after hydration.' },
+    }
+    const { unlisted, stale } = verdict('export const C = () => <LocalDate date={at} />', allowed)
+    expect(unlisted).toEqual([])
+    expect(stale).toEqual(['x.tsx'])
+  })
+
+  it('an entry excuses only the rule it is listed under (T9)', () => {
+    const allowed = {
+      ...NOTHING_ALLOWED,
+      'default-locale-number': { 'x.tsx': 'A count shown only after a user action.' },
+    }
+    const { unlisted, stale } = verdict('export const a = d.toLocaleDateString()', allowed)
+    expect(unlisted).toEqual(['x.tsx:1'])
+    expect(stale).toEqual(['x.tsx'])
+  })
+})
+
+describe('T9 the shared primitives and the allowlist itself', () => {
+  // The scan also skips PRIMITIVE by name; measured 2026-10-07, the date
+  // primitive raises nothing on its own (its options are parameters, which
+  // the guard does not read), so the skip is a safeguard, not load-bearing.
+  it.each([PRIMITIVE, 'components/ui/format-number.ts'])(
+    'the shared primitive %s passes the guard on its own source (T9)',
+    (file) => {
+      const src = readFileSync(join(SRC_ROOT, file), 'utf8')
+      expect([...offences(file, src).keys()]).toEqual([])
+    }
+  )
+
+  it('every allowlisted file carries a reason (T9)', () => {
+    const entries = Object.values(ALLOWLIST).flatMap((byFile) => Object.entries(byFile))
+    const withoutReason = entries
+      .filter(([, reason]) => reason.trim().length === 0)
+      .map(([file]) => file)
+    expect(entries.length).toBeGreaterThan(0)
+    expect(withoutReason).toEqual([])
+  })
+
+  it('the allowlist only shrinks: no file beyond those listed when batch L landed (T9)', () => {
+    // Removing an entry keeps this green; adding one turns it red, so a new
+    // exception has to be argued for in the diff of this list too.
+    const LISTED_WHEN_BATCH_L_LANDED: Record<Rule, string[]> = {
+      'default-locale-date': [
+        'components/admin/status/status-lifecycle-stepper.tsx',
+        'components/conversation/snooze-natural-input.tsx',
+        'components/ui/mention-hover-card-overlay.tsx',
+        'routes/admin/settings.office-hours.tsx',
+      ],
+      'default-locale-number': [],
+      'unzoned-date': [],
+      'date-fns-format': [],
+    }
+    for (const rule of Object.keys(FIX) as Rule[]) {
+      const added = Object.keys(ALLOWLIST[rule]).filter(
+        (file) => !LISTED_WHEN_BATCH_L_LANDED[rule].includes(file)
+      )
+      expect(added, `new allowlist entries under ${rule}`).toEqual([])
+    }
   })
 })

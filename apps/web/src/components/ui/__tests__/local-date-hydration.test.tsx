@@ -3,7 +3,13 @@
  * An absolute date is formatted on the server and again as the page hydrates,
  * in two runtimes whose default locale and time zone differ. The first render
  * on both sides must produce the same text, so hydration raises no error, and
- * the text then settles on the viewer's locale and zone.
+ * the text then settles on the viewer's zone.
+ *
+ * Corrected 2026-10-07 for batch L contract T10 ("outside any language
+ * provider, formatting falls back to English, as before") and T3 (the
+ * browser never chooses another language): these renders have no provider,
+ * so after hydration only the zone switches to the viewer's and the text
+ * stays in English. Upstream expected the browser's runtime locale here.
  */
 import { act } from 'react'
 import { createRoot, hydrateRoot } from 'react-dom/client'
@@ -17,6 +23,8 @@ import { LocalDate, NUMERIC_DATE_TIME, useLocalDateFormatter } from '../local-da
 const AT = '2026-10-01T20:30:00.000Z'
 const DAY: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' }
 const VIEWER = { locale: 'de-DE', timeZone: 'Pacific/Kiritimati' }
+/** The language of every render outside a provider (T10). */
+const NO_PROVIDER_LOCALE = 'en-US'
 
 afterEach(restoreRuntimeLocale)
 afterEach(() => {
@@ -64,7 +72,7 @@ describe('LocalDate', () => {
 
     expect(errors).toEqual([])
     expect(serverHtml).toContain('Oct 1, 2026')
-    expect(container.textContent).toBe(formatIn(VIEWER.locale, VIEWER.timeZone, AT, DAY))
+    expect(container.textContent).toBe(formatIn(NO_PROVIDER_LOCALE, VIEWER.timeZone, AT, DAY))
     expect(container.textContent).not.toBe('Oct 1, 2026')
   })
 
@@ -76,7 +84,7 @@ describe('LocalDate', () => {
 
     expect(errors).toEqual([])
     expect(serverHtml).toContain('Oct 1, 2026')
-    expect(container.textContent).toBe(formatIn(VIEWER.locale, 'America/New_York', AT, DAY))
+    expect(container.textContent).toBe(formatIn(NO_PROVIDER_LOCALE, 'America/New_York', AT, DAY))
   })
 
   it('keeps a locale it is given, switching only the zone after hydration', async () => {
@@ -110,9 +118,11 @@ describe('useLocalDateFormatter', () => {
     expect(errors).toEqual([])
     const span = container.querySelector('span')!
     expect(span.getAttribute('title')).toBe(
-      `Created ${formatIn(VIEWER.locale, VIEWER.timeZone, AT, DAY)}`
+      `Created ${formatIn(NO_PROVIDER_LOCALE, VIEWER.timeZone, AT, DAY)}`
     )
-    expect(span.textContent).toBe(formatIn(VIEWER.locale, VIEWER.timeZone, AT, { hour: 'numeric' }))
+    expect(span.textContent).toBe(
+      formatIn(NO_PROVIDER_LOCALE, VIEWER.timeZone, AT, { hour: 'numeric' })
+    )
   })
 
   it('formats for the viewer from the first render when mounted on the client', async () => {
@@ -127,7 +137,7 @@ describe('useLocalDateFormatter', () => {
       createRoot(container).render(<Probe />)
     })
 
-    expect(seen[0]).toBe(formatIn(VIEWER.locale, VIEWER.timeZone, AT, NUMERIC_DATE_TIME))
+    expect(seen[0]).toBe(formatIn(NO_PROVIDER_LOCALE, VIEWER.timeZone, AT, NUMERIC_DATE_TIME))
   })
 })
 
