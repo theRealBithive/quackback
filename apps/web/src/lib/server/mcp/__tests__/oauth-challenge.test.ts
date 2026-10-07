@@ -60,8 +60,12 @@ describe('MCP protected resource metadata', () => {
     // register and authorize. An empty list leaves it with nowhere to go, and
     // a `bearer_methods_supported` that does not say `header` invites the
     // client to put the access token in a query string.
+    // The entry is the issuer identifier, which Better Auth serves as
+    // `{origin}/api/auth`: RFC 8414 clients reject metadata whose `issuer`
+    // differs from the advertised one, so the bare origin broke discovery
+    // (upstream #583).
     const doc = mcpProtectedResourceMetadata('https://feedback.example.com')
-    expect(doc.authorization_servers).toEqual(['https://feedback.example.com'])
+    expect(doc.authorization_servers).toEqual(['https://feedback.example.com/api/auth'])
     expect(doc.bearer_methods_supported).toEqual(['header'])
   })
 
