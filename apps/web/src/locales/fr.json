@@ -1422,5 +1422,9 @@
   "unsubscribe.error.failed.title": "Une erreur s'est produite",
   "unsubscribe.error.failed.message": "Nous n'avons pas pu traiter votre demande. Réessayez plus tard.",
   "unsubscribe.error.expired.title": "Lien expiré",
-  "unsubscribe.error.expired.message": "Ce lien de désabonnement a déjà été utilisé ou a expiré."
+  "unsubscribe.error.expired.message": "Ce lien de désabonnement a déjà été utilisé ou a expiré.",
+  "onboarding.account.setupComplete.title": "Cet espace de travail est déjà configuré",
+  "onboarding.account.setupComplete.signIn": "Connectez-vous avec un compte administrateur.",
+  "onboarding.noAccess.alreadySetUpTitle": "Cet espace de travail est déjà configuré",
+  "onboarding.noAccess.alreadySetUpBody": "Connectez-vous avec un compte administrateur pour le gérer."
 }

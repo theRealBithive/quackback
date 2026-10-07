@@ -1422,5 +1422,9 @@
   "unsubscribe.error.failed.title": "حدث خطأ ما",
   "unsubscribe.error.failed.message": "تعذّرت معالجة طلبك. يرجى المحاولة لاحقًا.",
   "unsubscribe.error.expired.title": "انتهت صلاحية الرابط",
-  "unsubscribe.error.expired.message": "تم استخدام رابط إلغاء الاشتراك هذا بالفعل أو انتهت صلاحيته."
+  "unsubscribe.error.expired.message": "تم استخدام رابط إلغاء الاشتراك هذا بالفعل أو انتهت صلاحيته.",
+  "onboarding.account.setupComplete.title": "تم إعداد مساحة العمل هذه بالفعل",
+  "onboarding.account.setupComplete.signIn": "سجّل الدخول بحساب مسؤول.",
+  "onboarding.noAccess.alreadySetUpTitle": "تم إعداد مساحة العمل هذه بالفعل",
+  "onboarding.noAccess.alreadySetUpBody": "سجّل الدخول بحساب مسؤول لإدارتها."
 }

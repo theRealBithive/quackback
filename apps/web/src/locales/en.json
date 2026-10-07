@@ -1422,5 +1422,9 @@
   "unsubscribe.error.failed.title": "Something Went Wrong",
   "unsubscribe.error.failed.message": "We couldn't process your request. Please try again later.",
   "unsubscribe.error.expired.title": "Link Expired",
-  "unsubscribe.error.expired.message": "This unsubscribe link has already been used or has expired."
+  "unsubscribe.error.expired.message": "This unsubscribe link has already been used or has expired.",
+  "onboarding.account.setupComplete.title": "This workspace is already set up",
+  "onboarding.account.setupComplete.signIn": "Sign in with an admin account.",
+  "onboarding.noAccess.alreadySetUpTitle": "This workspace is already set up",
+  "onboarding.noAccess.alreadySetUpBody": "Sign in with an admin account to manage it."
 }

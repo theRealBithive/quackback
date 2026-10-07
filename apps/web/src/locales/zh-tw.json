@@ -1422,5 +1422,9 @@
   "unsubscribe.error.failed.title": "發生錯誤",
   "unsubscribe.error.failed.message": "無法處理你的要求，請稍後再試。",
   "unsubscribe.error.expired.title": "連結已失效",
-  "unsubscribe.error.expired.message": "此取消訂閱連結已被使用或已過期。"
+  "unsubscribe.error.expired.message": "此取消訂閱連結已被使用或已過期。",
+  "onboarding.account.setupComplete.title": "此工作區已完成設定",
+  "onboarding.account.setupComplete.signIn": "請使用管理員帳戶登入。",
+  "onboarding.noAccess.alreadySetUpTitle": "此工作區已完成設定",
+  "onboarding.noAccess.alreadySetUpBody": "請使用管理員帳戶登入以進行管理。"
 }

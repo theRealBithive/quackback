@@ -1422,5 +1422,9 @@
   "unsubscribe.error.failed.title": "出了点问题",
   "unsubscribe.error.failed.message": "无法处理你的请求，请稍后再试。",
   "unsubscribe.error.expired.title": "链接已失效",
-  "unsubscribe.error.expired.message": "此退订链接已被使用或已过期。"
+  "unsubscribe.error.expired.message": "此退订链接已被使用或已过期。",
+  "onboarding.account.setupComplete.title": "此工作区已完成设置",
+  "onboarding.account.setupComplete.signIn": "请使用管理员帐户登录。",
+  "onboarding.noAccess.alreadySetUpTitle": "此工作区已完成设置",
+  "onboarding.noAccess.alreadySetUpBody": "请使用管理员帐户登录以进行管理。"
 }

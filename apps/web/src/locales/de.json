@@ -1422,5 +1422,9 @@
   "unsubscribe.error.failed.title": "Etwas ist schiefgelaufen",
   "unsubscribe.error.failed.message": "Wir konnten Ihre Anfrage nicht verarbeiten. Bitte versuchen Sie es später erneut.",
   "unsubscribe.error.expired.title": "Link abgelaufen",
-  "unsubscribe.error.expired.message": "Dieser Abmeldelink wurde bereits verwendet oder ist abgelaufen."
+  "unsubscribe.error.expired.message": "Dieser Abmeldelink wurde bereits verwendet oder ist abgelaufen.",
+  "onboarding.account.setupComplete.title": "Dieser Workspace ist bereits eingerichtet",
+  "onboarding.account.setupComplete.signIn": "Melden Sie sich mit einem Administratorkonto an.",
+  "onboarding.noAccess.alreadySetUpTitle": "Dieser Workspace ist bereits eingerichtet",
+  "onboarding.noAccess.alreadySetUpBody": "Melden Sie sich mit einem Administratorkonto an, um ihn zu verwalten."
 }

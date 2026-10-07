@@ -1422,5 +1422,9 @@
   "unsubscribe.error.failed.title": "Что-то пошло не так",
   "unsubscribe.error.failed.message": "Не удалось обработать запрос. Попробуйте позже.",
   "unsubscribe.error.expired.title": "Ссылка устарела",
-  "unsubscribe.error.expired.message": "Эта ссылка для отписки уже использована или срок её действия истёк."
+  "unsubscribe.error.expired.message": "Эта ссылка для отписки уже использована или срок её действия истёк.",
+  "onboarding.account.setupComplete.title": "Это рабочее пространство уже настроено",
+  "onboarding.account.setupComplete.signIn": "Войдите с учётной записью администратора.",
+  "onboarding.noAccess.alreadySetUpTitle": "Это рабочее пространство уже настроено",
+  "onboarding.noAccess.alreadySetUpBody": "Войдите с учётной записью администратора, чтобы управлять им."
 }
