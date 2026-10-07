@@ -28,6 +28,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { publicStatusIncidentQueries, publicStatusPageQueries } from '@/lib/client/queries/status'
 import { formatMonthYear } from '@/lib/shared/utils/date'
 import { GermanIntlWrapper, renderInGerman, renderWithIntl } from '@/test/render-with-intl'
+import germanMessages from '@/locales/de.json'
+import englishMessages from '@/locales/en.json'
 import { restoreRuntimeLocale, setRuntimeLocale } from '@/test/runtime-locale'
 
 const loaderData = vi.hoisted(() => ({ current: {} as Record<string, unknown> }))
@@ -294,6 +296,17 @@ function statusPage(snapshot: Record<string, unknown>) {
 }
 
 describe('T8 the status page route', () => {
+  it('shows the status hero in the German catalogue text, which differs from English (T8)', () => {
+    const messages = germanMessages as Record<string, string>
+    const english = englishMessages as Record<string, string>
+    const heroId = 'portal.status.hero.operational'
+    expect(messages[heroId]).not.toBe(english[heroId])
+
+    const { container } = renderStatusIndexInGerman(statusPage({}))
+
+    expect(container.textContent ?? '').toContain(messages[heroId])
+  })
+
   it('heads a day of recent incidents with its UTC day, in German, for every viewer (T8)', () => {
     fc.assert(
       fc.property(nearUtcMidnight, anyViewerZone, anyViewerLocale, (moment, zone, locale) => {
