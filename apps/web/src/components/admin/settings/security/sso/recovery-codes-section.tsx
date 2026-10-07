@@ -89,7 +89,7 @@ export function RecoveryCodesSection() {
             </Badge>
             {latest ? (
               <span className="text-muted-foreground">
-                Last generated <LocalDate date={latest.createdAt} />
+                Last generated <LocalDate date={latest.createdAt} locale="en-US" />
               </span>
             ) : (
               <span className="text-muted-foreground">No codes generated yet.</span>
