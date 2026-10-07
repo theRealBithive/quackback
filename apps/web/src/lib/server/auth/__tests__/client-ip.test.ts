@@ -461,6 +461,41 @@ describe('the address chosen for a request (C1, C2, C5)', () => {
   })
 })
 
+describe('a forwarding chain shorter than the trusted hop count (C5)', () => {
+  it('carries no address, whatever the client wrote into the short chain (C5)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 2, max: 5 }).chain((hops) =>
+          fc.record({
+            hops: fc.constant(hops),
+            // Between one and hops - 1 entries: never long enough to reach the
+            // position the outermost trusted proxy writes.
+            chain: fc.array(ipAddress, { minLength: 1, maxLength: hops - 1 }),
+          })
+        ),
+        ({ hops, chain }) => {
+          proxyConfig.hops = hops
+          mockGetRequestIP.mockReturnValue('10.0.0.1')
+
+          const headers = withTrustedClientIp({ 'x-forwarded-for': chain.join(', ') })
+
+          expect(headers.has(CLIENT_IP_HEADER)).toBe(false)
+        }
+      ),
+      { numRuns: 200 }
+    )
+  })
+
+  it('still resolves once the chain reaches the trusted position exactly (C1)', () => {
+    proxyConfig.hops = 2
+    mockGetRequestIP.mockReturnValue('10.0.0.1')
+
+    const headers = withTrustedClientIp({ 'x-forwarded-for': '198.51.100.7, 10.0.0.2' })
+
+    expect(headers.get(CLIENT_IP_HEADER)).toBe('198.51.100.7')
+  })
+})
+
 describe('what a real Better Auth instance counts and records (C2, C3, C4, C5)', () => {
   /**
    * A fresh instance with the anonymous plugin, so a sign-in creates a session
