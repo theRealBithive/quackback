@@ -997,6 +997,26 @@ an equivalent until it was probed against the real database; recorded as one,
 it would have been a false excuse. Before writing an equivalence reason about
 what a library does, measure the library, not the stub in front of it.
 
+## 2x — A picked upstream suite is written against module names from commits we skipped
+
+Three suites in upstream batch F failed for reasons that had nothing to do with
+the fix they came with. `widget-home-compose-board.test.tsx` (#577) mocked
+`useWidgetMediaUpload` and `widget/posts`' `widgetCreatePublicPostFn`, names
+upstream introduced later with #566 and the widget-posts move; here they are
+`useWidgetImageUpload` and `public-posts`' `createPublicPostFn`, so the mock
+answered nothing and the submit never reached it. `rich-text-editor-enter.test.tsx`
+(#567) rendered without an `IntlProvider`, which the fork's editor needs. And
+the typecheck, not any test, found three fork-only fixtures that build an
+`IdentityProvider` without the field #609 added. Each looked like a broken fix
+until the mock or fixture was read. After a pick, run its own suites first and
+read a failure's first line before the fix's code: `No "X" export is defined on
+the mock` and `Could not find required intl object` are the tells.
+
+Hit again in batch K: `@/test/server-fns-in-process`, `use-widget-file-upload`
+and `finishIdentityOnboarding` came with #688, #644 and #656 from commits we
+had not picked. Typecheck finds them at once (`Cannot find module`); grep the
+picked test files for imports before running anything.
+
 ## 1x — `afterAll(fixture.close)` inside a `describe` shuts the connection for every later `describe` in the file
 
 The DB fixture's three hooks read as a set, and every suite in the repository
@@ -1925,21 +1945,6 @@ budget has to fit the foreground call's ten-minute ceiling, so pass
 `MUTATION_BUDGET_SECONDS=570`; the runs here took 2m40s–4m40s for nine to
 eleven graded files.
 
-## 1x — A picked upstream suite is written against module names from commits we skipped
-
-Three suites in upstream batch F failed for reasons that had nothing to do with
-the fix they came with. `widget-home-compose-board.test.tsx` (#577) mocked
-`useWidgetMediaUpload` and `widget/posts`' `widgetCreatePublicPostFn`, names
-upstream introduced later with #566 and the widget-posts move; here they are
-`useWidgetImageUpload` and `public-posts`' `createPublicPostFn`, so the mock
-answered nothing and the submit never reached it. `rich-text-editor-enter.test.tsx`
-(#567) rendered without an `IntlProvider`, which the fork's editor needs. And
-the typecheck, not any test, found three fork-only fixtures that build an
-`IdentityProvider` without the field #609 added. Each looked like a broken fix
-until the mock or fixture was read. After a pick, run its own suites first and
-read a failure's first line before the fix's code: `No "X" export is defined on
-the mock` and `Could not find required intl object` are the tells.
-
 ## 1x — happy-dom's `Headers` loses a `__Secure-` cookie, so an OAuth round trip fails with `state_mismatch`
 
 The batch F OIDC contract suites run real Better Auth against a stub identity
@@ -2338,11 +2343,24 @@ reported "never executed" although the suite's property draws a null cookie.
 The property reaches that line only when three other drawn conditions line up
 first (widget scope, anonymous user, no bearer): about 0.2% per run, so about
 one hit in 500 runs, and some seeds have none. Stryker's per-test coverage then
-records the line as unreached on one gate run and reached on the next, so the
-same mutant flips between `NoCoverage` and `Survived` with no change in the
-code. A fixed example for every short-circuited branch a property reaches
+recorded the line as unreached on one gate run. Nothing seeds fast-check
+globally here (no `fc.configureGlobal` in `vitest.setup.ts`), so a later run
+can reach it and grade the same mutant `Survived` instead; that flip was not
+observed, only the one `NoCoverage` result. A fixed example for every short-circuited branch a property reaches
 rarely makes the grade deterministic; checking the reach rate before trusting
 a property as the line's only coverage would have saved a gate cycle.
+
+## 1x — Better Auth stores a normalised `ipAddress`, so a raw address never matches it
+
+Better Auth 1.7 does not store the client address it resolved: an IPv6 address
+becomes its fully expanded /64 network, and an IPv4-mapped one (`::ffff:1.2.3.4`)
+becomes plain IPv4. Under `NODE_ENV` development or test it records `127.0.0.1`
+when it resolves nothing. The anonymous vote limiter compared the raw address
+from `getClientIp` against `session.ip_address` and so never counted an IPv6
+voter. Anything that compares an address with stored sessions has to go
+through the library's own `getIP` (`sessionIpAddressOf` in `auth/client-ip.ts`).
+The library reads `NODE_ENV` once at module load, so the production-only
+fallback cannot be stubbed per test.
 
 ## Resolved
 
