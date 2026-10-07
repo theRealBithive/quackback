@@ -22,11 +22,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 
-const hoisted = vi.hoisted(() => ({ processUnsubscribeToken: vi.fn() }))
+const hoisted = vi.hoisted(() => ({
+  processUnsubscribeToken: vi.fn(),
+  logLines: [] as string[],
+}))
 
 vi.mock('@/lib/server/domains/subscriptions/subscription.service', () => ({
   processUnsubscribeToken: hoisted.processUnsubscribeToken,
 }))
+
+/** The endpoint's log, captured down to debug: what an operator would read. */
+vi.mock('@/lib/server/logger', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/server/logger')>()
+  const destination = { write: (line: string) => void hoisted.logLines.push(line) }
+  return { ...original, logger: original.createLogger({ level: 'debug', destination }) }
+})
+
+function logged(): Array<Record<string, unknown>> {
+  return hoisted.logLines.map((line) => JSON.parse(line))
+}
 
 import { handleOneClickUnsubscribe } from '../one-click-unsubscribe'
 
@@ -83,6 +97,7 @@ function streamedRequest(stream: ReadableStream<Uint8Array>, headers: Record<str
 }
 
 beforeEach(() => {
+  hoisted.logLines.length = 0
   hoisted.processUnsubscribeToken.mockReset()
   hoisted.processUnsubscribeToken.mockResolvedValue({
     action: 'unsubscribe_all',
@@ -134,6 +149,44 @@ describe('a one-click request in the RFC 8058 form', () => {
     expect(hoisted.processUnsubscribeToken).toHaveBeenCalledWith(LIVE_TOKEN)
   })
 
+  it('(U4) records a processed opt-out at info, with what it did', async () => {
+    await oneClick(LIVE_TOKEN)
+
+    const lines = logged().map((r) => [r.level, r.component, r.msg, r.action])
+    expect(lines).toEqual([
+      ['info', 'one-click-unsubscribe', 'one-click unsubscribe processed', 'unsubscribe_all'],
+    ])
+  })
+
+  it('(U4) records a spent or unknown token at debug only', async () => {
+    hoisted.processUnsubscribeToken.mockResolvedValue(null)
+
+    const response = await oneClick(LIVE_TOKEN)
+
+    expect(response.status).toBe(200)
+    const lines = logged().map((r) => [r.level, r.component, r.msg])
+    expect(lines).toEqual([
+      ['debug', 'one-click-unsubscribe', 'one-click unsubscribe token invalid or expired'],
+    ])
+  })
+
+  it('(U4) accepts the one-click body whatever content type, or none, it is labelled with', async () => {
+    // U4 makes the body the test of a one-click request; a label that is not
+    // multipart does not turn the same bytes into something else.
+    const body = new TextEncoder().encode(ONE_CLICK_BODY)
+    const unlabelled = new Request(linkFor(LIVE_TOKEN), { method: 'POST', body })
+    expect(unlabelled.headers.get('content-type')).toBeNull()
+    const asText = new Request(linkFor(LIVE_TOKEN), {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body,
+    })
+
+    expect((await handleOneClickUnsubscribe(unlabelled)).status).toBe(200)
+    expect((await handleOneClickUnsubscribe(asText)).status).toBe(200)
+    expect(hoisted.processUnsubscribeToken).toHaveBeenCalledTimes(2)
+  })
+
   it('(U4) is recognised as multipart form data too, whatever the header’s case', async () => {
     const form = new FormData()
     form.set('List-Unsubscribe', 'One-Click')
@@ -176,6 +229,16 @@ describe('a one-click request in the RFC 8058 form', () => {
 
     expect(response.status).toBe(503)
     expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(await response.text()).toBe('Try again later')
+    const lines = logged().map((r) => [
+      r.level,
+      r.component,
+      r.msg,
+      (r.err as { message?: unknown } | undefined)?.message,
+    ])
+    expect(lines).toEqual([
+      ['error', 'one-click-unsubscribe', 'one-click unsubscribe failed', 'connection terminated'],
+    ])
   })
 })
 
@@ -205,6 +268,8 @@ describe('a request without the one-click body', () => {
     )
 
     expect(response.status).toBe(400)
+    // What a provider's delivery log shows for the refusal.
+    expect(await response.text()).toBe('Expected List-Unsubscribe=One-Click')
     expect(hoisted.processUnsubscribeToken).not.toHaveBeenCalled()
   })
 

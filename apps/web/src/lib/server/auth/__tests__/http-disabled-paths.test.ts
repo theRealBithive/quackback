@@ -27,7 +27,7 @@
 import { describe, it, expect } from 'vitest'
 import { betterAuth } from 'better-auth'
 import { memoryAdapter } from 'better-auth/adapters/memory'
-import { emailOTP } from 'better-auth/plugins'
+import { emailOTP, jwt } from 'better-auth/plugins'
 import { HTTP_DISABLED_AUTH_PATHS } from '../http-disabled-paths'
 
 const ORIGIN = 'https://acme.quackback.io'
@@ -82,5 +82,37 @@ describe('email-change endpoints', () => {
     await expect(
       auth.api.requestEmailChangeEmailOTP({ body: { newEmail: 'new@example.com' } })
     ).rejects.toMatchObject({ status: 'UNAUTHORIZED' })
+  })
+})
+
+/** An instance with the JWT plugin, whose `/token` collides with OAuth's `/oauth2/token`. */
+function jwtAuth(disabledPaths: string[]) {
+  return betterAuth({
+    baseURL: ORIGIN,
+    secret: 'test-secret-not-used-for-anything-real',
+    database: memoryAdapter({ user: [], session: [], account: [], verification: [], jwks: [] }),
+    disabledPaths,
+    plugins: [jwt()],
+  })
+}
+
+function get(path: string): Request {
+  return new Request(`${ORIGIN}/api/auth${path}`, { headers: { origin: ORIGIN } })
+}
+
+// No contract number: closing `/token` predates batch K. The list's own
+// header gives the reason, and this holds it against the library.
+describe('the JWT token endpoint', () => {
+  it('answers 404 over HTTP', async () => {
+    const res = await jwtAuth(HTTP_DISABLED_AUTH_PATHS).handler(get('/token'))
+
+    expect(res.status).toBe(404)
+  })
+
+  // The control: without the list the same request reaches the endpoint.
+  it('is served by an instance that does not close it', async () => {
+    const res = await jwtAuth([]).handler(get('/token'))
+
+    expect(res.status).not.toBe(404)
   })
 })

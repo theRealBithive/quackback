@@ -43,7 +43,15 @@ const hoisted = vi.hoisted(() => ({
   update: vi.fn(),
   set: vi.fn(),
   where: vi.fn(),
+  logLines: [] as string[],
 }))
+
+/** The module's log, captured: the retag failure is what an operator reads. */
+vi.mock('@/lib/server/logger', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/server/logger')>()
+  const destination = { write: (line: string) => void hoisted.logLines.push(line) }
+  return { ...original, logger: original.createLogger({ level: 'debug', destination }) }
+})
 
 vi.mock('@/lib/server/db', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/db')>()),
@@ -250,6 +258,14 @@ describe('isStrandedPortalSession (S5, S6)', () => {
       { numRuns: 500 }
     )
   })
+
+  it('does not hold for an anonymous widget session that came with no cookie at all (S5)', () => {
+    // Fixed rather than drawn: the property above reaches this case only on
+    // some seeds, since the other three conditions have to line up first.
+    const found = { session: { id: 'sess_1', scope: 'widget' }, user: { isAnonymous: true } }
+
+    expect(isStrandedPortalSession(found, new Headers())).toBe(false)
+  })
 })
 
 describe('healStrandedPortalSession (S5, S6, S7)', () => {
@@ -281,12 +297,24 @@ describe('healStrandedPortalSession (S5, S6, S7)', () => {
 
   it('leaves the session exactly as it was when the write fails (S7)', async () => {
     hoisted.where.mockRejectedValue(new Error('connection terminated'))
+    hoisted.logLines.length = 0
     const found = stranded()
 
     const result = await healStrandedPortalSession(found, siteCookie())
 
     expect(result).toBe(found)
     expect(result.session.scope).toBe('widget')
+    // The request goes on, and the failure is left for an operator to find.
+    const lines = hoisted.logLines.map((line) => JSON.parse(line))
+    expect(lines.map((r) => [r.level, r.component, r.msg, r.session_id, r.err?.message])).toEqual([
+      [
+        'warn',
+        'session-audience',
+        'portal session retag failed',
+        'sess_1',
+        'connection terminated',
+      ],
+    ])
   })
 
   it('writes nothing and returns the same session whenever it is not stranded (S5, S6)', async () => {

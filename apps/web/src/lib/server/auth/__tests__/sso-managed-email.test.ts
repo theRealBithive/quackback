@@ -28,6 +28,7 @@ import fc from 'fast-check'
 
 const hoisted = vi.hoisted(() => ({
   linkedProviders: new Set<string>(),
+  providersUnreadable: false,
 }))
 
 const PROVIDERS = [
@@ -52,7 +53,10 @@ function enforcing(id: string, registrationId: string, domain: string) {
 }
 
 vi.mock('@/lib/server/domains/settings/identity-providers.service', () => ({
-  listIdentityProviders: async () => PROVIDERS,
+  listIdentityProviders: async () => {
+    if (hoisted.providersUnreadable) throw new Error('identity providers unreadable')
+    return PROVIDERS
+  },
 }))
 vi.mock('../registered-providers', () => ({
   getRegisteredOidcProviderIds: async () => new Set(['oidc_a', 'oidc_b', 'oidc_d']),
@@ -116,9 +120,18 @@ async function blocked(from: string | null, to: string | null, linked: string[])
 
 beforeEach(() => {
   hoisted.linkedProviders = new Set()
+  hoisted.providersUnreadable = false
 })
 
 describe('isEmailMoveSsoBlocked', () => {
+  it('lets an edit that sets no address through without consulting the SSO setup (E3)', async () => {
+    // Renaming someone who has no address at all moves no address, so it must
+    // not fail on the domain rules, not even when they cannot be read.
+    hoisted.providersUnreadable = true
+
+    expect(await blocked(null, null, [])).toBe(false)
+  })
+
   // Reaches: a managed destination from no address, from an unmanaged one,
   // from the other managed domain and from the same one; with any links
   // except the destination's own provider.

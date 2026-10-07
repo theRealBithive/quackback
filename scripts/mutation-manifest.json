@@ -88,7 +88,10 @@
     },
     {
       "file": "apps/web/src/lib/server/auth/sso-managed-email.ts",
-      "suites": ["apps/web/src/lib/server/auth/__tests__/sso-managed-email.test.ts"]
+      "suites": [
+        "apps/web/src/lib/server/auth/__tests__/sso-managed-email.test.ts",
+        "apps/web/src/lib/server/domains/users/__tests__/user-update.db.test.ts"
+      ]
     },
     {
       "file": "apps/web/src/lib/server/runtime-error-log.ts",
@@ -980,6 +983,69 @@
       "line": "if (description === null) return true",
       "replacement": "false",
       "why": "isEmptyTiptapDoc treats a missing document as empty, so for a null description the next line returns true as well. This line exists for the type checker, which needs description narrowed to a document before hasSameVisibleContent; no input can tell the two paths apart."
+    },
+    {
+      "file": "apps/web/src/lib/server/runtime-error-log.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (original && typeof original === 'object' && accountedFor.has(original)) return",
+      "replacement": "true",
+      "why": "The two type checks only narrow `original` for the compiler. `cause ?? first` is never null or undefined, because `first` is an Error, and WeakSet.has answers false for any primitive without throwing (only objects are ever added, by noteLoggedAtBoundary). So with either check replaced by true, every value reaches the same has() answer it would have reached anyway."
+    },
+    {
+      "file": "apps/web/src/lib/server/runtime-error-log.ts",
+      "mutator": "LogicalOperator",
+      "line": "if (original && typeof original === 'object' && accountedFor.has(original)) return",
+      "replacement": "original || typeof original === 'object'",
+      "why": "Same line, same reason: `original` is never nullish, so the `||` form lets through exactly the values the `&&` form does or primitives, and WeakSet.has answers false for a primitive without throwing. The verdict is has() in every case."
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/one-click-unsubscribe.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (!request.body) return new Uint8Array()",
+      "replacement": "false",
+      "why": "A request with no body is not a one-click request either way: the guard returns an empty body, which carries no List-Unsubscribe field, and without it `request.body.getReader()` throws on null, which isOneClickBody's catch turns into the same false. Both end in the same 400."
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/one-click-unsubscribe.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (!body) return false",
+      "replacement": "false",
+      "why": "A null body (over the cap) goes on to TextDecoder.decode(null) or Response.formData() over no body; measured under the test runtime, both throw, and the catch returns the same false. Were either to yield an empty value instead, an empty form still has no List-Unsubscribe field and the answer is false again."
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/one-click-unsubscribe.ts",
+      "mutator": "StringLiteral",
+      "line": "const contentType = request.headers.get('content-type') ?? ''",
+      "replacement": "\"Stryker was here!\"",
+      "why": "The fallback is read only by startsWith('multipart/form-data'), and any fallback that does not start with that takes the same urlencoded branch the empty string does. No request can tell the two fallbacks apart."
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/one-click-unsubscribe.ts",
+      "mutator": "BlockStatement",
+      "line": "} catch {",
+      "replacement": "{}",
+      "why": "With the block emptied the function resolves to undefined instead of false, and its only caller negates the result, so `!undefined` refuses exactly as `!false` does. The response is the same 400."
+    },
+    {
+      "file": "packages/email/src/list-unsubscribe.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (!unsubscribeUrl) return {}",
+      "replacement": "false",
+      "why": "The guard spares a throw the catch below absorbs: new URL('') and new URL(undefined) both throw, and the catch returns the same empty header set. No input distinguishes the two paths."
+    },
+    {
+      "file": "apps/web/src/lib/server/auth/session-audience.ts",
+      "mutator": "StringLiteral",
+      "line": "return /(?:^|;)\\s*(?:__Secure-)?better-auth\\.session_token=/.test(headers.get('cookie') ?? '')",
+      "replacement": "\"Stryker was here!\"",
+      "why": "The fallback stands in for a missing Cookie header, and the session-cookie pattern matches neither the empty string nor the replacement, so a request without cookies is not stranded either way. Executed by the fixed no-cookie example in session-audience.test.ts."
+    },
+    {
+      "file": "apps/web/src/lib/server/auth/sso-managed-email.ts",
+      "mutator": "BooleanLiteral",
+      "line": "columns: { id: true },",
+      "replacement": "false",
+      "why": "The lookup is read only for whether a row came back. `{ id: false }` selects every column but the id, and measured against the real schema it returns a row for a linked account and undefined for an unlinked one, exactly like `{ id: true }`. (The other mutant on this line, `{}`, is not equivalent: drizzle refuses a projection with no fields, and user-update.db.test.ts catches it.)"
     }
   ]
 }

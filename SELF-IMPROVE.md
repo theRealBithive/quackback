@@ -960,6 +960,43 @@ in production only through the route loader — the same mock can stash `fn` on 
 `createServerOnlyFn` as an identity function in the same factory, or the route's
 other exports disappear.
 
+## 2x — A manifest entry can name a subset of a file's suites, and the gap reads as survivors
+
+`scripts/mutation-manifest.json` pairs a graded file with the suites that pin
+it, and nothing checks that the pairing is complete. When a second suite was
+added for `next-position.ts` — a `.db.test.ts` beside the existing mock-based
+one — the entry still named only the first, so the gate re-ran the file against
+half its coverage and reported the SQL fragment's two mutants as survivors. They
+were not survivors. They were mutants the selected suites never reached, which
+is exactly the failure mode the `NoCoverage` handling exists to catch, except
+that here the suite that covers them was on disk and simply unlisted.
+
+The sweep that finds it is three lines: for every graded file, list the
+`__tests__` directory beside it and flag any `<name>.*.test.ts` the entry does
+not name. Run against the whole manifest it turned up one more, pre-existing:
+`gitlab/server/inbound.ts` is graded against `inbound.test.ts` and
+`signature-matrix.test.ts`, and `inbound.properties.test.ts` sits unlisted
+beside them. That file was untouched by the branch, so the gate never graded it
+and never said anything.
+
+Two fixes, either would do. `mutation-scope.test.ts` already asserts the whole
+manifest and reads each named suite off disk; it could also assert that no
+sibling suite matching the graded file's name is missing from the entry. Or the
+gate could print unlisted siblings the way it prints files with no entry at
+all — naming the gap rather than failing on it, since a co-located name is a
+guess and the manifest is the assertion.
+
+Hit again in batch K, in the worse direction: the unlisted suite was not a
+sibling. `sso-managed-email.ts` was graded against its own mock-based suite
+only, and the mutant `columns: { id: true }` -> `{}` survived there because the
+stub ignores the projection. Real drizzle refuses it (`No fields selected for
+table "account"`), and `domains/users/__tests__/user-update.db.test.ts` runs the
+real check against Postgres and fails on it — three directories away, so the
+sibling sweep above would not have found it either. The survivor looked like
+an equivalent until it was probed against the real database; recorded as one,
+it would have been a false excuse. Before writing an equivalence reason about
+what a library does, measure the library, not the stub in front of it.
+
 ## 1x — `afterAll(fixture.close)` inside a `describe` shuts the connection for every later `describe` in the file
 
 The DB fixture's three hooks read as a set, and every suite in the repository
@@ -1022,32 +1059,6 @@ widget had minted, which the contract says is impossible — the fixture had bee
 passing on the permissive default, and the expectation was wrong rather than the
 code. A fixture that omits the field is not a dashboard session; it is a session
 nobody stamped, and only a default hides the difference.
-
-## 1x — A manifest entry can name a subset of a file's suites, and the gap reads as survivors
-
-`scripts/mutation-manifest.json` pairs a graded file with the suites that pin
-it, and nothing checks that the pairing is complete. When a second suite was
-added for `next-position.ts` — a `.db.test.ts` beside the existing mock-based
-one — the entry still named only the first, so the gate re-ran the file against
-half its coverage and reported the SQL fragment's two mutants as survivors. They
-were not survivors. They were mutants the selected suites never reached, which
-is exactly the failure mode the `NoCoverage` handling exists to catch, except
-that here the suite that covers them was on disk and simply unlisted.
-
-The sweep that finds it is three lines: for every graded file, list the
-`__tests__` directory beside it and flag any `<name>.*.test.ts` the entry does
-not name. Run against the whole manifest it turned up one more, pre-existing:
-`gitlab/server/inbound.ts` is graded against `inbound.test.ts` and
-`signature-matrix.test.ts`, and `inbound.properties.test.ts` sits unlisted
-beside them. That file was untouched by the branch, so the gate never graded it
-and never said anything.
-
-Two fixes, either would do. `mutation-scope.test.ts` already asserts the whole
-manifest and reads each named suite off disk; it could also assert that no
-sibling suite matching the graded file's name is missing from the entry. Or the
-gate could print unlisted siblings the way it prints files with no entry at
-all — naming the gap rather than failing on it, since a co-located name is a
-guess and the manifest is the assertion.
 
 ## 1x — Replacing a whole `describe` block drops the tests inside it, and nothing counts
 
@@ -2319,6 +2330,19 @@ The way through was a separate dependency PR first, then merging the new
 `main` into the feature branch and waiting for a second full CI run. When
 `check` fails, look at the audit step before reading anything else, and fix it
 on its own branch from `main`.
+
+## 1x — A line reached only by a random fast-check draw grades differently run to run
+
+`session-audience.ts`' cookie fallback (`headers.get('cookie') ?? ''`) was
+reported "never executed" although the suite's property draws a null cookie.
+The property reaches that line only when three other drawn conditions line up
+first (widget scope, anonymous user, no bearer): about 0.2% per run, so about
+one hit in 500 runs, and some seeds have none. Stryker's per-test coverage then
+records the line as unreached on one gate run and reached on the next, so the
+same mutant flips between `NoCoverage` and `Survived` with no change in the
+code. A fixed example for every short-circuited branch a property reaches
+rarely makes the grade deterministic; checking the reach rate before trusting
+a property as the line's only coverage would have saved a gate cycle.
 
 ## Resolved
 

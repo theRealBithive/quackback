@@ -6,6 +6,11 @@
  *   V3 The GitLab settings page lists projects with a renewed token; an expired
  *      access token alone never makes the list fail.
  *
+ * And from the confirmed list for batch K (upstream #688):
+ *
+ *   L5 Connecting an integration whose platform credentials are missing is
+ *      refused with a clear 400 and logged as a warning.
+ *
  * The project list is what the settings page loads first, so it used to be the
  * morning's first symptom: the stored token had expired overnight, the page
  * said the projects could not be loaded, and the operator read that as a lost
@@ -14,6 +19,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { PERMISSIONS } from '@/lib/shared/permissions'
+import { ValidationError } from '@/lib/shared/errors'
 
 type AnyHandler = (args?: { data?: Record<string, unknown> }) => Promise<unknown>
 const handlers: AnyHandler[] = []
@@ -197,6 +203,18 @@ describe('getGitLabConnectUrl', () => {
     )
     expect(hoisted.hasPlatformCredentials).toHaveBeenCalledWith('gitlab')
     expect(hoisted.signOAuthState).not.toHaveBeenCalled()
+  })
+
+  it('refuses as a 400 the settings page can name, not as a server error (L5)', async () => {
+    hoisted.hasPlatformCredentials.mockResolvedValue(false)
+
+    const refusal = await getGitLabConnectUrl().catch((error: unknown) => error)
+
+    expect(refusal).toBeInstanceOf(ValidationError)
+    expect(refusal).toMatchObject({
+      statusCode: 400,
+      code: 'PLATFORM_CREDENTIALS_NOT_CONFIGURED',
+    })
   })
 
   it('requires the permission to manage integrations', async () => {

@@ -125,6 +125,28 @@ describe('withTrustedClientIpRequest', () => {
     expect(await request.json()).toEqual({ email: 'a@acme.example' })
   })
 
+  it('rebuilds a GET or HEAD without a body even when the adapter hands it one (C1)', async () => {
+    // A request a sign-in attempt arrives on must always be rebuildable, or
+    // it never reaches the counter. The platform refuses a GET or HEAD with a
+    // body, so a server adapter that exposes a stream for one must not make
+    // the rebuild throw.
+    mockGetRequestIP.mockReturnValue('203.0.113.7')
+    class AdapterRequest extends Request {
+      get body(): ReadableStream<Uint8Array<ArrayBuffer>> {
+        return new ReadableStream()
+      }
+    }
+
+    for (const method of ['GET', 'HEAD']) {
+      const rebuilt = withTrustedClientIpRequest(
+        new AdapterRequest('https://acme.example/api/auth/get-session', { method })
+      )
+      expect(rebuilt.method).toBe(method)
+      expect(rebuilt.body).toBeNull()
+      expect(rebuilt.headers.get(CLIENT_IP_HEADER)).toBe('203.0.113.7')
+    }
+  })
+
   it('accepts the request object the Node dev server hands to route handlers', async () => {
     const { NodeRequest } = await loadSrvxNode()
     mockGetRequestIP.mockReturnValue('203.0.113.8')
@@ -203,6 +225,19 @@ describe('withTrustedClientIpArgs', () => {
     const args = [{ body: { x: 1 } }]
     expect(withTrustedClientIpArgs(args)).toBe(args)
     expect(withTrustedClientIpArgs([])).toEqual([])
+  })
+
+  it('passes a first argument that is no call context through untouched (C7)', () => {
+    // A function can carry a `headers` property, but it is not the options
+    // object an api call forwards headers in.
+    mockGetRequestIP.mockReturnValue('203.0.113.7')
+    const notAContext = Object.assign(() => undefined, {
+      headers: new Headers({ [CLIENT_IP_HEADER]: '9.9.9.9' }),
+    })
+    for (const first of [null, undefined, 'text', 0, notAContext]) {
+      const args = [first, { body: { x: 1 } }]
+      expect(withTrustedClientIpArgs(args)).toBe(args)
+    }
   })
 })
 
