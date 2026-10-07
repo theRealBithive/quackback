@@ -228,9 +228,16 @@ describe('requireAuth at a permission gate (R2, R3)', () => {
         fc.oneof(fc.constantFrom('widget', 'portal'), unknownScope),
         async (scope) => {
           mockGetSession.mockResolvedValue(sessionWithScope(scope))
+          // Since #555 a widget session is refused before the permission is
+          // looked at, with its own message; every other audience reaches the
+          // dashboard-only permission gate.
+          const readsAsWidget = toSessionScope(scope) === 'widget'
+          const expectedRefusal = readsAsWidget
+            ? /Widget sessions cannot access this resource/
+            : /dashboard session/
 
           await expect(requireAuth({ permission: PERMISSIONS.SETTINGS_MANAGE })).rejects.toThrow(
-            /dashboard session/
+            expectedRefusal
           )
         }
       ),
@@ -409,9 +416,9 @@ describe('a portal visitor stranded on a widget-tagged anonymous session (S5, S6
     })
     mockGetSession.mockResolvedValue(anonymousSession('widget', true))
 
-    const auth = await requireAuth()
-
-    expect(auth.scope).toBe('widget')
+    // A retagged session would read as portal and pass; refused as a widget
+    // session is how an untouched tag shows through the gate since #555.
+    await expect(requireAuth()).rejects.toThrow(/Widget sessions cannot access this resource/)
     expect(mockDbUpdate).not.toHaveBeenCalled()
   })
 
@@ -419,9 +426,9 @@ describe('a portal visitor stranded on a widget-tagged anonymous session (S5, S6
     request.headers = new Headers({ cookie: 'better-auth.session_token=tok.sig' })
     mockGetSession.mockResolvedValue(anonymousSession('widget', false))
 
-    const auth = await requireAuth()
-
-    expect(auth.scope).toBe('widget')
+    // A retagged session would read as portal and pass; refused as a widget
+    // session is how an untouched tag shows through the gate since #555.
+    await expect(requireAuth()).rejects.toThrow(/Widget sessions cannot access this resource/)
     expect(mockDbUpdate).not.toHaveBeenCalled()
   })
 
