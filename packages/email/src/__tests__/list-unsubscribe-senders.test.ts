@@ -7,10 +7,10 @@
  *   U1 Opening an unsubscribe link never unsubscribes anyone. It shows what would happen and asks for confirmation.
  *   U2 The unsubscribe happens only on an explicit confirmation, or on a one-click request from the mail provider.
  *   U3 A malformed, unknown, used or expired token shows the expired-link page, never a server error.
- *   U4 A one-click request in the RFC 8058 form is answered with success for every token, whether live, used, unknown or malformed. A request without the one-click body is refused. A body larger than 1 KB is refused after reading no more than that.
+ *   U4 A one-click request in the RFC 8058 form is answered with success for every token, whether live, used, unknown or malformed. A request without the one-click body is refused. A body larger than 1 KB is refused without reading more than the chunk that crosses 1 KB.
  *   U5 A token is spent only once the opt-out has actually happened. If the opt-out fails, the link keeps working and a retry succeeds exactly once.
  *   U6 Unsubscribing from the changelog also stops the changelog mail that reaches a person through posts they follow, even if they never subscribed to the changelog.
- *   U7 Every notification email that has an unsubscribe link carries List-Unsubscribe. It offers one-click only when the link is HTTPS. An email without a link carries neither header.
+ *   U7 Every notification email that has a tokenised unsubscribe link carries List-Unsubscribe. It offers one-click only when the link is HTTPS. An email without such a link carries neither header; a link to the notification preferences is not an unsubscribe link.
  *   U8 The unsubscribe page is in the language the rest of the site resolved for the request, in all nine languages, and the German addresses the reader formally.
  *   U9 The unsubscribe page's strings are not loaded into the portal or the widget.
  *
@@ -28,6 +28,8 @@ import {
   sendStatusChangeEmail,
   sendStatusIncidentPublishedEmail,
   sendStatusMaintenanceScheduledEmail,
+  sendNoteMentionEmail,
+  sendTicketEventEmail,
 } from '../index'
 
 const sdkSend = vi.hoisted(() => vi.fn())
@@ -218,6 +220,39 @@ describe.each(SENDERS)('the %s email', (_name, send) => {
 
   it('(U7) carries neither header when it has no link', async () => {
     await send('')
+
+    expect(sentHeaders()).toBeUndefined()
+  })
+})
+
+// A footer link to the notification preferences opens a page whose POST does
+// not unsubscribe, so advertising it as one-click would be a false promise.
+describe('emails whose footer links only to the notification preferences', () => {
+  const PREFERENCES_URL = 'https://acme.test/settings/notifications'
+
+  it('(U7) a note mention carries no List-Unsubscribe', async () => {
+    await sendNoteMentionEmail({
+      to: TO,
+      authorName: 'Ada',
+      preview: 'See this',
+      conversationUrl: 'https://acme.test/admin/inbox/1',
+      workspaceName: 'Acme',
+      preferencesUrl: PREFERENCES_URL,
+    })
+
+    expect(sentHeaders()).toBeUndefined()
+  })
+
+  it('(U7) a ticket event carries no List-Unsubscribe', async () => {
+    await sendTicketEventEmail({
+      to: TO,
+      kind: 'created',
+      ticketLabel: '#142',
+      title: 'Printer on fire',
+      workspaceName: 'Acme',
+      ctaUrl: 'https://acme.test/tickets/142',
+      preferencesUrl: PREFERENCES_URL,
+    })
 
     expect(sentHeaders()).toBeUndefined()
   })

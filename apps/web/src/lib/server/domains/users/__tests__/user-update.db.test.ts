@@ -12,15 +12,14 @@
  *
  * E1 When an address's domain requires SSO, the person cannot sign in by email link or code either. The refusal depends only on the domain, never on whether an account exists.
  * E2 A person changes their email address only through the confirmed flow. The library's direct change endpoints cannot be reached over HTTP.
- * E3 An address at a domain that requires SSO cannot be taken by the person's own change or by an admin's edit. Renaming someone whose address stays the same still works.
+ * E3 An address at a domain that requires SSO cannot be taken by the person's own change or by an admin's edit, unless the account already signs in through that domain's provider. Renaming someone whose address stays the same still works.
  * E4 When an admin enters a new address, it is not treated as verified. An unchanged address keeps its verification.
  * E5 When a domain's enforcing provider signs someone in with an address at that domain, that sign-in verifies the account it lands on, so the account links instead of staying stuck. Whoever held an unlinked account before loses their sessions.
  * E6 An admin's edit that crosses with a concurrent change to the same address is refused, not silently overwritten.
+ * E7 An address at a domain that requires SSO cannot be given up for one the provider does not manage.
  *
- * Held here: E3 (the admin's edit), E4 and E6. Tests without a number predate
- * #689. Two refusals below go beyond E3's wording (moving someone OFF a
- * managed address) or read against it (an account on the domain's provider
- * may take an address there); they carry no number and are open questions.
+ * Held here: E3 (the admin's edit), E4, E6 and E7. Tests without a number
+ * predate #689.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
 import { createId, type PrincipalId, type UserId } from '@quackback/ids'
@@ -321,7 +320,7 @@ describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
       sso.providers = []
     })
 
-    it('refuses to move someone off a managed address (no number: beyond E3)', async () => {
+    it('refuses to move someone off a managed address (E7)', async () => {
       const person = await seedUser({ name: 'Sam', email: `sam-${runSuffix()}@acme.com` })
 
       await expect(
@@ -343,7 +342,7 @@ describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
       ).rejects.toThrow(/single sign-on/i)
     })
 
-    it('lets someone who signs in through the owning provider get an address there (no number: conflicts with E3)', async () => {
+    it('lets someone who signs in through the owning provider get an address there (E3)', async () => {
       const person = await seedUser({ name: 'Lee', email: null })
       await testDb.insert(account).values({
         accountId: `sub-${runSuffix()}`,
@@ -363,7 +362,7 @@ describe.skipIf(!fixture.available)('updatePortalUserProfile', () => {
       expect(row.email).toBe(address)
     })
 
-    it('lets an admin correct an address within the domain for someone on its provider (no number: conflicts with E3)', async () => {
+    it('lets an admin correct an address within the domain for someone on its provider (E3)', async () => {
       const person = await seedUser({ name: 'Jon', email: `jhon-${runSuffix()}@acme.com` })
       await testDb.insert(account).values({
         accountId: `sub-${runSuffix()}`,

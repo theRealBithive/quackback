@@ -906,7 +906,7 @@ describe('dispatch on the ses rung', () => {
   })
 
   // Contract U7 (upstream #687; the full U list is in list-unsubscribe.test.ts):
-  //   U7 Every notification email that has an unsubscribe link carries List-Unsubscribe. It offers one-click only when the link is HTTPS. An email without a link carries neither header.
+  //   U7 Every notification email that has a tokenised unsubscribe link carries List-Unsubscribe. It offers one-click only when the link is HTTPS. An email without such a link carries neither header; a link to the notification preferences is not an unsubscribe link.
   it('(U7) carries RFC 8058 one-click unsubscribe headers on a changelog email', async () => {
     process.env.EMAIL_FROM = 'notifications@platform.test'
     await sendChangelogPublishedEmail({

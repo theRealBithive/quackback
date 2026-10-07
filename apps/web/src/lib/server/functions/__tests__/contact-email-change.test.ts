@@ -24,20 +24,18 @@
  *
  * E1 When an address's domain requires SSO, the person cannot sign in by email link or code either. The refusal depends only on the domain, never on whether an account exists.
  * E2 A person changes their email address only through the confirmed flow. The library's direct change endpoints cannot be reached over HTTP.
- * E3 An address at a domain that requires SSO cannot be taken by the person's own change or by an admin's edit. Renaming someone whose address stays the same still works.
+ * E3 An address at a domain that requires SSO cannot be taken by the person's own change or by an admin's edit, unless the account already signs in through that domain's provider. Renaming someone whose address stays the same still works.
  * E4 When an admin enters a new address, it is not treated as verified. An unchanged address keeps its verification.
  * E5 When a domain's enforcing provider signs someone in with an address at that domain, that sign-in verifies the account it lands on, so the account links instead of staying stuck. Whoever held an unlinked account before loses their sessions.
  * E6 An admin's edit that crosses with a concurrent change to the same address is refused, not silently overwritten.
+ * E7 An address at a domain that requires SSO cannot be given up for one the provider does not manage.
  *
  * Contract (upstream #662), confirmed, the one item held in this file:
  *
  * C7 Server-side calls into the sign-in library that pass request headers along get the same treatment as requests that reach it directly.
  *
- * Held here: E2 (the confirmed flow) and E3 (the person's own change), and C7.
- * Tests without a number predate both pull requests. Tests marked "beyond E3"
- * refuse moving OFF a managed address, which E3 does not say; tests marked
- * "conflicts with E3" let an account on the domain's provider take an address
- * there, which reads against E3's "cannot be taken". Both are open questions.
+ * Held here: E2 (the confirmed flow), E3 and E7 (the person's own change), and
+ * C7. Tests without a number predate both pull requests.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -389,7 +387,7 @@ describe('a domain that requires SSO', () => {
     ]
   })
 
-  it('sends no current-address code for a managed address (no number: beyond E3)', async () => {
+  it('sends no current-address code for a managed address (E7)', async () => {
     accountIs(SSO)
 
     await expect(call(sendCurrentAddressCodeFn)).rejects.toThrow(/single sign-on/i)
@@ -397,7 +395,7 @@ describe('a domain that requires SSO', () => {
     expect(hoisted.sendVerifyAddressCode).not.toHaveBeenCalled()
   })
 
-  it('refuses to move off a managed address, even with a good current code (no number: beyond E3)', async () => {
+  it('refuses to move off a managed address, even with a good current code (E7)', async () => {
     accountIs(SSO)
 
     await expect(
@@ -430,7 +428,7 @@ describe('a domain that requires SSO', () => {
   // Someone whose provider released no email signs in through the domain's own
   // provider; the rule is there to keep them on it, not to stop them naming
   // their address there.
-  it('lets an account that signs in through the owning provider add an address there (no number: conflicts with E3)', async () => {
+  it('lets an account that signs in through the owning provider add an address there (E3)', async () => {
     accountIs(PLACEHOLDER)
     hoisted.accountFindFirst.mockResolvedValue({ id: 'acc_1' })
 
@@ -457,7 +455,7 @@ describe('a domain that requires SSO', () => {
     expect(free).toEqual(taken)
   })
 
-  it('lets an account on the owning provider correct its address within the domain (no number: conflicts with E3)', async () => {
+  it('lets an account on the owning provider correct its address within the domain (E3)', async () => {
     accountIs(SSO)
     hoisted.accountFindFirst.mockResolvedValue({ id: 'acc_1' })
 
@@ -466,7 +464,7 @@ describe('a domain that requires SSO', () => {
     expect(hoisted.requestEmailChangeEmailOTP).toHaveBeenCalled()
   })
 
-  it('still keeps that account from moving off the domain (no number: beyond E3)', async () => {
+  it('still keeps that account from moving off the domain (E7)', async () => {
     accountIs(SSO)
     hoisted.accountFindFirst.mockResolvedValue({ id: 'acc_1' })
 
@@ -475,7 +473,7 @@ describe('a domain that requires SSO', () => {
     ).rejects.toThrow(/single sign-on/i)
   })
 
-  it('sends a current-address code to a managed address on the owning provider (no number: conflicts with E3)', async () => {
+  it('sends a current-address code to a managed address on the owning provider (E3)', async () => {
     accountIs(SSO)
     hoisted.accountFindFirst.mockResolvedValue({ id: 'acc_1' })
 
