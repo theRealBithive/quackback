@@ -5,6 +5,7 @@ import { isSameDay, startOfDay } from 'date-fns'
 import { CalendarIcon, ClockIcon, XMarkIcon } from '@heroicons/react/24/outline'
 
 import { cn } from '@/lib/shared/utils'
+import { toIsoDateOnly } from '@/lib/shared/utils/date'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
@@ -67,6 +68,35 @@ function PickedValue({
       <LocalDate date={value} options={PICKED_TIME} locale={locale} />
     </>
   )
+}
+
+/**
+ * A date-only value (noon UTC on its day) as the local midnight of that same
+ * day, which is what the calendar grid compares against. Handing the grid the
+ * stored moment would mark the neighbouring day east of UTC+11.
+ */
+function calendarDayInGrid(value: Date): Date {
+  return new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())
+}
+
+/** A day of the calendar grid (local midnight) as "YYYY-MM-DD". */
+function gridDayKey(gridDay: Date): string {
+  const month = String(gridDay.getMonth() + 1).padStart(2, '0')
+  const day = String(gridDay.getDate()).padStart(2, '0')
+  return `${gridDay.getFullYear()}-${month}-${day}`
+}
+
+/**
+ * Whether a date-only pick of this grid day would leave the bounds. The pick
+ * is stored as noon UTC on the day, so the bounds are compared as UTC days:
+ * east of UTC the viewer's today can be a day the UTC clock has not reached,
+ * and offering it under a `maxDate` of now would store the day before.
+ */
+function isCalendarDayOutsideBounds(gridDay: Date, minDate?: Date, maxDate?: Date): boolean {
+  const day = gridDayKey(gridDay)
+  if (minDate && day < toIsoDateOnly(minDate)) return true
+  if (maxDate && day > toIsoDateOnly(maxDate)) return true
+  return false
 }
 
 function clampToBounds(date: Date, minDate?: Date, maxDate?: Date): Date {
@@ -147,6 +177,7 @@ export function DateTimePicker({
   }
 
   const isDateDisabled = (date: Date) => {
+    if (dateOnly) return isCalendarDayOutsideBounds(date, minDate, maxDate)
     if (minDate && date < startOfDay(minDate)) return true
     if (maxDate && date > startOfDay(maxDate)) return true
     return false
@@ -154,6 +185,7 @@ export function DateTimePicker({
 
   const timeMax = maxDate && value && isSameDay(value, maxDate) ? maxDate : undefined
   const showClear = value !== undefined && onClear !== undefined
+  const selectedDay = dateOnly && value ? calendarDayInGrid(value) : value
 
   const triggerContent = (
     <>
@@ -225,7 +257,7 @@ export function DateTimePicker({
       <PopoverContent className="w-auto p-0" align="end">
         <Calendar
           mode="single"
-          selected={value}
+          selected={selectedDay}
           onSelect={handleDateSelect}
           disabled={isDateDisabled}
           autoFocus
