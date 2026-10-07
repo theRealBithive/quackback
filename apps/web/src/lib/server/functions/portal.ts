@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { TiptapContent } from '@/lib/shared/db-types'
+import { toWidgetVisibleBoard, type WidgetVisibleBoard } from '@/lib/shared/widget-visible-board'
 import { createServerFn } from '@tanstack/react-start'
 import {
   type PostId,
@@ -762,19 +762,8 @@ export const fetchBoardCapabilitiesFn = createServerFn({ method: 'GET' }).handle
     permissions: await buildBoardPermissions(actor, boards, allowAnonymous),
     // Same visitor-visible list as the permissions map, so identify can
     // surface segment/members boards the anonymous SSR seed omitted.
-    boards: boards.map((board): WidgetVisibleBoard => ({
-      id: String(board.id),
-      name: board.name,
-      slug: board.slug,
-      descriptionTemplate: board.settings?.descriptionTemplate,
-    })),
+    boards: boards.map(toWidgetVisibleBoard),
   }
 })
 
-export type WidgetVisibleBoard = {
-  id: string
-  name: string
-  slug: string
-  /** The board's own description template; the widget resolves the fallback. */
-  descriptionTemplate?: TiptapContent
-}
+export type { WidgetVisibleBoard }

@@ -83,8 +83,8 @@ export function mayReplaceDescription(
   description: DescriptionDoc | null,
   insertedTemplate: DescriptionDoc | undefined
 ): boolean {
-  const descriptionDoc = (description ?? undefined) as TiptapContent | undefined
-  if (isEmptyTiptapDoc(descriptionDoc)) return true
+  if (description === null) return true
+  if (isEmptyTiptapDoc(description as TiptapContent)) return true
   if (insertedTemplate === undefined) return false
   return hasSameVisibleContent(description, insertedTemplate)
 }

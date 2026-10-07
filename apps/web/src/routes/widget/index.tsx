@@ -36,7 +36,8 @@ import { useWidgetAuth } from '@/components/widget/widget-auth-provider'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { widgetChangelogListQuery } from '@/components/widget/widget-changelog-query'
 import { widgetHelpCategoriesQuery } from '@/components/widget/widget-help-query'
-import { fetchBoardCapabilitiesFn, type WidgetVisibleBoard } from '@/lib/server/functions/portal'
+import { fetchBoardCapabilitiesFn } from '@/lib/server/functions/portal'
+import { toWidgetVisibleBoard } from '@/lib/shared/widget-visible-board'
 import { getShowPoweredByFn } from '@/lib/server/functions/powered-by'
 import { listPublicArticlesFn } from '@/lib/server/functions/help-center'
 import { getWidgetAuthHeaders } from '@/lib/client/widget-auth'
@@ -246,12 +247,7 @@ export const Route = createFileRoute('/widget/')({
       // the signed identity token). Re-filtering by audience.kind here
       // would silently drop authenticated/segment boards that the actor
       // is legitimately allowed to see.
-      boards: portalData.boards.map((b): WidgetVisibleBoard => ({
-        id: b.id as string,
-        name: b.name,
-        slug: b.slug,
-        descriptionTemplate: b.settings?.descriptionTemplate,
-      })),
+      boards: portalData.boards.map(toWidgetVisibleBoard),
       // Workspace default description template, for boards without their own.
       postTemplate: settings?.publicPortalConfig?.postTemplate,
       orgSlug: settings?.slug ?? '',
