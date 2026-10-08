@@ -176,4 +176,25 @@ describe('WidgetAuthProvider — canPortalHandoff follows the current identity',
     postFromHost({ id: 'cust', ssoToken: 'sso' })
     await waitFor(() => expect(screen.getByTestId('handoff').textContent).toBe('resolved:handoff'))
   })
+
+  it('drops a teammate veto when the host signs the teammate out, so the next visitor is not held to it (J12)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          sessionToken: 'tok',
+          user: { id: 'admin', name: 'Admin', email: 'a@example.com', avatarUrl: null },
+          canPortalHandoff: false,
+        }),
+      })
+    )
+    renderWidget({ probe: <HandoffProbe /> })
+
+    postFromHost({ id: 'admin', ssoToken: 'sso' })
+    await waitFor(() => expect(screen.getByTestId('handoff').textContent).toBe('resolved:veto'))
+
+    postFromHost(null)
+    await waitFor(() => expect(screen.getByTestId('handoff').textContent).toBe('resolved:handoff'))
+  })
 })
