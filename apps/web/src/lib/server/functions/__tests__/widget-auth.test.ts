@@ -21,6 +21,8 @@ vi.mock('@/lib/server/db', () => ({
     query: {
       session: { findFirst: (...args: unknown[]) => mockSessionFindFirst(...args) },
       principal: { findFirst: (...args: unknown[]) => mockPrincipalFindFirst(...args) },
+      // Fork (J22): no provenance row, so these sessions are unsigned.
+      widgetIdentifiedSession: { findFirst: async () => undefined },
     },
     insert: (...args: unknown[]) => {
       mockInsert(...args)
@@ -29,6 +31,7 @@ vi.mock('@/lib/server/db', () => ({
   },
   session: { token: 'token', expiresAt: 'expiresAt', userId: 'userId' },
   principal: { userId: 'userId' },
+  widgetIdentifiedSession: { sessionId: 'sessionId' },
   eq: vi.fn(),
   and: vi.fn(),
   gt: vi.fn(),
@@ -144,6 +147,7 @@ describe('getWidgetSession', () => {
       user: { id: 'user_1', email: 'jane@acme.com', name: 'Jane', image: 'https://avatar.url' },
       principal: { id: 'principal_1', role: 'user', type: 'user' },
       canPortalHandoff: true,
+      signedWidgetIdentity: false,
     })
   })
 
@@ -170,6 +174,7 @@ describe('getWidgetSession', () => {
       user: { id: 'user_1', email: 'jane@acme.com', name: 'Jane', image: null },
       principal: { id: 'principal_mock123', role: 'user', type: 'user' },
       canPortalHandoff: true,
+      signedWidgetIdentity: false,
     })
   })
 

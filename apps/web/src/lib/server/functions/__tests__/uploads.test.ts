@@ -52,6 +52,7 @@ const mockSession: WidgetAuthContext = {
   user: { id: 'user_test1' as UserId, email: 'a@b.com', name: 'A', image: null },
   principal: { id: 'principal_test1' as PrincipalId, role: 'user' as const, type: 'user' },
   canPortalHandoff: true,
+  signedWidgetIdentity: false,
 }
 
 describe('getWidgetImageUploadUrlFn', () => {

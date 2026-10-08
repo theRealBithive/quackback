@@ -68,6 +68,7 @@ import type { RequesterTicketDTO, ConversationTicketSummary } from '@/lib/server
 import { AI_INBOX_BUCKETS } from '@/lib/server/domains/assistant/assistant.involvement'
 import { ConflictError, ForbiddenError } from '@/lib/shared/errors'
 import { logger } from '@/lib/server/logger'
+import { isPortalGateLiftedForWidget } from './widget-portal-gate'
 
 const log = logger.child({ component: 'conversation' })
 
@@ -254,13 +255,14 @@ async function assertConversationsEnabled(): Promise<void> {
 
 /**
  * Shared gate for visitor-facing conversation endpoints: conversations must be
- * reachable. Portal-site callers also need portal access; widget-scoped
- * sessions (Bearer BFF) do not — the host app already admitted them.
- * Team members bypass the portal check (admin inbox).
+ * reachable, and the caller must hold portal access. Two callers skip the
+ * portal check: team members (admin inbox), and a widget session whose
+ * identity the host app signed (J22; see `widget-portal-gate.ts`). An
+ * anonymous or unsigned widget session is asked for portal access as before.
  */
 async function assertVisitorConversationAccess(ctx: AuthContext): Promise<void> {
   await assertConversationsEnabled()
-  if (isTeamMember(ctx.principal.role) || ctx.scope === 'widget') return
+  if (isTeamMember(ctx.principal.role) || isPortalGateLiftedForWidget(ctx)) return
   const { resolvePortalAccessForRequest } = await import('./portal-access')
   const access = await resolvePortalAccessForRequest()
   if (!access.granted) throw new Error('Portal access required')
@@ -485,9 +487,9 @@ export const runGetMyConversation = createServerOnlyFn(async function runGetMyCo
     return { ...base, conversation: null, messages: [], hasMore: false }
   }
 
-  // Portal-site visitors need portal access (degrade to greeting-only).
-  // Widget-scoped sessions skip that — the host app already admitted them.
-  if (!isTeamMember(ctx.principal.role) && ctx.scope !== 'widget') {
+  // Visitors need portal access (degrade to greeting-only), unless the host
+  // app signed this widget identity (J22).
+  if (!isTeamMember(ctx.principal.role) && !isPortalGateLiftedForWidget(ctx)) {
     const { resolvePortalAccessForRequest } = await import('./portal-access')
     const access = await resolvePortalAccessForRequest()
     if (!access.granted) {
@@ -579,7 +581,7 @@ export const runGetMyConversations = createServerOnlyFn(async function runGetMyC
   const { isConversationsEnabled } = await import('@/lib/server/domains/settings/settings.support')
   if (!(await isConversationsEnabled()) || !ctx?.principal) return empty
 
-  if (!isTeamMember(ctx.principal.role) && ctx.scope !== 'widget') {
+  if (!isTeamMember(ctx.principal.role) && !isPortalGateLiftedForWidget(ctx)) {
     const { resolvePortalAccessForRequest } = await import('./portal-access')
     const access = await resolvePortalAccessForRequest()
     if (!access.granted) return empty
@@ -635,7 +637,7 @@ export const runGetMessengerUnread = createServerOnlyFn(async function runGetMes
   const { isConversationsEnabled } = await import('@/lib/server/domains/settings/settings.support')
   if (!(await isConversationsEnabled()) || !ctx?.principal) return zero
 
-  if (!isTeamMember(ctx.principal.role) && ctx.scope !== 'widget') {
+  if (!isTeamMember(ctx.principal.role) && !isPortalGateLiftedForWidget(ctx)) {
     const { resolvePortalAccessForRequest } = await import('./portal-access')
     const access = await resolvePortalAccessForRequest()
     if (!access.granted) return zero

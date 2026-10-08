@@ -118,6 +118,13 @@ export interface AuthContext {
   permissions: PermissionKey[]
   /** Session audience; only 'dashboard' may carry permissions. */
   scope: SessionScope
+  /**
+   * Set only by the widget's auth entry points: true when this widget session
+   * came from an identify the host app signed. Absent means unsigned, so a
+   * context built anywhere else never lifts the widget's private-portal gate
+   * (see `widget-portal-gate.ts`).
+   */
+  signedWidgetIdentity?: boolean
 }
 
 /**

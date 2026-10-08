@@ -7,6 +7,7 @@ import { ensurePrincipalForUser } from '@/lib/server/domains/principals/principa
 import { resolveUserAvatarUrl } from '@/lib/server/domains/principals/principal-display'
 import { rawSessionToken } from '@/lib/server/auth/session-token'
 import { shouldRollSession, WIDGET_SESSION_TTL_MS } from './widget-session-roll'
+import { hasSignedWidgetIdentity } from './widget-portal-gate'
 import { logger } from '@/lib/server/logger'
 import type { AuthContext } from './auth-helpers'
 
@@ -31,6 +32,8 @@ export interface WidgetAuthContext {
   }
   /** False for workspace teammates — the widget must not mint a portal OTT. */
   canPortalHandoff: boolean
+  /** True when this session came from an identify the host app signed (J22). */
+  signedWidgetIdentity: boolean
 }
 
 /**
@@ -111,6 +114,7 @@ export async function getWidgetSession(opts?: {
       type: principalRecord.type ?? 'user',
     },
     canPortalHandoff: !isTeamMember(principalRecord.role),
+    signedWidgetIdentity: await hasSignedWidgetIdentity(sessionRecord.id),
   }
 }
 
@@ -121,6 +125,7 @@ function toAuthContext(w: WidgetAuthContext): AuthContext {
     principal: w.principal,
     permissions: [],
     scope: 'widget',
+    signedWidgetIdentity: w.signedWidgetIdentity,
   }
 }
 

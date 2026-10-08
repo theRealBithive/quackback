@@ -84,6 +84,13 @@ vi.mock('@/lib/server/functions/auth-helpers', () => ({
   policyActorFromAuth: vi.fn(),
   hasAuthCredentials: vi.fn(),
 }))
+// Fork (J22): the posts, comments and changelog wrappers ask the portal-site
+// resolver for every caller without a signed identity. This suite is about
+// delegation, so the workspace is public here; the gate itself is held in
+// functions/__tests__/widget-portal-gate.test.ts.
+vi.mock('@/lib/server/functions/portal-access', () => ({
+  resolvePortalAccessForRequest: async () => ({ granted: true, reason: 'public' }),
+}))
 vi.mock('@/lib/server/functions/public-posts', () => ({
   runListPublicPosts: hoisted.run.listPublicPosts,
   runCreatePublicPost: hoisted.run.createPublicPost,
