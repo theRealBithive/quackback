@@ -63,6 +63,15 @@ vi.mock('@/components/admin/users/block-person-control', () => ({
 vi.mock('@/lib/server/functions/conversation', () => ({
   listConversationsForUserFn: vi.fn().mockResolvedValue({ conversations: [], hasMore: false }),
   getConversationAssistantActivityFn: vi.fn().mockResolvedValue(null),
+  // ticket-header-card reaches the visitor RPC table since #555, which reads
+  // these at module load; nothing here calls them.
+  getMyConversationFn: vi.fn(),
+  sendConversationMessageFn: vi.fn(),
+  listConversationMessagesFn: vi.fn(),
+  mintConversationStreamTokenFn: vi.fn(),
+  submitCsatFn: vi.fn(),
+  markConversationReadFn: vi.fn(),
+  sendConversationTypingFn: vi.fn(),
 }))
 vi.mock('@/lib/server/functions/admin', () => ({
   getPortalUserFn: vi.fn().mockResolvedValue(null),
