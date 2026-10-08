@@ -9,7 +9,7 @@ import { resolveVideoMimeType } from '@/lib/shared/storage-config'
 /**
  * Shared vi.mock factory for @/lib/server/storage/s3.
  *
- * Provides a re-implementation of uploadImageFromFormData that closes over the
+ * Provides a re-implementation of uploadMediaFromFormData that closes over the
  * named mock functions — so tests can spy on uploadObject/generateStorageKey via
  * vi.mocked(), and the mock's internal validation logic stays in one place.
  *
@@ -35,13 +35,13 @@ export function createS3MockFactory() {
     async (key: string, _body?: unknown, _type?: string) => `https://cdn.example.com/${key}`
   )
 
-  const upload = async (formData: FormData, storagePrefix: string, allowVideo: boolean) => {
+  const upload = async (formData: FormData, storagePrefix: string) => {
     const file = formData.get('file')
     if (!(file instanceof File))
       return Response.json({ error: 'No file provided' }, { status: 400 })
     const image = mockIsAllowedImageType(file.type)
     const contentType = image ? file.type : resolveVideoMimeType(file.type, file.name)
-    const video = allowVideo && !!contentType && mockIsAllowedVideoType(contentType)
+    const video = !!contentType && mockIsAllowedVideoType(contentType)
     if (!image && !video) return Response.json({ error: 'Invalid file type' }, { status: 400 })
     const maxSize = video ? MAX_VIDEO_FILE_SIZE : MAX_FILE_SIZE
     if (file.size > maxSize)
@@ -74,11 +74,8 @@ export function createS3MockFactory() {
     uploadObject: mockUploadObject,
     MAX_FILE_SIZE,
     MAX_VIDEO_FILE_SIZE,
-    async uploadImageFromFormData(formData: FormData, storagePrefix: string) {
-      return upload(formData, storagePrefix, false)
-    },
     async uploadMediaFromFormData(formData: FormData, storagePrefix: string) {
-      return upload(formData, storagePrefix, true)
+      return upload(formData, storagePrefix)
     },
   }
 }

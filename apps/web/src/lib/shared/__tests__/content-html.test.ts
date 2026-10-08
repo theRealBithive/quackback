@@ -68,6 +68,15 @@ describe('generateContentHTML', () => {
     expect(m4v).toContain('type="video/mp4"')
   })
 
+  it('renders no image for a source no URL parser can read', () => {
+    expect(
+      generateContentHTML({
+        type: 'doc',
+        content: [{ type: 'image', attrs: { src: 'http://[::1' } }],
+      })
+    ).not.toContain('<img')
+  })
+
   it('refuses executable video sources', () => {
     expect(
       generateContentHTML({

@@ -47,7 +47,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
-import { mockSession, mockPrincipal, mockImageFile } from '../../__tests__/upload-fixtures'
+import {
+  mockSession,
+  mockPrincipal,
+  mockImageFile,
+  mockVideoFile,
+} from '../../__tests__/upload-fixtures'
 
 vi.mock('@/lib/server/config', () => ({ config: { trustedProxyHops: 1 } }))
 
@@ -169,6 +174,47 @@ describe('nobody without a session can upload (H5)', () => {
   })
 })
 
+describe('what the portal route stores (H1, H2, H4)', () => {
+  function uploadFile(file: File): Promise<Response> {
+    const formData = new FormData()
+    formData.append('file', file)
+    return handlePortalUpload({
+      request: new Request('http://localhost/api/portal/upload', {
+        method: 'POST',
+        body: formData,
+        headers: { 'x-forwarded-for': '203.0.113.7' },
+      }),
+    })
+  }
+
+  it('stores a WebM recording from an anonymous visitor (H1)', async () => {
+    freshSession('anonymous')
+    const response = await uploadFile(mockVideoFile('clip.webm', 'video/webm'))
+    expect(response.status).toBe(200)
+    expect(uploadObject).toHaveBeenCalledWith(
+      expect.stringContaining('portal-media'),
+      expect.any(Buffer),
+      'video/webm'
+    )
+  })
+
+  it('refuses a file whose bytes are not its type, and stores nothing (H2, H4)', async () => {
+    freshSession('user')
+    const pngBytes = await mockImageFile('shot.png', 'image/png').arrayBuffer()
+    const response = await uploadFile(new File([pngBytes], 'clip.mp4', { type: 'video/mp4' }))
+    expect(response.status).toBe(400)
+    expect(uploadObject).not.toHaveBeenCalled()
+  })
+
+  it('reports a store that failed as a failure, never with an address (H4)', async () => {
+    freshSession('user')
+    vi.mocked(uploadObject).mockRejectedValueOnce(new Error('bucket unavailable'))
+    const response = await uploadFile(mockVideoFile())
+    expect(response.status).toBe(500)
+    expect(await response.json()).not.toHaveProperty('publicUrl')
+  })
+})
+
 describe('an anonymous visitor uploads only where anonymous visitors may post (H6)', () => {
   it('refuses an anonymous upload where the workspace holds anonymous posting back (H6, H4)', async () => {
     const heldBack = [
@@ -265,6 +311,17 @@ describe('uploads are limited per session and, for anonymous ones, per address (
       ),
       { numRuns: 20 }
     )
+  })
+
+  it('lets one address make exactly the ten anonymous uploads a minute chosen for it (H7)', async () => {
+    // The per-address number is the operator-facing decision recorded with the
+    // H7 fix: ten 100 MB videos, half of what one session may send.
+    const statuses: number[] = []
+    for (let attempt = 0; attempt < 11; attempt++) {
+      freshSession('anonymous')
+      statuses.push((await uploadFrom('203.0.113.80')).status)
+    }
+    expect(statuses).toEqual([...Array(10).fill(200), 429])
   })
 
   it('gives every client address its own budget (H7)', async () => {
