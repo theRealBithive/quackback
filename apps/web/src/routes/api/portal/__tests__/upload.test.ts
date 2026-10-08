@@ -30,6 +30,15 @@ vi.mock('@/lib/server/storage/s3', async () => {
   return createS3MockFactory()
 })
 
+// Since batch H (H6) an anonymous upload is accepted only where the workspace
+// lets anonymous visitors post; the suite's anonymous case runs in one that does.
+vi.mock('@/lib/server/functions/workspace', () => ({
+  getSettings: vi.fn().mockResolvedValue({
+    id: 'workspace_test',
+    portalConfig: JSON.stringify({ features: { allowAnonymous: true } }),
+  }),
+}))
+
 const { incrementBucket } = vi.hoisted(() => ({
   incrementBucket: vi.fn().mockResolvedValue({ count: 1 }),
 }))
@@ -73,7 +82,7 @@ describe('POST /api/portal/upload', () => {
     expect(await res.json()).toMatchObject({ error: 'Unauthorized' })
   })
 
-  it('allows an anonymous portal session to upload media', async () => {
+  it('allows an anonymous portal session to upload media where anonymous posting is on', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValueOnce(anonymousSession)
     vi.mocked(db.query.principal.findFirst).mockResolvedValueOnce(anonymousPrincipal)
     vi.mocked(uploadObject).mockResolvedValueOnce('https://cdn.example.com/portal-media/photo.jpg')
