@@ -62,7 +62,7 @@ describe('POST /api/devices', () => {
     expect(registerDevice).not.toHaveBeenCalled()
   })
 
-  it('403s a widget-scoped session', async () => {
+  it('403s a widget-scoped session (J7)', async () => {
     getSession.mockResolvedValue({ user: { id: 'user_1' }, session: { scope: 'widget' } })
     const res = await handleRegisterDevice(post({ token: 't', platform: 'ios' }))
     expect(res.status).toBe(403)

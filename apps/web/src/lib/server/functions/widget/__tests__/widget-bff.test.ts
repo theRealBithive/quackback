@@ -351,7 +351,7 @@ describe('widget BFF requireWidgetAuth endpoints', () => {
   ]
 
   it.each(required)(
-    '$name uses requireWidgetAuth and not site requireAuth',
+    '$name uses requireWidgetAuth and not site requireAuth (J8)',
     async ({ call, run }) => {
       await call()
       expect(hoisted.requireWidgetAuth).toHaveBeenCalled()
@@ -360,7 +360,7 @@ describe('widget BFF requireWidgetAuth endpoints', () => {
     }
   )
 
-  it.each(required)('$name rejects without a widget session', async ({ call }) => {
+  it.each(required)('$name rejects without a widget session (J8)', async ({ call }) => {
     hoisted.requireWidgetAuth.mockRejectedValue(new Error('Authentication required'))
     await expect(call()).rejects.toThrow(/Authentication required/)
     expectWidgetAuthOnly()
@@ -428,7 +428,7 @@ describe('widget BFF getOptionalWidgetAuth endpoints', () => {
     },
   ]
 
-  it.each(optional)('$name uses getOptionalWidgetAuth and not site auth', async ({ call }) => {
+  it.each(optional)('$name uses getOptionalWidgetAuth and not site auth (J8)', async ({ call }) => {
     await call()
     expect(hoisted.getOptionalWidgetAuth).toHaveBeenCalled()
     expect(hoisted.requireWidgetAuth).not.toHaveBeenCalled()

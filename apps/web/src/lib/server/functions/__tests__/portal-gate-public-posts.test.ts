@@ -211,7 +211,7 @@ beforeEach(async () => {
 // ---------------------------------------------------------------------------
 
 describe('listPublicRoadmapsFn — portal-visibility gate', () => {
-  it('returns an empty array when the portal is private and the caller is unauthorized', async () => {
+  it('returns an empty array when the portal is private and the caller is unauthorized (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthenticated' })
 
     const result = await publicPostsHandlers[LIST_PUBLIC_ROADMAPS]({ data: {} })
@@ -220,7 +220,7 @@ describe('listPublicRoadmapsFn — portal-visibility gate', () => {
     expect(mockListPublicRoadmaps).not.toHaveBeenCalled()
   })
 
-  it('returns an empty array for an authenticated-but-unauthorized caller', async () => {
+  it('returns an empty array for an authenticated-but-unauthorized caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
 
     const result = await publicPostsHandlers[LIST_PUBLIC_ROADMAPS]({ data: {} })
@@ -296,7 +296,7 @@ describe('listPublicRoadmapsFn — portal-visibility gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('getPublicRoadmapPostsFn — portal-visibility gate', () => {
-  it('returns empty result when the portal is private and the caller is unauthorized', async () => {
+  it('returns empty result when the portal is private and the caller is unauthorized (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthenticated' })
 
     const result = (await publicPostsHandlers[GET_PUBLIC_ROADMAP_POSTS]({
@@ -309,7 +309,7 @@ describe('getPublicRoadmapPostsFn — portal-visibility gate', () => {
     expect(mockGetPublicRoadmapPosts).not.toHaveBeenCalled()
   })
 
-  it('returns empty result for an authenticated-but-unauthorized caller', async () => {
+  it('returns empty result for an authenticated-but-unauthorized caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
 
     const result = (await publicPostsHandlers[GET_PUBLIC_ROADMAP_POSTS]({
@@ -352,7 +352,7 @@ describe('getPublicRoadmapPostsFn — portal-visibility gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('getRoadmapPostsByStatusFn — portal-visibility gate', () => {
-  it('returns empty result when the portal is private and the caller is unauthorized', async () => {
+  it('returns empty result when the portal is private and the caller is unauthorized (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthenticated' })
 
     const result = (await publicPostsHandlers[GET_ROADMAP_POSTS_BY_STATUS]({
@@ -365,7 +365,7 @@ describe('getRoadmapPostsByStatusFn — portal-visibility gate', () => {
     expect(mockGetPublicRoadmapPostsPaginated).not.toHaveBeenCalled()
   })
 
-  it('returns empty result for an authenticated-but-unauthorized caller', async () => {
+  it('returns empty result for an authenticated-but-unauthorized caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
 
     const result = (await publicPostsHandlers[GET_ROADMAP_POSTS_BY_STATUS]({
@@ -415,7 +415,7 @@ describe('getRoadmapPostsByStatusFn — portal-visibility gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('findSimilarPostsFn — portal-visibility gate', () => {
-  it('returns an empty array when the portal is private and the caller is unauthorized', async () => {
+  it('returns an empty array when the portal is private and the caller is unauthorized (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthenticated' })
 
     const result = await publicPostsHandlers[FIND_SIMILAR_POSTS]({
@@ -427,7 +427,7 @@ describe('findSimilarPostsFn — portal-visibility gate', () => {
     // (The db mock's select fn starts uncalled until a granted path runs.)
   })
 
-  it('returns an empty array for an authenticated-but-unauthorized caller', async () => {
+  it('returns an empty array for an authenticated-but-unauthorized caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
 
     const result = await publicPostsHandlers[FIND_SIMILAR_POSTS]({
@@ -546,7 +546,7 @@ describe('findSimilarPostsFn — portal-visibility gate', () => {
 // handler; denials short-circuit with an Unauthorized error.
 
 describe('getVoteSidebarDataFn — portal-visibility gate', () => {
-  it('returns the non-voting default when the portal is private and the caller is unauthorized', async () => {
+  it('returns the non-voting default when the portal is private and the caller is unauthorized (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
 
     const result = (await publicPostsHandlers[GET_VOTE_SIDEBAR_DATA]({

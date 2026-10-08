@@ -39,7 +39,7 @@ function exhaust(workspaceKey: string, ip: string): boolean {
 }
 
 describe('registration rate limit', () => {
-  it('does not spend another workspace budget', () => {
+  it('does not spend another workspace budget (J30)', () => {
     const ip = '203.0.113.11'
 
     expect(exhaust('workspace-alpha', ip)).toBe(true)
@@ -64,7 +64,19 @@ describe('registration rate limit', () => {
     expect(isRegistrationRateLimited(request(ip))).toBe(false)
   })
 
-  it('still limits within one workspace', () => {
+  it('admits exactly 100 registrations an hour from one address, and refuses the next (J30)', () => {
+    const ip = '203.0.113.16'
+    const verdicts: boolean[] = []
+    withWorkspace('workspace-echo', () => {
+      for (let i = 0; i < 101; i += 1) verdicts.push(isRegistrationRateLimited(request(ip)))
+    })
+
+    expect(REG_MAX).toBe(100)
+    expect(verdicts.slice(0, 100).every((limited) => limited === false)).toBe(true)
+    expect(verdicts[100]).toBe(true)
+  })
+
+  it('still limits within one workspace (J30)', () => {
     const ip = '203.0.113.14'
 
     expect(withWorkspace('workspace-charlie', () => isRegistrationRateLimited(request(ip)))).toBe(
@@ -73,7 +85,7 @@ describe('registration rate limit', () => {
     expect(exhaust('workspace-charlie', ip)).toBe(true)
   })
 
-  it('does not let a forwarding header or the private header buy a fresh budget (C2)', () => {
+  it('does not let a forwarding header or the private header buy a fresh budget (C2, J30)', () => {
     const ip = '203.0.113.15'
 
     expect(exhaust('workspace-delta', ip)).toBe(true)

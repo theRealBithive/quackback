@@ -91,7 +91,7 @@ describe('mcpDcrRegistrationBody', () => {
     expect(body.application_type).toBeUndefined()
   })
 
-  it('leaves an explicit HTTPS web client as web', () => {
+  it('leaves an explicit HTTPS web client as web (J25)', () => {
     const body = mcpDcrRegistrationBody({
       application_type: 'web',
       redirect_uris: ['https://example.com/oauth/callback'],
@@ -100,7 +100,7 @@ describe('mcpDcrRegistrationBody', () => {
     expect(body.redirect_uris).toEqual(['https://example.com/oauth/callback'])
   })
 
-  it('coerces omitted application_type and Cursor custom-scheme redirects for Better Auth 1.7', () => {
+  it('coerces omitted application_type and Cursor custom-scheme redirects for Better Auth 1.7 (J25)', () => {
     const original = {
       client_name: 'Cursor',
       redirect_uris: [CURSOR_REDIRECT],
@@ -143,12 +143,12 @@ describe('mcpDcrRegistrationBody', () => {
     expect(body.redirect_uris).toEqual([uri])
   })
 
-  it('leaves an omitted application_type alone when every redirect is web-valid', () => {
+  it('leaves an omitted application_type alone when every redirect is web-valid (J25)', () => {
     const body = mcpDcrRegistrationBody({ redirect_uris: ['https://example.com/oauth/callback'] })
     expect(body.application_type).toBeUndefined()
   })
 
-  it('does not override an explicit web client that registered a loopback redirect', () => {
+  it('does not override an explicit web client that registered a loopback redirect (J25)', () => {
     const body = mcpDcrRegistrationBody({
       application_type: 'web',
       redirect_uris: ['http://localhost:8765/callback'],
@@ -236,7 +236,7 @@ describe('needsBetterAuth17RedirectRewrite', () => {
     expect(needsBetterAuth17RedirectRewrite(CURSOR_REDIRECT)).toBe(true)
   })
 
-  it('does not rewrite reserved schemes so Better Auth still rejects them', () => {
+  it('does not rewrite reserved schemes so Better Auth still rejects them (J26)', () => {
     expect(needsBetterAuth17RedirectRewrite('file:///tmp/callback')).toBe(false)
     expect(needsBetterAuth17RedirectRewrite('javascript:alert(1)')).toBe(false)
   })

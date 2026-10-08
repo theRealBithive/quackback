@@ -191,7 +191,7 @@ describe('setMyLanguagePreferenceFn', () => {
     )
   })
 
-  it('rejects a widget-scoped session', async () => {
+  it('rejects a widget-scoped session (J6)', async () => {
     mockRequireAuth.mockRejectedValue(
       new Error('Access denied: Widget sessions cannot access this resource')
     )

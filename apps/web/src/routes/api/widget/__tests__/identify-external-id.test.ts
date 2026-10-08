@@ -121,7 +121,7 @@ beforeEach(() => {
 })
 
 describe('POST /api/widget/identify — external_id resolution (verified path)', () => {
-  it('creates a new user stamped with the verified sub as external_id', async () => {
+  it('creates a new user stamped with the verified sub as external_id (J23)', async () => {
     mockVerifyJWT.mockReturnValue({ sub: 'sub_alice', email: 'alice@acme.com', name: 'Alice' })
     mockUserFindFirst.mockResolvedValue(null) // no external_id match, no email match
     mockPrincipalFindFirst.mockResolvedValue(null)
@@ -133,7 +133,7 @@ describe('POST /api/widget/identify — external_id resolution (verified path)',
     expect(userInsertValues()?.emailVerified).toBe(true)
   })
 
-  it('resolves a returning sub to the same user and adopts the new email', async () => {
+  it('resolves a returning sub to the same user and adopts the new email (J19, J23)', async () => {
     mockVerifyJWT.mockReturnValue({ sub: 'sub_bob', email: 'bob-new@acme.com', name: 'Bob' })
     mockUserFindFirst
       // external_id lookup hits the existing user (email has since changed)…
@@ -163,7 +163,7 @@ describe('POST /api/widget/identify — external_id resolution (verified path)',
     expect(body.user?.email).toBe('bob-new@acme.com')
   })
 
-  it('rejects a verified email claim that belongs to another account', async () => {
+  it('rejects a verified email claim that belongs to another account (J18)', async () => {
     mockVerifyJWT.mockReturnValue({
       sub: 'sub_bob',
       email: 'taken@acme.com',
@@ -190,7 +190,7 @@ describe('POST /api/widget/identify — external_id resolution (verified path)',
     expect(userInsertValues()).toBeUndefined()
   })
 
-  it('releases an external_id bound to a user with no principal and creates a clean record', async () => {
+  it('releases an external_id bound to a user with no principal and creates a clean record (J17)', async () => {
     mockVerifyJWT.mockReturnValue({
       sub: 'staff-admin',
       email: 'new@acme.com',

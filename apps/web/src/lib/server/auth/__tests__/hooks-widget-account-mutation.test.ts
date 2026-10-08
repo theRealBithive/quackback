@@ -68,7 +68,7 @@ function ctx(opts: { path: string; token?: string; cookie?: string; scope?: stri
 }
 
 describe('handleWidgetAccountMutationGate', () => {
-  it('rejects a widget Bearer on request-email-change', async () => {
+  it('rejects a widget Bearer on request-email-change (J6)', async () => {
     await expect(
       handleWidgetAccountMutationGate(
         ctx({ path: '/email-otp/request-email-change', token: 'widget-tok', scope: 'widget' })
@@ -76,7 +76,7 @@ describe('handleWidgetAccountMutationGate', () => {
     ).rejects.toBeInstanceOf(APIError)
   })
 
-  it('rejects a widget Bearer on change-email OTP confirm', async () => {
+  it('rejects a widget Bearer on change-email OTP confirm (J6)', async () => {
     await expect(
       handleWidgetAccountMutationGate(
         ctx({ path: '/email-otp/change-email', token: 'widget-tok', scope: 'widget' })
@@ -100,7 +100,7 @@ describe('handleWidgetAccountMutationGate', () => {
     ).resolves.toBeUndefined()
   })
 
-  it('rejects a widget Bearer on session-revocation routes', async () => {
+  it('rejects a widget Bearer on session-revocation routes (J6)', async () => {
     await expect(
       handleWidgetAccountMutationGate(
         ctx({ path: '/revoke-sessions', token: 'widget-tok', scope: 'widget' })
@@ -113,7 +113,7 @@ describe('handleWidgetAccountMutationGate', () => {
     ).rejects.toThrow(/Widget sessions/)
   })
 
-  it('rejects a widget Bearer on OAuth account-link routes', async () => {
+  it('rejects a widget Bearer on OAuth account-link routes (J6)', async () => {
     await expect(
       handleWidgetAccountMutationGate(
         ctx({ path: '/link-social', token: 'widget-tok', scope: 'widget' })
@@ -139,7 +139,7 @@ describe('handleWidgetAccountMutationGate', () => {
     ).resolves.toBeUndefined()
   })
 
-  it('rejects a widget Bearer on any other Better Auth path', async () => {
+  it('rejects a widget Bearer on any other Better Auth path (J6)', async () => {
     await expect(
       handleWidgetAccountMutationGate(
         ctx({ path: '/sign-out', token: 'widget-tok', scope: 'widget' })

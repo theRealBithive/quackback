@@ -197,7 +197,7 @@ describe('REPOINT_STEPS registry', () => {
       expect(isNull).toHaveBeenCalledWith('principal.blockedByPrincipalId')
     })
 
-    it('skips blocked_at transfer onto a teammate target', async () => {
+    it('skips blocked_at transfer onto a teammate target (J10)', async () => {
       await repointPrincipalActivity(tx, FROM, TO, { skipBlockTransfer: true })
 
       expect(mockUpdateSet).not.toHaveBeenCalledWith({

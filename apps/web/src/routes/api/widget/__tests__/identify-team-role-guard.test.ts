@@ -139,7 +139,7 @@ beforeEach(() => {
 })
 
 describe('POST /api/widget/identify — rejects any body without a signed ssoToken', () => {
-  it('rejects an id+email body naming an admin email and mints nothing', async () => {
+  it('rejects an id+email body naming an admin email and mints nothing (J2)', async () => {
     mockUserFindFirst.mockResolvedValue({
       id: 'user_admin',
       email: 'admin@acme.com',
@@ -162,20 +162,20 @@ describe('POST /api/widget/identify — rejects any body without a signed ssoTok
     expect(mockUserFindFirst).not.toHaveBeenCalled()
   })
 
-  it('rejects an id+email body naming a member email', async () => {
+  it('rejects an id+email body naming a member email (J2)', async () => {
     const res = await postIdentify({ id: 'attacker-supplied', email: 'member@acme.com' })
     expect(res.status).toBe(400)
     expect(mockInsert).not.toHaveBeenCalled()
   })
 
-  it('rejects an id+email body even for a plain customer email', async () => {
+  it('rejects an id+email body even for a plain customer email (J2)', async () => {
     // Unverified identify is gone entirely — not just team-guarded.
     const res = await postIdentify({ id: 'foo', email: 'customer@acme.com' })
     expect(res.status).toBe(400)
     expect(mockInsert).not.toHaveBeenCalled()
   })
 
-  it('rejects a first-time email with no existing user', async () => {
+  it('rejects a first-time email with no existing user (J2)', async () => {
     mockUserFindFirst.mockResolvedValue(null)
     const res = await postIdentify({ id: 'new-id', email: 'first-time@acme.com' })
     expect(res.status).toBe(400)
@@ -184,7 +184,7 @@ describe('POST /api/widget/identify — rejects any body without a signed ssoTok
 })
 
 describe('POST /api/widget/identify — teammate identities mint a widget session', () => {
-  it('mints a widget session when the ssoToken resolves to an admin principal', async () => {
+  it('mints a widget session when the ssoToken resolves to an admin principal (J1, J3)', async () => {
     mockUserFindFirst.mockResolvedValue({
       id: 'user_admin_sso',
       email: 'sso@acme.com',
@@ -209,7 +209,7 @@ describe('POST /api/widget/identify — teammate identities mint a widget sessio
     expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ scope: 'widget' }))
   })
 
-  it('mints a widget session when the ssoToken resolves to a member principal', async () => {
+  it('mints a widget session when the ssoToken resolves to a member principal (J1, J3)', async () => {
     mockUserFindFirst.mockResolvedValue({
       id: 'user_member_sso',
       email: 'sso@acme.com',
@@ -231,7 +231,7 @@ describe('POST /api/widget/identify — teammate identities mint a widget sessio
     expect(mockInsert).toHaveBeenCalled()
   })
 
-  it('does not reuse a portal-scoped session for a teammate identify', async () => {
+  it('does not reuse a portal-scoped session for a teammate identify (J3)', async () => {
     mockUserFindFirst.mockResolvedValue({
       id: 'user_admin_sso',
       email: 'sso@acme.com',
@@ -260,7 +260,7 @@ describe('POST /api/widget/identify — teammate identities mint a widget sessio
     expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ scope: 'widget' }))
   })
 
-  it('does not overwrite a teammate dashboard profile from the host-app JWT', async () => {
+  it('does not overwrite a teammate dashboard profile from the host-app JWT (J1)', async () => {
     mockVerifyJWT.mockReturnValue({
       sub: 'sso-user',
       email: 'sso@acme.com',
@@ -297,7 +297,7 @@ describe('POST /api/widget/identify — teammate identities mint a widget sessio
 })
 
 describe('POST /api/widget/identify — the verified (ssoToken) path for a portal identity', () => {
-  it('succeeds and mints a session when the resolved principal is a plain portal user', async () => {
+  it('succeeds and mints a session when the resolved principal is a plain portal user (J1)', async () => {
     mockUserFindFirst.mockResolvedValue({
       id: 'user_portal_sso',
       email: 'sso@acme.com',

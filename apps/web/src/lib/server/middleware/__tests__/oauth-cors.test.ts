@@ -31,7 +31,7 @@ describe('isOAuthCorsPath', () => {
     '/api/auth/oauth2/token',
     '/api/auth/oauth2/revoke',
     '/api/auth/jwks',
-  ])('covers %s', (path) => {
+  ])('covers %s (J29)', (path) => {
     expect(isOAuthCorsPath(path)).toBe(true)
   })
 
@@ -43,13 +43,13 @@ describe('isOAuthCorsPath', () => {
     '/api/auth/oauth2/introspect',
     '/api/mcp/extra',
     '/admin',
-  ])('leaves %s alone', (path) => {
+  ])('leaves %s alone (J29)', (path) => {
     expect(isOAuthCorsPath(path)).toBe(false)
   })
 })
 
 describe('handleOAuthCors', () => {
-  it('answers a preflight without running the rest of the chain', async () => {
+  it('answers a preflight without running the rest of the chain (J29)', async () => {
     let ran = false
     const out = await handleOAuthCors({
       request: new Request('https://feedback.example.com/api/mcp', {
@@ -83,7 +83,7 @@ describe('handleOAuthCors', () => {
     }
   })
 
-  it('adds CORS and exposes the MCP and auth challenge headers on responses', async () => {
+  it('adds CORS and exposes the MCP and auth challenge headers on responses (J29)', async () => {
     const out = (await handleOAuthCors({
       request: req('/api/mcp', 'POST'),
       next: async () => ({
@@ -112,7 +112,7 @@ describe('handleOAuthCors', () => {
     expect(out.response.headers.get('access-control-allow-origin')).toBe('*')
   })
 
-  it('does not touch other paths, including preflights to them', async () => {
+  it('does not touch other paths, including preflights to them (J29)', async () => {
     const plain = new Response('ok')
     const out = (await handleOAuthCors({
       request: req('/api/auth/sign-in/email', 'POST'),

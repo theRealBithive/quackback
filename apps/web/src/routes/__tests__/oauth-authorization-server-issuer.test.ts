@@ -57,13 +57,13 @@ describe('OAuth authorization server discovery for /api/mcp', () => {
   const advertised = mcpProtectedResourceMetadata(BASE_URL).authorization_servers[0]
   const issuerPath = new URL(advertised).pathname.replace(/\/$/, '')
 
-  it('serves metadata at the RFC 8414 path derived from the advertised issuer', () => {
+  it('serves metadata at the RFC 8414 path derived from the advertised issuer (J24)', () => {
     expect((PathInsertedRoute as unknown as TestRoute).path).toBe(
       `/.well-known/oauth-authorization-server${issuerPath}`
     )
   })
 
-  it('returns an issuer equal to the advertised authorization server', async () => {
+  it('returns an issuer equal to the advertised authorization server (J24)', async () => {
     const body = await fetchMetadata(
       PathInsertedRoute,
       `${BASE_URL}/.well-known/oauth-authorization-server${issuerPath}`
@@ -71,7 +71,7 @@ describe('OAuth authorization server discovery for /api/mcp', () => {
     expect(body.issuer).toBe(advertised)
   })
 
-  it('returns the same issuer from the root well-known URL', async () => {
+  it('returns the same issuer from the root well-known URL (J24)', async () => {
     const body = await fetchMetadata(
       RootRoute,
       `${BASE_URL}/.well-known/oauth-authorization-server`
@@ -79,7 +79,7 @@ describe('OAuth authorization server discovery for /api/mcp', () => {
     expect(body.issuer).toBe(advertised)
   })
 
-  it('serves OIDC discovery at the path-inserted URL with the same issuer', async () => {
+  it('serves OIDC discovery at the path-inserted URL with the same issuer (J24)', async () => {
     expect((OidcPathInsertedRoute as unknown as TestRoute).path).toBe(
       `/.well-known/openid-configuration${issuerPath}`
     )

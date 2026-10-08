@@ -142,7 +142,7 @@ describe('notification preference mutations reject widget scope', () => {
     })
   })
 
-  it('rejects a widget session so a teammate Bearer cannot mute mail', async () => {
+  it('rejects a widget session so a teammate Bearer cannot mute mail (J6)', async () => {
     hoisted.mockRequireAuth.mockRejectedValue(
       new Error('Access denied: Widget sessions cannot access this resource')
     )

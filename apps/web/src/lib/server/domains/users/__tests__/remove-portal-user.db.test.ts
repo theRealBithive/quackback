@@ -210,7 +210,7 @@ describe.skipIf(!fixture.available)('removePortalUser (real DB, rolled back)', (
     expect(stillThere).toBeDefined()
   })
 
-  it('releases widget external_id so a later identify cannot resurrect the husk', async () => {
+  it('releases widget external_id so a later identify cannot resurrect the husk (J16)', async () => {
     const author = await seedPortalUser('Widget Wendy')
     await testDb
       .update(user)
