@@ -1291,20 +1291,6 @@
     {
       "file": "apps/web/src/lib/server/events/emit.ts",
       "mutator": "ObjectLiteral",
-      "line": "const log = logger.child({ component: 'emit' })",
-      "replacement": "{}",
-      "why": "The component name is metadata on a log line. It reaches no branch, no return value and no query, and nothing a caller or an operator reads is built from it, so no input can tell the mutant apart."
-    },
-    {
-      "file": "apps/web/src/lib/server/events/emit.ts",
-      "mutator": "StringLiteral",
-      "line": "const log = logger.child({ component: 'emit' })",
-      "replacement": "\"\"",
-      "why": "The component name is metadata on a log line. It reaches no branch, no return value and no query, and nothing a caller or an operator reads is built from it, so no input can tell the mutant apart."
-    },
-    {
-      "file": "apps/web/src/lib/server/events/emit.ts",
-      "mutator": "ObjectLiteral",
       "line": "log.warn({ err: error, type: def.type }, 'best-effort emit failed')",
       "replacement": "{}",
       "why": "The field set is metadata on a log line. It reaches no branch, no return value and no query: the job's outcome, its row and the error runJob records are the same with or without it, so no input can tell the mutant apart except by asserting the fields back from the logger, which is the tautology the gate exists to expose."
@@ -1315,20 +1301,6 @@
       "line": "log.warn({ err: error, type: def.type }, 'best-effort emit failed')",
       "replacement": "\"\"",
       "why": "The message is metadata on a log line. It reaches no branch, no return value and no query: the job's outcome, its row and the error runJob records are the same with or without it, so no input can tell the mutant apart except by asserting the string back from the logger."
-    },
-    {
-      "file": "apps/web/src/lib/server/events/event-reactions.ts",
-      "mutator": "ObjectLiteral",
-      "line": "const log = logger.child({ component: 'event-reactions' })",
-      "replacement": "{}",
-      "why": "The component name is metadata on a log line. It reaches no branch, no return value and no query, and nothing a caller or an operator reads is built from it, so no input can tell the mutant apart."
-    },
-    {
-      "file": "apps/web/src/lib/server/events/event-reactions.ts",
-      "mutator": "StringLiteral",
-      "line": "const log = logger.child({ component: 'event-reactions' })",
-      "replacement": "\"\"",
-      "why": "The component name is metadata on a log line. It reaches no branch, no return value and no query, and nothing a caller or an operator reads is built from it, so no input can tell the mutant apart."
     },
     {
       "file": "apps/web/src/lib/server/events/event-reactions.ts",
