@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 16x — Test suites are flaky under parallel load
+## 17x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -155,6 +155,15 @@ went red on `mutations/__tests__/settings.test.ts` again (the 20s timeout),
 and the next run, with that one file left out, on a `socket hang up` in an
 unrelated suite. Both green alone. Two coverage runs lost before the third
 wrote a report.
+
+Seventeenth, on batch H: three `--changed origin/main` coverage runs went red
+on 3, 29 and 4 files, none of them touched by the batch, every one green
+alone. The 29-file run overlapped a second worktree's coverage run against
+the same `quackback_test` database (load average 53), and its DB suites
+(`signup-policy.db`, the ticket services) failed on counts and resets the
+other run was changing underneath them. Two checkouts must not share the
+test database while either runs a full set; give the second one its own
+`DATABASE_URL` (the web config already reads it from the environment).
 
 ## 7x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
