@@ -1238,6 +1238,32 @@ the SQL file to the new number, extend the `migrator-gate` span, regenerate
 the drift check, which passes either way because it too starts from an empty
 database. Every future back-merge that carries a migration will hit this.
 
+## 1x — Under `vite dev`, a `<script src>` pointing at a server route answers `Cannot GET`
+
+Nitro's dev pre-middleware treats a request with `sec-fetch-dest: script` and
+a `.js` extension as a static asset, and Vite then answers 404 before the
+router sees it. `curl` without that header gets 200, so the route looks fine
+from a shell. Upstream batch J's e2e harness loads the widget through
+`<script src="/api/widget/sdk.js">`, and CI's e2e-smoke job runs `vite dev`,
+so the identified widget specs could never see a widget: 0/6 locally until
+the dev-only plugin in `vite.config.ts` (the one already letting
+`/api/storage/` through) let that path through too. It cost three e2e runs
+and a look at the screenshots to find. Reproduce with
+`curl -H 'Sec-Fetch-Dest: script' -H 'Accept: */*' <url>`, not a bare curl.
+Any new asset-shaped server route needs adding to the same list.
+
+## 1x — vitest 4.1.11 hands a mocked module only to the first of several concurrent dynamic imports
+
+Measured by a probe in batch J: three parallel `await import()`s of a module
+mocked with `vi.mock` returned the mock for the first and the real module for
+the other two, even after the module had been imported once before.
+Sequential imports all get the mock. The widget index loader imports
+`widget/conversation` three times in `Promise.all`, so a test of it ran the
+real team-avatars function, which failed, and the loader's `.catch` hid the
+failure. A mocked suite can therefore run real code without a red line.
+Where code under test fans out dynamic imports, mock the layer underneath as
+well, or assert something only the mock can produce.
+
 ## 1x — A Stryker survivor list is stale the moment you write a test against it
 
 The gate prints its survivors and writes `.mutation-tmp/report.json`. Both are
