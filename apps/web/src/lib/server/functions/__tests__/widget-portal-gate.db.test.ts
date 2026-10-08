@@ -77,6 +77,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { createId, type PrincipalId, type UserId } from '@quackback/ids'
 import { createDbTestFixture, testDb } from '@/lib/server/__tests__/db-test-fixture'
 import { principal, session, user, widgetIdentifiedSession } from '@/lib/server/db'
+import { logger } from '@/lib/server/logger'
 
 vi.mock('@/lib/server/db', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/db')>()),
@@ -258,18 +259,57 @@ describe.skipIf(!fixture.available)('the signed flag on a real widget session (J
       scope: 'widget',
       provenance: 'signed row',
     })
+    const outage = new Error('connection terminated')
     const lookup = vi
       .spyOn(testDb.query.widgetIdentifiedSession, 'findFirst')
-      .mockRejectedValueOnce(new Error('connection terminated'))
+      .mockRejectedValueOnce(outage)
+    const logged = vi.fn()
+    const childLogger = vi.spyOn(logger, 'child').mockReturnValue({ error: logged } as never)
 
     try {
       await expect(hasSignedWidgetIdentity(sessionId)).resolves.toBe(false)
+      // The operator learns which check fell back, and why.
+      expect(childLogger).toHaveBeenCalledWith({ component: 'widget-portal-gate' })
+      expect(logged).toHaveBeenCalledWith(
+        { err: outage },
+        'signed identity lookup failed; keeping the portal gate'
+      )
     } finally {
       lookup.mockRestore()
+      childLogger.mockRestore()
     }
     // The same row, read once the database answers again, is signed: the
     // false above came from the failure, not from the row.
     await expect(hasSignedWidgetIdentity(sessionId)).resolves.toBe(true)
+  })
+
+  it("is false for a session without a row of its own, whatever other sessions' rows say (J22)", async () => {
+    // Inside this test's transaction the table holds exactly one row: another
+    // session's signed identify. A lookup that is not about this session
+    // would find that row and lift the gate.
+    await testDb.delete(widgetIdentifiedSession)
+    await seedBearerSession({
+      role: 'user',
+      type: 'user',
+      scope: 'widget',
+      provenance: 'signed row',
+    })
+    const { sessionId } = await seedBearerSession({
+      role: 'user',
+      type: 'anonymous',
+      scope: 'widget',
+      provenance: 'no row',
+    })
+    const logged = vi.fn()
+    const childLogger = vi.spyOn(logger, 'child').mockReturnValue({ error: logged } as never)
+
+    try {
+      await expect(hasSignedWidgetIdentity(sessionId)).resolves.toBe(false)
+      // A session that simply has no row is not an outage.
+      expect(logged).not.toHaveBeenCalled()
+    } finally {
+      childLogger.mockRestore()
+    }
   })
 
   it('carries no flag at all when there is no Bearer token (J22)', async () => {

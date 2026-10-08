@@ -5,6 +5,11 @@
  * are pinned in lib/server/functions/__tests__/auth-scope.test.ts, which also
  * carries the confirmed contract list. What is here is the rest of the module,
  * so the pair of suites covers it between them.
+ *
+ * `assertNotWidgetScope` arrived with batch J (upstream #555) and serves J6 of
+ * that batch's contract, quoted in full in
+ * lib/server/functions/__tests__/widget-portal-gate.test.ts: "Through a widget
+ * session nobody can change the account behind it."
  */
 import { describe, it, expect } from 'vitest'
 import fc from 'fast-check'
@@ -16,6 +21,7 @@ import {
   roleAtLeast,
   sessionRole,
   toSessionScope,
+  assertNotWidgetScope,
   ROLE_RANK,
   type Role,
 } from '../roles'
@@ -153,5 +159,18 @@ describe('the audience helpers, on the cases auth-scope does not name', () => {
         expect(sessionRole(role, scope)).toBe(scope === 'dashboard' ? role : 'user')
       })
     )
+  })
+})
+
+describe('assertNotWidgetScope (J6)', () => {
+  it('refuses the widget audience, naming why (J6)', () => {
+    expect(() => assertNotWidgetScope('widget')).toThrow(
+      'Access denied: Widget sessions cannot update this account'
+    )
+  })
+
+  it('lets the portal and dashboard audiences change their own account (J6)', () => {
+    expect(() => assertNotWidgetScope('portal')).not.toThrow()
+    expect(() => assertNotWidgetScope('dashboard')).not.toThrow()
   })
 })

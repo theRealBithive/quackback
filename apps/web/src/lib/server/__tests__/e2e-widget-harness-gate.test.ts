@@ -74,6 +74,8 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 
 const configState = vi.hoisted(() => ({
   mode: 'development' as 'development' | 'production' | 'unreadable',
@@ -105,6 +107,7 @@ vi.mock('@tanstack/react-router', () => ({
     }),
 }))
 
+import * as harness from '../e2e-widget-harness'
 import { isE2eWidgetHarnessEnabled } from '../e2e-widget-harness'
 import { Route } from '../../../routes/e2e.widget'
 
@@ -180,5 +183,83 @@ describe('GET /e2e/widget (J31)', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('x-robots-tag')).toBe('noindex')
     expect(mintedFor).toHaveBeenCalled()
+  })
+})
+
+describe('the identities the harness signs (J31)', () => {
+  /** The claims of the identity token the harness page hands the widget. */
+  async function signedClaims(persona: 'customer' | 'teammate'): Promise<Record<string, unknown>> {
+    const html = await harness.mintE2eWidgetHtml(persona, 'http://acme.localhost:3000')
+    const token = /"ssoToken":"([^"]+)"/.exec(html)?.[1]
+    if (!token) throw new Error(`the ${persona} page carries no identity token`)
+    const payload = token.split('.')[1] ?? ''
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+  }
+
+  /** `const NAME = 'value'` declarations in an e2e script, by name. */
+  function literalsIn(relativePath: string): Record<string, string> {
+    const source = readFileSync(path.resolve(import.meta.dirname, relativePath), 'utf8')
+    const literals: Record<string, string> = {}
+    for (const match of source.matchAll(/^const (\w+) = '([^']*)'$/gm)) {
+      literals[match[1]!] = match[2]!
+    }
+    return literals
+  }
+
+  it('signs the seeded customer, for one hour (J31)', async () => {
+    const claims = await signedClaims('customer')
+
+    expect(claims).toMatchObject({
+      id: 'e2e-customer',
+      email: 'e2e.customer@example.com',
+      name: 'E2E Customer',
+    })
+    expect(Number(claims.exp) - Number(claims.iat)).toBe(60 * 60)
+  })
+
+  it('signs the seeded admin as the teammate, under a host-app name of its own (J31)', async () => {
+    const claims = await signedClaims('teammate')
+
+    // identified.spec.ts asserts the widget does not take over this name for
+    // a teammate, so it has to differ from the account's own.
+    expect(claims).toMatchObject({
+      id: 'e2e-teammate',
+      email: 'demo@example.com',
+      name: 'Host App Teammate',
+    })
+  })
+
+  it('names exactly the records the e2e seed script creates (J31)', () => {
+    // The seed script runs outside the app and keeps its own copies. If the
+    // two disagree, identify links a customer the seed never created and the
+    // specs look for rows that are not there.
+    const seed = literalsIn('../../../../e2e/scripts/seed-widget-identified.ts')
+    const admin = /email: '([^']+)'/.exec(
+      readFileSync(path.resolve(import.meta.dirname, '../../../../e2e/fixtures/auth.ts'), 'utf8')
+    )?.[1]
+
+    expect({
+      customerEmail: harness.E2E_WIDGET_CUSTOMER_EMAIL,
+      customerExternalId: harness.E2E_WIDGET_CUSTOMER_EXTERNAL_ID,
+      customerName: harness.E2E_WIDGET_CUSTOMER_NAME,
+      articleSlug: harness.E2E_WIDGET_ARTICLE_SLUG,
+      ticketTitle: harness.E2E_WIDGET_TICKET_TITLE,
+      csatSubject: harness.E2E_WIDGET_CSAT_SUBJECT,
+      teammateEmail: harness.E2E_WIDGET_TEAMMATE_EMAIL,
+    }).toEqual({
+      customerEmail: seed.CUSTOMER_EMAIL,
+      customerExternalId: seed.CUSTOMER_EXTERNAL_ID,
+      customerName: seed.CUSTOMER_NAME,
+      articleSlug: seed.ARTICLE_SLUG,
+      ticketTitle: seed.TICKET_TITLE,
+      csatSubject: seed.CSAT_SUBJECT,
+      teammateEmail: admin,
+    })
+  })
+
+  it('treats an empty or unknown persona as an anonymous visitor (J31)', () => {
+    expect(harness.parseE2eWidgetPersona('')).toBe('anon')
+    expect(harness.parseE2eWidgetPersona(null)).toBe('anon')
+    expect(harness.parseE2eWidgetPersona('admin')).toBe('anon')
   })
 })

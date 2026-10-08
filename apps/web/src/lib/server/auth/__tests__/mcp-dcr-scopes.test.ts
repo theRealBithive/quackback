@@ -240,6 +240,42 @@ describe('mcpDcrRegistrationBody', () => {
     })
     expect(body.application_type).toBeUndefined()
   })
+
+  it('declares an explicit web client native when only one of its callbacks was swapped (M4)', () => {
+    // The explicit type rules out the default rule, so only the swap can
+    // make this registration native.
+    const body = mcpDcrRegistrationBody({
+      application_type: 'web',
+      redirect_uris: ['https://www.cursor.com/agents/mcp/oauth/callback', CURSOR_REDIRECT],
+    })
+    expect(body.application_type).toBe('native')
+  })
+
+  it.each([
+    'https://localhost/cb',
+    'https://LOCALHOST:8443/cb',
+    'https://[::1]/cb',
+    'https://127.0.0.1/cb',
+    'https://127.10.200.3/cb',
+    'https://127.0.10.1/cb',
+    'https://127.0.0.10/cb',
+  ])('registers an untyped client with the loopback redirect %s as native (J25)', (redirect) => {
+    // RFC 8252 loopback is a native app's redirect, HTTPS or not; Better
+    // Auth would refuse it from a web client.
+    const body = mcpDcrRegistrationBody({ redirect_uris: [redirect] })
+    expect(body.application_type).toBe('native')
+    expect(body.redirect_uris).toEqual([redirect])
+  })
+
+  it.each(['https://app.example.com/cb', 'https://127.0.0.1.example.com/cb'])(
+    'leaves an untyped client with the non-loopback HTTPS redirect %s to the default (J25)',
+    (redirect) => {
+      // A host that merely starts like a loopback address is an ordinary
+      // web host.
+      const body = mcpDcrRegistrationBody({ redirect_uris: [redirect] })
+      expect(body.application_type).toBeUndefined()
+    }
+  )
 })
 
 describe('needsBetterAuth17RedirectRewrite', () => {

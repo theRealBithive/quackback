@@ -108,10 +108,14 @@ const hoisted = vi.hoisted(() => ({
   insertValues: vi.fn(),
   recordAuditEvent: vi.fn(),
   requestCookie: null as string | null,
+  serverFnOptions: null as unknown,
+  logChild: vi.fn(),
+  log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }))
 
 vi.mock('@tanstack/react-start', () => ({
-  createServerFn: () => {
+  createServerFn: (options: unknown) => {
+    hoisted.serverFnOptions = options
     const chain: Record<string, unknown> = {}
     chain.validator = () => chain
     chain.handler = (handler: HandoffHandler) => {
@@ -138,14 +142,19 @@ vi.mock('@/lib/server/auth/session', () => ({
 vi.mock('@/lib/server/config', () => ({ config: { baseUrl: 'http://localhost:3000' } }))
 vi.mock('@/lib/server/audit/log', () => ({ recordAuditEvent: hoisted.recordAuditEvent }))
 vi.mock('@/lib/server/logger', () => ({
-  logger: { child: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
+  logger: {
+    child: (bindings: unknown) => {
+      hoisted.logChild(bindings)
+      return hoisted.log
+    },
+  },
 }))
 
 vi.mock('@/lib/server/db', () => ({
   db: {
     query: {
-      widgetIdentifiedSession: { findFirst: () => hoisted.provenanceRow() },
-      principal: { findFirst: () => hoisted.principalRow() },
+      widgetIdentifiedSession: { findFirst: (query: unknown) => hoisted.provenanceRow(query) },
+      principal: { findFirst: (query: unknown) => hoisted.principalRow(query) },
     },
     update: () => ({
       set: (values: unknown) => {
@@ -225,6 +234,8 @@ beforeEach(() => {
   hoisted.updateWhere.mockReset().mockResolvedValue(undefined)
   hoisted.insertValues.mockReset()
   hoisted.recordAuditEvent.mockReset().mockResolvedValue(undefined)
+  hoisted.logChild.mockReset()
+  for (const level of Object.values(hoisted.log)) level.mockReset()
   fetchMock = vi.fn(async () => verifiedToken())
   vi.stubGlobal('fetch', fetchMock)
 })
@@ -607,5 +618,266 @@ describe('isWidgetSessionHmacVerified (J11)', () => {
     expect(await isWidgetSessionHmacVerified('s')).toBe(false)
     hoisted.provenanceRow.mockResolvedValueOnce(undefined)
     expect(await isWidgetSessionHmacVerified('s')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// What the handoff records, asks and forwards (J11-J15; OWASP A09 for the
+// audit trail)
+// ---------------------------------------------------------------------------
+
+/** A verify answer Better Auth accepted, with this body and these headers. */
+function acceptedWith(body: () => Promise<unknown>, headers = new Headers()): Response {
+  return { ok: true, status: 200, headers, json: body } as unknown as Response
+}
+
+const REFUSED = 'portal.widget_handshake.invalid'
+
+function auditEvents(): unknown[] {
+  return hoisted.recordAuditEvent.mock.calls.map(([event]) => event)
+}
+
+describe('the audit trail of a handoff (J11, J12, J13)', () => {
+  it('records a request without a token, naming no one (J11)', async () => {
+    await handoff({})
+
+    expect(auditEvents()).toEqual([
+      { event: REFUSED, outcome: 'failure', actor: {}, metadata: { reason: 'missing_ott' } },
+    ])
+  })
+
+  it('records an unreachable verify endpoint and logs the cause (J11)', async () => {
+    const cause = new Error('Network error')
+    fetchMock.mockRejectedValue(cause)
+
+    await handoff({ ott: 'tok' })
+
+    expect(auditEvents()).toEqual([
+      { event: REFUSED, outcome: 'failure', actor: {}, metadata: { reason: 'fetch_error' } },
+    ])
+    expect(hoisted.log.error).toHaveBeenCalledWith({ err: cause }, 'ott verify fetch failed')
+  })
+
+  it('records a token Better Auth refused with its status (J11)', async () => {
+    fetchMock.mockResolvedValue(refusedToken(400))
+
+    await expect(handoff({ ott: 'bad' })).resolves.toEqual({ kind: 'error', status: 'invalid' })
+    expect(auditEvents()).toEqual([
+      { event: REFUSED, outcome: 'failure', actor: {}, metadata: { reason: 'ba_status_400' } },
+    ])
+  })
+
+  it('records a session that was not signed, naming the user and the session (J11)', async () => {
+    hoisted.provenanceRow.mockResolvedValue({ hmacVerified: false })
+
+    await handoff({ ott: 'tok' })
+
+    expect(auditEvents()).toEqual([
+      {
+        event: REFUSED,
+        outcome: 'failure',
+        actor: { userId: TOKEN_USER },
+        target: { type: 'session', id: TOKEN_SESSION },
+        metadata: { reason: 'unverified_provenance' },
+      },
+    ])
+  })
+
+  it('records a teammate refused a portal session, naming the user and the session (J12)', async () => {
+    hoisted.principalRow.mockResolvedValue({ role: 'admin' })
+
+    await handoff({ ott: 'tok' })
+
+    expect(auditEvents()).toEqual([
+      {
+        event: REFUSED,
+        outcome: 'failure',
+        actor: { userId: TOKEN_USER },
+        target: { type: 'session', id: TOKEN_SESSION },
+        metadata: { reason: 'teammate_identity' },
+      },
+    ])
+  })
+
+  it('records a completed handoff as a success for that user and session (J11)', async () => {
+    await handoff({ ott: 'tok' })
+
+    expect(auditEvents()).toEqual([
+      {
+        event: 'portal.widget_handshake.consumed',
+        outcome: 'success',
+        actor: { userId: TOKEN_USER },
+        target: { type: 'session', id: TOKEN_SESSION },
+      },
+    ])
+  })
+
+  it('logs under its own component name (J11)', async () => {
+    await handoff({ ott: 'tok' })
+
+    expect(hoisted.logChild).toHaveBeenCalledWith({ component: 'widget-handoff' })
+  })
+})
+
+describe('a verify answer that does not name both a session and its user (J11, J15)', () => {
+  it.each([
+    ['a session but no user', { session: { id: TOKEN_SESSION } }],
+    ['a user but no session', { user: { id: TOKEN_USER } }],
+    ['a user and a session without an id', { session: { userId: TOKEN_USER }, user: {} }],
+  ])('is refused when it names %s, before anything is installed (J11)', async (_label, body) => {
+    fetchMock.mockResolvedValue(acceptedWith(async () => body, verifiedToken().headers))
+
+    await expect(handoff({ ott: 'tok' })).resolves.toEqual({ kind: 'error', status: 'invalid' })
+    expect(hoisted.writes).toEqual([])
+    expect(auditReasons()).toEqual(['missing_session_info'])
+    expect(hoisted.log.warn).toHaveBeenCalledWith(
+      'session/user id missing from verify response, handoff rejected'
+    )
+  })
+
+  it.each([
+    ['an empty body', null],
+    ['an object without session or user', {}],
+    ['a user object without an id', { user: {} }],
+  ])('reads %s as naming nobody, not as an unreadable answer (J11)', async (_label, body) => {
+    fetchMock.mockResolvedValue(acceptedWith(async () => body))
+
+    await expect(handoff({ ott: 'tok' })).resolves.toEqual({ kind: 'error', status: 'invalid' })
+    expect(hoisted.log.warn).not.toHaveBeenCalledWith('could not parse verify response body')
+    expect(auditReasons()).toEqual(['missing_session_info'])
+  })
+
+  it('warns about an answer whose body cannot be read, and refuses it (J11)', async () => {
+    fetchMock.mockResolvedValue(
+      acceptedWith(async () => {
+        throw new SyntaxError('Unexpected token')
+      })
+    )
+
+    await expect(handoff({ ott: 'tok' })).resolves.toEqual({ kind: 'error', status: 'invalid' })
+    expect(hoisted.log.warn).toHaveBeenCalledWith('could not parse verify response body')
+  })
+})
+
+describe('what the handoff forwards to the browser (J11, J15)', () => {
+  it('forwards no cookie when Better Auth set none, and never another header as one (J15)', async () => {
+    const headers = new Headers({ 'content-type': 'application/json', 'x-request-id': 'r1' })
+    fetchMock.mockResolvedValue(
+      acceptedWith(
+        async () => ({ session: { id: TOKEN_SESSION }, user: { id: TOKEN_USER } }),
+        headers
+      )
+    )
+
+    await expect(handoff({ ott: 'tok' })).resolves.toEqual({ kind: 'redirect', to: '/' })
+    expect(hoisted.cookies).toEqual([])
+    expect(hoisted.writes).toEqual(['promote', 'marker'])
+  })
+
+  it('asks Better Auth to verify the token by POST, with the browser cookie alongside (J11)', async () => {
+    hoisted.requestCookie = 'better-auth.session_token=old'
+
+    await handoff({ ott: 'tok' })
+
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/auth/one-time-token/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: 'better-auth.session_token=old' },
+      body: JSON.stringify({ token: 'tok' }),
+    })
+  })
+
+  it('consumes the token only through a POST server function, never a prefetchable GET (J11)', async () => {
+    await import('../auth.widget-handoff')
+
+    expect(hoisted.serverFnOptions).toEqual({ method: 'POST' })
+  })
+
+  it('keeps the token and the destination when it reads the address (J11)', async () => {
+    const { Route } = await import('../auth.widget-handoff')
+    const validateSearch = (
+      Route.options as unknown as { validateSearch: (raw: unknown) => unknown }
+    ).validateSearch
+
+    expect(validateSearch({ ott: 'tok', returnTo: '/posts/1', other: 'x' })).toEqual({
+      ott: 'tok',
+      returnTo: '/posts/1',
+    })
+  })
+})
+
+describe('a write that fails after the checks passed (J15)', () => {
+  it('logs a failed promotion and still installs nothing more than Better Auth set (J15)', async () => {
+    const cause = new Error('deadlock')
+    hoisted.updateWhere.mockRejectedValue(cause)
+
+    await expect(handoff({ ott: 'tok' })).resolves.toEqual({ kind: 'redirect', to: '/' })
+    expect(hoisted.log.error).toHaveBeenCalledWith(
+      { err: cause },
+      'failed to promote handoff session to portal scope'
+    )
+  })
+
+  it('logs a failed origin marker and still lands the visitor on the destination (J11)', async () => {
+    const cause = new Error('unique violation')
+    hoisted.insertValues.mockImplementation(() => {
+      throw cause
+    })
+
+    await expect(handoff({ ott: 'tok', returnTo: '/posts/1' })).resolves.toEqual({
+      kind: 'redirect',
+      to: '/posts/1',
+    })
+    expect(hoisted.log.error).toHaveBeenCalledWith(
+      { err: cause },
+      'failed to insert widget_origin_session marker'
+    )
+  })
+})
+
+describe('the two lookups behind the handoff (J11, J12, J14)', () => {
+  it("asks for the role of the token's own user (J12)", async () => {
+    await isHandoffPrincipalTeammate('user_42')
+
+    expect(hoisted.principalRow).toHaveBeenCalledWith({
+      where: { column: 'principal.user_id', value: 'user_42' },
+      columns: { role: true },
+    })
+  })
+
+  it("asks whether the token's own session was signed (J11)", async () => {
+    await isWidgetSessionHmacVerified('sess_42')
+
+    expect(hoisted.provenanceRow).toHaveBeenCalledWith({
+      where: { column: 'widget_identified_session.session_id', value: 'sess_42' },
+      columns: { hmacVerified: true },
+    })
+  })
+
+  it('logs a failed teammate lookup, which then counts as a teammate (J14)', async () => {
+    const cause = new Error('connection refused')
+    hoisted.principalRow.mockRejectedValueOnce(cause)
+
+    expect(await isHandoffPrincipalTeammate('user_x')).toBe(true)
+    expect(hoisted.logChild).toHaveBeenCalledWith({ component: 'widget-handoff' })
+    expect(hoisted.log.error).toHaveBeenCalledWith(
+      { err: cause },
+      'teammate lookup failed; skipping portal cookie'
+    )
+  })
+
+  it('logs a failed provenance lookup, which then counts as unsigned (J11)', async () => {
+    const cause = new Error('connection refused')
+    hoisted.provenanceRow.mockRejectedValueOnce(cause)
+
+    expect(await isWidgetSessionHmacVerified('s')).toBe(false)
+    expect(hoisted.logChild).toHaveBeenCalledWith({ component: 'widget-handoff' })
+    expect(hoisted.log.error).toHaveBeenCalledWith({ err: cause }, 'provenance lookup failed')
+  })
+
+  it('reads a session without a provenance row as unsigned, without calling it an outage (J11)', async () => {
+    hoisted.provenanceRow.mockResolvedValueOnce(undefined)
+
+    expect(await isWidgetSessionHmacVerified('s')).toBe(false)
+    expect(hoisted.log.error).not.toHaveBeenCalled()
   })
 })

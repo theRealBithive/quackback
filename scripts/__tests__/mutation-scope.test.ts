@@ -521,6 +521,7 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         suites: [
           'apps/web/src/routes/__tests__/auth.widget-handoff.test.ts',
           'apps/web/src/routes/__tests__/auth.widget-handoff-promotion.test.ts',
+          'apps/web/src/routes/__tests__/auth.widget-handoff-page.test.tsx',
         ],
       },
       {
