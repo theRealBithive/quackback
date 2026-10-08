@@ -212,3 +212,12 @@ describe('T6 converted call sites render German grouping', () => {
     expect(cell.getAttribute('title')).toBe('1.204 posts · 5.632 votes')
   })
 })
+
+describe('the formatter follows the page language when it changes', () => {
+  it('(T6) a mounted number regroups when the page switches language', () => {
+    const view = render(inLocale('en', <Probe value={1234567} />))
+    expect(screen.getByTestId('n').textContent).toBe('1,234,567')
+    view.rerender(inLocale('de', <Probe value={1234567} />))
+    expect(screen.getByTestId('n').textContent).toBe('1.234.567')
+  })
+})

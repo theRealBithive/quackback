@@ -80,6 +80,22 @@ describe('parseCalendarDate', () => {
     expect(parseCalendarDate('October 1')).toBeNull()
     expect(parseCalendarDate('')).toBeNull()
   })
+
+  it('is null for a month or day that does not exist, even when the other parts look right (T5)', () => {
+    expect(parseCalendarDate('2026-13-05')).toBeNull()
+    expect(parseCalendarDate('2026-00-05')).toBeNull()
+    expect(parseCalendarDate('2026-02-29')).toBeNull()
+    expect(parseCalendarDate('2024-02-29')?.toISOString()).toBe('2024-02-29T00:00:00.000Z')
+  })
+
+  it('refuses a year below 100 rather than name 19xx for it (T5)', () => {
+    expect(parseCalendarDate('0050-01-01')).toBeNull()
+  })
+
+  it('is null when the date does not open the value (T5)', () => {
+    expect(parseCalendarDate('see 2026-10-01')).toBeNull()
+    expect(parseCalendarDate(' 2026-10-01')).toBeNull()
+  })
 })
 
 describe('formatCalendarDate', () => {

@@ -28,7 +28,7 @@ import { act } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
 import { IntlProvider } from 'react-intl'
-import { screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import fc from 'fast-check'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GermanIntlWrapper, renderInGerman } from '@/test/render-with-intl'
@@ -314,5 +314,49 @@ describe('outside any language provider', () => {
   it('(T10) a compact TimeAgo with no provider is English', () => {
     atNow()
     expect(renderToString(<TimeAgo date={dateAgo(5 * MINUTE)} short />)).toContain('>5m</span>')
+  })
+})
+
+describe('<TimeAgo> after it mounts', () => {
+  it('(T7) rewords itself when it is given another date', () => {
+    atNow()
+    const view = render(<TimeAgo date={dateAgo(3 * DAY)} />)
+    expect(view.container.textContent).toBe('3 days ago')
+    view.rerender(<TimeAgo date={dateAgo(5 * DAY)} />)
+    expect(view.container.textContent).toBe('5 days ago')
+    view.unmount()
+  })
+
+  it('(T7) keeps the server-rendered element when the browser words the label the same', async () => {
+    atNow()
+    const container = document.createElement('div')
+    container.innerHTML = renderToString(<TimeAgo date={dateAgo(3 * DAY)} />)
+    const serverElement = container.firstElementChild
+    let root!: ReturnType<typeof hydrateRoot>
+    await act(async () => {
+      root = hydrateRoot(container, <TimeAgo date={dateAgo(3 * DAY)} />)
+    })
+    expect(container.textContent).toBe('3 days ago')
+    expect(container.firstElementChild).toBe(serverElement)
+    act(() => root.unmount())
+  })
+
+  it('(T7) stops its refresh timer when it unmounts', () => {
+    atNow()
+    expect(vi.getTimerCount()).toBe(0)
+    const view = render(<TimeAgo date={dateAgo(3 * DAY)} />)
+    expect(vi.getTimerCount()).toBe(1)
+    view.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('the largest month count', () => {
+  it('(T7) 320 days is still counted in months, the unit before years, never reading 12 months', () => {
+    // 320 days sits on the code's own switch from months to years, so this
+    // pins that boundary rather than a rule the contract states.
+    atNow()
+    expect(getTimeAgo(dateAgo(320 * DAY))).toBe('1 year ago')
+    expect(getTimeAgo(dateAgo(320 * DAY - 1))).toBe('11 months ago')
   })
 })

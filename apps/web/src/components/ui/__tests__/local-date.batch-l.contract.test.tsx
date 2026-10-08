@@ -35,11 +35,19 @@ import { hydrateRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
 import { IntlProvider } from 'react-intl'
 import fc from 'fast-check'
+import { render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SUPPORTED_LOCALES } from '@/lib/shared/i18n'
 import { GermanIntlWrapper } from '@/test/render-with-intl'
 import { formatIn, restoreRuntimeLocale, setRuntimeLocale } from '@/test/runtime-locale'
-import { LocalDate, NUMERIC_DATE_TIME, useLocalDateFormatter } from '../local-date'
+import {
+  CalendarDate,
+  formatFirstRenderDate,
+  formatViewerDate,
+  LocalDate,
+  NUMERIC_DATE_TIME,
+  useLocalDateFormatter,
+} from '../local-date'
 
 const ZONES = [
   'UTC',
@@ -445,5 +453,62 @@ describe('outside any language provider', () => {
       ),
       { numRuns: 40 }
     )
+  })
+})
+
+describe('values that are not a moment', () => {
+  const NOT_A_MOMENT = [null, undefined, '', 'not a date', new Date(Number.NaN)] as const
+
+  it('(T1) both formatters answer an empty string for a missing or invalid date', () => {
+    for (const value of NOT_A_MOMENT) {
+      expect(formatFirstRenderDate(value)).toBe('')
+      expect(formatViewerDate(value)).toBe('')
+    }
+  })
+
+  it('(T1) <LocalDate> renders nothing for a missing or invalid date', () => {
+    for (const value of NOT_A_MOMENT) {
+      expect(renderToString(<LocalDate date={value} />)).toBe('')
+    }
+  })
+
+  it('(T2) a date with no options shows the time of day too, down to the second', () => {
+    const shown = formatFirstRenderDate(AT, NUMERIC_DATE_TIME)
+    expect(shown).toMatch(/10\/1\/2026/)
+    expect(shown).toMatch(/8:30:00/)
+  })
+})
+
+describe('<CalendarDate>', () => {
+  it('(T5) shows a value that is not a calendar day exactly as given', () => {
+    expect(renderToString(<CalendarDate value="soon" />)).toBe('soon')
+    expect(renderToString(<CalendarDate value="2026-02-31" />)).toBe('2026-02-31')
+  })
+
+  it('(T5) shows the named day to a viewer on either side of the date line, after hydration', () => {
+    for (const timeZone of ['Pacific/Pago_Pago', 'Pacific/Kiritimati', 'America/Los_Angeles']) {
+      setRuntimeLocale('en-US', timeZone)
+      const { container, unmount } = render(<CalendarDate value="2026-10-01" options={DAY} />)
+      expect(container.textContent).toBe('Oct 1, 2026')
+      unmount()
+      restoreRuntimeLocale()
+    }
+  })
+
+  it('(T5) names the day even when the options ask for another zone', () => {
+    setRuntimeLocale('en-US', 'Pacific/Pago_Pago')
+    const { container, unmount } = render(
+      <CalendarDate value="2026-10-01" options={{ ...DAY, timeZone: 'Pacific/Pago_Pago' }} />
+    )
+    expect(container.textContent).toBe('Oct 1, 2026')
+    unmount()
+  })
+
+  it('(T3) writes the day in the language it is given', () => {
+    const german = renderToString(<CalendarDate value="2026-10-01" options={DAY} locale="de" />)
+    const english = renderToString(<CalendarDate value="2026-10-01" options={DAY} locale="en" />)
+    expect(german).not.toBe(english)
+    expect(german).toContain('2026')
+    expect(german).toContain('Okt')
   })
 })
