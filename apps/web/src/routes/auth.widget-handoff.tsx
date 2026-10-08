@@ -94,6 +94,38 @@ export const isWidgetSessionHmacVerified = createServerOnlyFn(
   }
 )
 
+/** What the browser already holds, as far as the handoff needs to know. */
+type ExistingBrowserSession = 'dashboard' | 'other' | 'none' | 'unknown'
+
+/**
+ * The audience of the session the browser arrived with. A read that fails is
+ * `unknown`, never `none`: the caller treats it like a dashboard login.
+ */
+const readExistingBrowserSession = createServerOnlyFn(async (): Promise<ExistingBrowserSession> => {
+  // oxlint-disable-next-line no-restricted-imports -- createServerOnlyFn body; stripped from the client graph
+  const { getSession } = await import('@/lib/server/auth/session')
+  // oxlint-disable-next-line no-restricted-imports -- createServerOnlyFn body; stripped from the client graph
+  const { toSessionScope } = await import('@/lib/shared/roles')
+  try {
+    const existing = await getSession()
+    if (!existing?.user) return 'none'
+    if (toSessionScope(existing.session.scope) === 'dashboard') return 'dashboard'
+    return 'other'
+  } catch {
+    return 'unknown'
+  }
+})
+
+/** The audit reason for a handoff that installs no portal session. */
+function handoffRefusalReason(input: {
+  isTeammate: boolean
+  existingSession: ExistingBrowserSession
+}): string {
+  if (input.isTeammate) return 'teammate_identity'
+  if (input.existingSession === 'dashboard') return 'dashboard_session_present'
+  return 'existing_session_unknown'
+}
+
 // ---------------------------------------------------------------------------
 // Search schema
 // ---------------------------------------------------------------------------
@@ -265,23 +297,22 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
     // cookie. An already-authenticated dashboard session goes straight to
     // returnTo so "View on board" lands on the post/article; unauthenticated
     // teammate OTTs still hit the sign-in landing.
-    const { getSession } = await import('@/lib/server/auth/session')
-    const { toSessionScope } = await import('@/lib/shared/roles')
-    const existing = await getSession().catch(() => null)
-    const existingIsDashboard =
-      !!existing?.user && toSessionScope(existing.session.scope) === 'dashboard'
+    //
+    // A browser session that cannot be read counts as one that might be a
+    // dashboard login (J13): the handoff installs nothing over it.
+    const existingSession = await readExistingBrowserSession()
+    const existingIsDashboard = existingSession === 'dashboard'
+    const existingIsUnknown = existingSession === 'unknown'
     const isTeammate = await isHandoffPrincipalTeammate(userId)
-    if (isTeammate || existingIsDashboard) {
+    if (isTeammate || existingIsDashboard || existingIsUnknown) {
       await recordAuditEvent({
         event: 'portal.widget_handshake.invalid',
         outcome: 'failure',
         actor: { userId: userId as UserId },
         target: { type: 'session', id: sessionId },
-        metadata: {
-          reason: isTeammate ? 'teammate_identity' : 'dashboard_session_present',
-        },
+        metadata: { reason: handoffRefusalReason({ isTeammate, existingSession }) },
       })
-      if (existingIsDashboard) {
+      if (existingIsDashboard || existingIsUnknown) {
         return { kind: 'redirect', to: returnTo }
       }
       const landing = buildSigninRedirect(returnTo)
