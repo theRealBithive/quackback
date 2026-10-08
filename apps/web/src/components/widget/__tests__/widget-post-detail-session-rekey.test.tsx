@@ -32,6 +32,7 @@ vi.mock('@/lib/client/widget-bridge', () => ({ sendToHost: vi.fn() }))
 vi.mock('../use-widget-image-upload', () => ({
   useWidgetImageUpload: () => ({ upload: vi.fn() }),
   useWidgetMediaUpload: () => ({ upload: vi.fn() }),
+  useWidgetMediaUpload: () => ({ upload: vi.fn() }),
 }))
 vi.mock('../widget-vote-button', () => ({ WidgetVoteButton: () => null }))
 vi.mock('../widget-comment-list', () => ({ WidgetCommentList: () => null }))

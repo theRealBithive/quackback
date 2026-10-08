@@ -58,6 +58,7 @@ vi.mock('@/lib/server/functions/admin', () => ({
 
 vi.mock('@/lib/client/hooks/use-image-upload', () => ({
   useImageUpload: () => ({ upload: vi.fn() }),
+  useMediaUpload: () => ({ upload: vi.fn() }),
 }))
 
 vi.mock('@/components/admin/help-center/article-translations-dialog', () => ({

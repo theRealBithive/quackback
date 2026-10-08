@@ -48,6 +48,7 @@ vi.mock('@/lib/client/mutations/help-center', () => ({
 
 vi.mock('@/lib/client/hooks/use-image-upload', () => ({
   useImageUpload: () => ({ upload: vi.fn() }),
+  useMediaUpload: () => ({ upload: vi.fn() }),
 }))
 
 // The sidebar owns the category, which the create schema requires; a stub

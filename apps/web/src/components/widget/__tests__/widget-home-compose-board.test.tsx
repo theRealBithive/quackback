@@ -39,6 +39,7 @@ vi.mock('@/lib/client/widget-auth', () => ({
 vi.mock('@/lib/client/widget-bridge', () => ({ sendToHost: vi.fn() }))
 vi.mock('../use-widget-image-upload', () => ({
   useWidgetImageUpload: () => ({ upload: vi.fn() }),
+  useWidgetMediaUpload: () => ({ upload: vi.fn() }),
   WidgetSessionError: class WidgetSessionError extends Error {},
 }))
 vi.mock('../widget-vote-button', () => ({ WidgetVoteButton: () => null }))

@@ -83,6 +83,7 @@ vi.mock('../changelog-metadata-sidebar-content', () => ({
 }))
 vi.mock('@/lib/client/hooks/use-image-upload', () => ({
   useImageUpload: () => ({ upload: vi.fn() }),
+  useMediaUpload: () => ({ upload: vi.fn() }),
 }))
 
 import { CreateChangelogDialog } from '../create-changelog-dialog'

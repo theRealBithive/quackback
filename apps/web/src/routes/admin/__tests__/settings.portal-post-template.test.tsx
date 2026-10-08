@@ -77,6 +77,7 @@ vi.mock('@/lib/client/mutations/settings', () => ({
 }))
 vi.mock('@/lib/client/hooks/use-image-upload', () => ({
   useImageUpload: () => ({ upload: vi.fn() }),
+  useMediaUpload: () => ({ upload: vi.fn() }),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('@/components/ui/select', async () => ({

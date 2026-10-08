@@ -55,7 +55,9 @@ vi.mock('@/lib/client/mutations/changelog', () => ({
 
 vi.mock('@/lib/client/hooks/use-image-upload', () => ({
   useImageUpload: () => ({ upload: vi.fn() }),
+  useMediaUpload: () => ({ upload: vi.fn() }),
   usePostImageUpload: () => ({ upload: vi.fn() }),
+  usePostMediaUpload: () => ({ upload: vi.fn() }),
 }))
 
 vi.mock('../changelog-metadata-sidebar', () => ({
