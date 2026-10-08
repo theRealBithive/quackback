@@ -138,7 +138,10 @@ async function appAccountOptions(): Promise<AccountOptions> {
   resetAuth()
   hoisted.options = null
   await getAuth()
-  const account = hoisted.options?.account
+  // Read through a widened type: TypeScript keeps the `null` assigned above
+  // and cannot see the mock writing the field during getAuth().
+  const captured = hoisted.options as null | { account?: AccountOptions }
+  const account = captured?.account
   if (!account) throw new Error('createAuth passed no account options')
   return account
 }

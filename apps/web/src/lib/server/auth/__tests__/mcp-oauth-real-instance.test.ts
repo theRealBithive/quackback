@@ -111,7 +111,7 @@ vi.mock('@better-auth/mcp', async (importOriginal) => {
     ...original,
     mcp: (options: McpOptions) => {
       hoisted.mcpOptions = options
-      return original.mcp(options as Parameters<typeof original.mcp>[0])
+      return original.mcp(options as unknown as Parameters<typeof original.mcp>[0])
     },
   }
 })
@@ -193,7 +193,7 @@ beforeAll(async () => {
     plugins: [
       jwt(),
       mcp({
-        ...(hoisted.mcpOptions as Parameters<typeof mcp>[0]),
+        ...(hoisted.mcpOptions as unknown as Parameters<typeof mcp>[0]),
         customAccessTokenClaims: async () => ({}),
       }),
     ],
@@ -202,7 +202,9 @@ beforeAll(async () => {
   const routeModule = await import('../../../../routes/api/auth/$')
   route = (routeModule.Route as unknown as { options: { server: { handlers: Handlers } } }).options
     .server.handlers
-})
+  // A cold import of the auth route and two Better Auth instances: setup cost
+  // that grows with machine load, not a behaviour under test.
+}, 60_000)
 
 // ---------------------------------------------------------------------------
 // Helpers
