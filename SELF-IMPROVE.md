@@ -1017,6 +1017,18 @@ and `finishIdentityOnboarding` came with #688, #644 and #656 from commits we
 had not picked. Typecheck finds them at once (`Cannot find module`); grep the
 picked test files for imports before running anything.
 
+## 2x — A date fixture that happens to fall on the real "today" collides with the preset labels
+
+Date pickers and filters render presets ("Today", "Yesterday") next to the
+formatted dates. A fixture date written as a literal can coincide with the
+machine's current day, and the query by text then finds two matches, or none
+once the date passes. Pin the clock (`vi.setSystemTime`) to a day far from any
+fixture, or derive fixtures from the pinned clock.
+
+Second occurrence: upstream's `active-filters-bar-date.test.tsx` (#627) went
+red in CI on 2026-10-08, the day its fixture `2026-10-01` became "Last 7
+days". A fixture can be correct for weeks and then fail on one calendar day.
+
 ## 1x — `afterAll(fixture.close)` inside a `describe` shuts the connection for every later `describe` in the file
 
 The DB fixture's three hooks read as a set, and every suite in the repository
@@ -2368,14 +2380,6 @@ A second worktree for a parallel batch shares the git objects but not the
 install. Until `bun install` runs inside it, vitest, tsc and the gates fail
 with module-resolution errors that read like a broken pick. Run `bun install`
 first in any new worktree.
-
-## 1x — A date fixture that happens to fall on the real "today" collides with the preset labels
-
-Date pickers and filters render presets ("Today", "Yesterday") next to the
-formatted dates. A fixture date written as a literal can coincide with the
-machine's current day, and the query by text then finds two matches, or none
-once the date passes. Pin the clock (`vi.setSystemTime`) to a day far from any
-fixture, or derive fixtures from the pinned clock.
 
 ## Resolved
 
