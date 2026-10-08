@@ -6,7 +6,7 @@
  * get `*` CORS with no credentials. Everything else keeps no CORS at all.
  */
 import { describe, it, expect } from 'vitest'
-import { handleOAuthCors, isOAuthCorsPath } from '../oauth-cors'
+import { handleOAuthCors, isOAuthCorsPath, oauthCorsMiddleware } from '../oauth-cors'
 
 const ORIGIN = 'http://localhost:6274'
 
@@ -129,5 +129,33 @@ describe('handleOAuthCors', () => {
       },
     })
     expect(ran).toBe(true)
+  })
+})
+
+describe('oauthCorsMiddleware, as the request middleware registers it (J29)', () => {
+  type ServerFn = (args: {
+    request: Request
+    next: () => Promise<{ response: Response }>
+  }) => Promise<unknown>
+  const server = (oauthCorsMiddleware as unknown as { options: { server: ServerFn } }).options
+    .server
+
+  it('opens the token endpoint to any origin, without credentials (J29)', async () => {
+    const out = (await server({
+      request: req('/api/auth/oauth2/token', 'POST'),
+      next: async () => ({ response: new Response('{}') }),
+    })) as { response: Response }
+
+    expect(out.response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(out.response.headers.get('access-control-allow-credentials')).toBeNull()
+  })
+
+  it('leaves a cookie-authorized endpoint without CORS (J29)', async () => {
+    const out = (await server({
+      request: req('/api/auth/oauth2/consent', 'POST'),
+      next: async () => ({ response: new Response('{}') }),
+    })) as { response: Response }
+
+    expect(out.response.headers.get('access-control-allow-origin')).toBeNull()
   })
 })

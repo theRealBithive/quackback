@@ -517,6 +517,55 @@ describe('portal.ts fetchPublicPostDetail — portal-visibility gate', () => {
   })
 })
 
+describe('portal.ts fetchPublicPostDetail — the thread it serves (J21)', () => {
+  it('serializes every comment date to an ISO string, replies included (J21)', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    mockGetPublicPostDetail.mockResolvedValue({
+      id: 'post_1',
+      title: 'Hello',
+      content: 'body',
+      contentJson: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      comments: [
+        {
+          id: 'comment_root',
+          createdAt: new Date('2026-01-02T00:00:00.000Z'),
+          replies: [
+            // The raw-SQL path can hand dates back as strings already.
+            { id: 'comment_reply', createdAt: '2026-01-03T00:00:00.000Z', replies: [] },
+          ],
+        },
+      ],
+      statusId: null,
+      voteCount: 0,
+      boardId: 'board_1',
+      boardAccess: {
+        view: 'anonymous',
+        vote: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segments: { view: [], vote: [], comment: [], submit: [] },
+        moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+      },
+    })
+    mockGetPostMergeInfo.mockResolvedValue(null)
+    mockGetMergedPosts.mockResolvedValue([])
+    const h = await loadModule(PORTAL)
+
+    const result = (await h[FETCH_PUBLIC_POST_DETAIL]({ data: { postId: 'post_1' } })) as {
+      comments: unknown[]
+    }
+
+    expect(result.comments).toEqual([
+      {
+        id: 'comment_root',
+        createdAt: '2026-01-02T00:00:00.000Z',
+        replies: [{ id: 'comment_reply', createdAt: '2026-01-03T00:00:00.000Z', replies: [] }],
+      },
+    ])
+  })
+})
+
 // ---------------------------------------------------------------------------
 // portal.ts — fetchPublicPosts
 // ---------------------------------------------------------------------------
@@ -830,5 +879,42 @@ describe('changelog.ts listPublicChangelogsFn — portal-visibility gate', () =>
     }
     expect(result.items).toHaveLength(1)
     expect(result.items[0].id).toBe('cl_2')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// changelog.ts — the changelog audience setting, behind the portal gate
+// ---------------------------------------------------------------------------
+
+describe('changelog.ts — a changelog restricted to signed-in users (J21)', () => {
+  /** The workspace restricts its changelog to signed-in users, for the next read. */
+  async function changelogForSignedInUsersOnly() {
+    const { db } = await import('@/lib/server/db')
+    vi.mocked(db.query.settings.findFirst).mockResolvedValueOnce({
+      id: 'workspace_1',
+      metadata: JSON.stringify({ changelogSettings: { audience: 'authenticated' } }),
+    } as never)
+  }
+
+  it('answers an entry as not found to an anonymous visitor the portal admits (J21)', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    await changelogForSignedInUsersOnly()
+    const h = await loadModule(CHANGELOG)
+
+    await expect(h[GET_PUBLIC_CHANGELOG]({ data: { id: 'cl_1' } })).rejects.toMatchObject({
+      code: 'CHANGELOG_NOT_FOUND',
+    })
+    expect(mockGetPublicChangelogById).not.toHaveBeenCalled()
+  })
+
+  it('lists nothing to an anonymous visitor the portal admits (J21)', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    await changelogForSignedInUsersOnly()
+    const h = await loadModule(CHANGELOG)
+
+    const result = await h[LIST_PUBLIC_CHANGELOGS]({ data: { limit: 10 } })
+
+    expect(result).toEqual({ items: [], nextCursor: null, hasMore: false })
+    expect(mockListPublicChangelogs).not.toHaveBeenCalled()
   })
 })

@@ -163,6 +163,35 @@ describe('POST /api/widget/identify — external_id resolution (verified path)',
     expect(body.user?.email).toBe('bob-new@acme.com')
   })
 
+  it('adopts a changed avatar and returns it in the same response (J19)', async () => {
+    mockVerifyJWT.mockReturnValue({
+      sub: 'sub_bob',
+      email: 'bob@acme.com',
+      name: 'Bob',
+      avatarURL: 'https://cdn.acme.com/bob-new.png',
+    })
+    mockUserFindFirst.mockResolvedValueOnce({
+      id: 'user_bob',
+      email: 'bob@acme.com',
+      emailVerified: true,
+      externalId: 'sub_bob',
+      name: 'Bob',
+      image: 'https://cdn.acme.com/bob-old.png',
+      imageKey: null,
+      metadata: null,
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_bob', role: 'user' })
+
+    const res = await postIdentify({ ssoToken: 'jwt' })
+
+    expect(res.status).toBe(200)
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ image: 'https://cdn.acme.com/bob-new.png' })
+    )
+    const body = (await res.json()) as { user?: { avatarUrl?: string } }
+    expect(body.user?.avatarUrl).toBe('https://cdn.acme.com/bob-new.png')
+  })
+
   it('rejects a verified email claim that belongs to another account (J18)', async () => {
     mockVerifyJWT.mockReturnValue({
       sub: 'sub_bob',

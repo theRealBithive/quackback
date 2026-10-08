@@ -154,17 +154,11 @@ vi.mock('@/lib/server/domains/help-center/help-center.service', () => ({
   recordArticleFeedback: hoisted.run.recordArticleFeedback,
 }))
 vi.mock('@/lib/shared/widget/article-ref', () => ({ canonicalArticleTypeId: () => null }))
-vi.mock('@/lib/shared/widget/article-locale', () => ({
-  withDefaultLocaleFallback: async (
-    _locale: string,
-    _fallback: string,
-    load: (loc: string) => Promise<unknown>
-  ) => ({ value: await load('en'), locale: 'en' }),
-}))
 vi.mock('@/lib/shared/errors', () => ({
   NotFoundError: class NotFoundError extends Error {},
 }))
 
+import { NotFoundError } from '@/lib/shared/errors'
 import {
   widgetListPublicPostsFn,
   widgetCreatePublicPostFn,
@@ -457,5 +451,41 @@ describe('widget BFF unauthenticated workspace reads', () => {
     expect(hoisted.getOptionalWidgetAuth).not.toHaveBeenCalled()
     expectWidgetAuthOnly()
     expect(hoisted.run.getWidgetTeamAvatars).toHaveBeenCalled()
+  })
+})
+
+describe('widgetResolvePublicArticleRefFn — an article that is not there (J8)', () => {
+  const ARTICLE = { id: 'art_1', helpfulCount: 3, notHelpfulCount: 1 }
+
+  it('falls back to the default-locale article when the requested translation is missing (J8)', async () => {
+    hoisted.run.getPublicArticleBySlugForLocale.mockImplementation(async (_ref, locale) => {
+      if (locale === 'de') throw new NotFoundError('ARTICLE_NOT_FOUND', 'no German translation')
+      return ARTICLE
+    })
+
+    const result = await widgetResolvePublicArticleRefFn({
+      data: { ref: 'getting-started', locale: 'de' },
+    })
+
+    // The vote counts stay server-side; the visitor sees the article itself.
+    expect(result).toEqual({ id: 'art_1', resolvedLocale: 'en' })
+  })
+
+  it('answers null when the article exists in no locale the visitor can read (J8)', async () => {
+    hoisted.run.getPublicArticleBySlugForLocale.mockRejectedValue(
+      new NotFoundError('ARTICLE_NOT_FOUND', 'gone')
+    )
+
+    await expect(
+      widgetResolvePublicArticleRefFn({ data: { ref: 'getting-started', locale: 'de' } })
+    ).resolves.toBeNull()
+  })
+
+  it('passes on a failure that is not a missing article (J8)', async () => {
+    hoisted.run.getPublicArticleBySlugForLocale.mockRejectedValue(new Error('database down'))
+
+    await expect(
+      widgetResolvePublicArticleRefFn({ data: { ref: 'getting-started', locale: 'de' } })
+    ).rejects.toThrow(/database down/)
   })
 })

@@ -193,6 +193,7 @@ vi.mock('@/lib/server/domains/posts/post.access', async (importOriginal) => {
 const LIST_PUBLIC_POSTS = 0
 const TOGGLE_VOTE = 4
 const CREATE_PUBLIC_POST = 5
+const GET_VOTED_POSTS = 6
 const LIST_PUBLIC_ROADMAPS = 7
 const GET_PUBLIC_ROADMAP_POSTS = 8
 const GET_ROADMAP_POSTS_BY_STATUS = 9
@@ -741,5 +742,106 @@ describe('write-path portal-visibility gates (G6)', () => {
     await publicPostsHandlers[TOGGLE_VOTE]({ data: { postId: 'pst_x' } }).catch(() => {})
 
     expect(mockResolvePortalAccess).toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// createPublicPostFn — what a caller the portal admits can still be refused
+// ---------------------------------------------------------------------------
+
+describe('createPublicPostFn — refusals after the portal gate (J20, J21)', () => {
+  const SIGNED_IN = {
+    user: { id: 'user_1', email: 'ada@example.com', name: 'Ada' },
+    principal: { id: 'principal_1', type: 'user', role: 'user' },
+  }
+  const POST = { boardId: 'brd_x', title: 'New post', content: 'body' }
+
+  async function arrange(opts: { board: unknown; settings: unknown; member: unknown }) {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    const { requireAuth } = await import('../auth-helpers')
+    vi.mocked(requireAuth).mockResolvedValue(SIGNED_IN as never)
+    mockPolicyActor.mockResolvedValue({ principalId: 'principal_1', principalType: 'user' })
+    const { getPublicBoardById } = await import('@/lib/server/domains/boards/board.public')
+    vi.mocked(getPublicBoardById).mockResolvedValue(opts.board as never)
+    const { getMemberByUser } = await import('@/lib/server/domains/principals/principal.service')
+    vi.mocked(getMemberByUser).mockResolvedValue(opts.member as never)
+    const { getSettings } = await import('../workspace')
+    vi.mocked(getSettings).mockResolvedValue(opts.settings as never)
+    const { getDefaultStatus } = await import('@/lib/server/domains/statuses/status.service')
+    vi.mocked(getDefaultStatus).mockResolvedValue(null as never)
+  }
+
+  async function createdNothing(): Promise<boolean> {
+    const { createPost } = await import('@/lib/server/domains/posts/post.service')
+    return vi.mocked(createPost).mock.calls.length === 0
+  }
+
+  it('refuses a board the caller cannot see as not found, and creates nothing (J20)', async () => {
+    await arrange({ board: null, settings: { portalConfig: {} }, member: { id: 'principal_1' } })
+
+    await expect(publicPostsHandlers[CREATE_PUBLIC_POST]({ data: POST })).rejects.toThrow(
+      /Board not found/
+    )
+    expect(await createdNothing()).toBe(true)
+  })
+
+  it('refuses when the workspace settings cannot be read, and creates nothing (J21)', async () => {
+    await arrange({
+      board: { id: 'brd_x', name: 'Ideas', slug: 'ideas' },
+      settings: null,
+      member: { id: 'principal_1' },
+    })
+
+    await expect(publicPostsHandlers[CREATE_PUBLIC_POST]({ data: POST })).rejects.toThrow(
+      /Organization settings not found/
+    )
+    expect(await createdNothing()).toBe(true)
+  })
+
+  it('refuses a signed-in caller who is no member of the workspace (J21)', async () => {
+    await arrange({
+      board: { id: 'brd_x', name: 'Ideas', slug: 'ideas' },
+      settings: { portalConfig: {} },
+      member: null,
+    })
+
+    await expect(publicPostsHandlers[CREATE_PUBLIC_POST]({ data: POST })).rejects.toThrow(
+      /must be a member/
+    )
+    expect(await createdNothing()).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getVotedPostsFn — the session is optional, a widget session reads as none
+// ---------------------------------------------------------------------------
+
+describe('getVotedPostsFn (J9)', () => {
+  it('answers no votes when the request carries a session nobody resolves, such as a widget one (J9)', async () => {
+    const { hasAuthCredentials, getOptionalAuth } = await import('../auth-helpers')
+    vi.mocked(hasAuthCredentials).mockReturnValueOnce(true)
+    vi.mocked(getOptionalAuth).mockResolvedValueOnce(null)
+    const { getAllUserVotedPostIds } = await import('@/lib/server/domains/posts/post.public')
+
+    const result = await publicPostsHandlers[GET_VOTED_POSTS]({ data: {} })
+
+    expect(result).toEqual({ votedPostIds: [] })
+    expect(vi.mocked(getAllUserVotedPostIds)).not.toHaveBeenCalled()
+  })
+
+  it("answers the signed-in caller's own votes (J9)", async () => {
+    const { hasAuthCredentials, getOptionalAuth } = await import('../auth-helpers')
+    vi.mocked(hasAuthCredentials).mockReturnValueOnce(true)
+    vi.mocked(getOptionalAuth).mockResolvedValueOnce({
+      user: { id: 'user_1' },
+      principal: { id: 'principal_1' },
+    } as never)
+    const { getAllUserVotedPostIds } = await import('@/lib/server/domains/posts/post.public')
+    vi.mocked(getAllUserVotedPostIds).mockResolvedValueOnce(new Set(['post_a', 'post_b']))
+
+    const result = await publicPostsHandlers[GET_VOTED_POSTS]({ data: {} })
+
+    expect(result).toEqual({ votedPostIds: ['post_a', 'post_b'] })
+    expect(vi.mocked(getAllUserVotedPostIds)).toHaveBeenCalledWith('principal_1')
   })
 })

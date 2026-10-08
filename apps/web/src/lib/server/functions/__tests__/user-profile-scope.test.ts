@@ -117,6 +117,18 @@ describe('profile mutations reject widget scope', () => {
     expect(hoisted.mockUpdateReturning).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['rename', updateProfileNameHandler, { name: 'New Name' }],
+    ['remove the avatar', removeAvatarHandler, undefined],
+    ['save an avatar', saveAvatarKeyHandler, { key: 'avatars/x.png' }],
+  ] as const)('refuses to %s with no session at all (J6)', async (_label, handler, data) => {
+    hoisted.mockGetSession.mockResolvedValue(null)
+    await expect(handler({ data: data as Record<string, unknown> })).rejects.toThrow(
+      /Authentication required/
+    )
+    expect(hoisted.mockUpdateReturning).not.toHaveBeenCalled()
+  })
+
   it('updates the name on a dashboard session', async () => {
     hoisted.mockGetSession.mockResolvedValue(sessionWithScope('dashboard'))
     const result = await updateProfileNameHandler({ data: { name: 'New Name' } })

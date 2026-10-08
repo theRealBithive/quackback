@@ -46,7 +46,7 @@ vi.mock('@/lib/server/auth/registered-providers', () => ({
   getRegisteredOidcProviderIds: vi.fn(),
 }))
 
-const { handleWidgetAccountMutationGate } = await import('../hooks')
+const { handleWidgetAccountMutationGate, hooksBefore } = await import('../hooks')
 
 function ctx(opts: { path: string; token?: string; cookie?: string; scope?: string | null }) {
   const headers = new Headers()
@@ -147,9 +147,62 @@ describe('handleWidgetAccountMutationGate', () => {
     ).rejects.toThrow(/Widget sessions/)
   })
 
+  it('rejects a widget session carried in the signed session cookie (J6)', async () => {
+    const gateCtx = ctx({
+      path: '/change-email',
+      cookie: `theme=dark; better-auth.session_token=${encodeURIComponent('widget-tok.sig/+=')}`,
+      scope: 'widget',
+    })
+
+    await expect(handleWidgetAccountMutationGate(gateCtx)).rejects.toThrow(/Widget sessions/)
+    // The signature after the dot is not part of the session token.
+    expect(gateCtx.context.internalAdapter.findSession).toHaveBeenCalledWith('widget-tok')
+  })
+
+  it('reads a session cookie whose value is not percent-encoded as it stands (J6)', async () => {
+    const gateCtx = ctx({
+      path: '/change-email',
+      cookie: 'better-auth.session_token=widget%tok',
+      scope: 'widget',
+    })
+
+    await expect(handleWidgetAccountMutationGate(gateCtx)).rejects.toThrow(/Widget sessions/)
+    expect(gateCtx.context.internalAdapter.findSession).toHaveBeenCalledWith('widget%tok')
+  })
+
+  it('looks up nothing for an empty session cookie (J6)', async () => {
+    const gateCtx = ctx({
+      path: '/change-email',
+      cookie: 'better-auth.session_token=',
+      scope: 'widget',
+    })
+
+    await expect(handleWidgetAccountMutationGate(gateCtx)).resolves.toBeUndefined()
+    expect(gateCtx.context.internalAdapter.findSession).not.toHaveBeenCalled()
+  })
+
   it('no-ops when there is no session token', async () => {
     await expect(
       handleWidgetAccountMutationGate(ctx({ path: '/change-email' }))
     ).resolves.toBeUndefined()
+  })
+})
+
+describe('the before-hook Better Auth runs on every request (J6)', () => {
+  it('applies the widget gate, so a widget Bearer is refused on a mutation path (J6)', async () => {
+    const run = hooksBefore as unknown as (c: unknown) => Promise<unknown>
+
+    await expect(
+      run(ctx({ path: '/change-email', token: 'widget-tok', scope: 'widget' }))
+    ).rejects.toThrow(/Widget sessions/)
+  })
+
+  it('lets a portal Bearer through on the same path (J6)', async () => {
+    const run = hooksBefore as unknown as (c: unknown) => Promise<unknown>
+
+    const portalCtx = ctx({ path: '/change-email', token: 'portal-tok', scope: 'portal' })
+
+    await run(portalCtx)
+    expect(portalCtx.context.internalAdapter.findSession).toHaveBeenCalledWith('portal-tok')
   })
 })

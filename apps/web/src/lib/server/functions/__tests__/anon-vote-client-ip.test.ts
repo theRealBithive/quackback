@@ -217,3 +217,20 @@ describe('the address an anonymous vote is counted under', () => {
     )
   })
 })
+
+describe('an anonymous voter over the limit', () => {
+  // Not a batch J guarantee: the limiter predates #555, which only moved it
+  // into the run helper the widget shares. This pins that the move kept it.
+  it('is refused, and no vote is recorded', async () => {
+    const { toggleVoteFn } = await import('../public-posts')
+    hoisted.getRequestIP.mockReturnValue('203.0.113.9')
+    hoisted.checkAnonVoteRateLimit.mockResolvedValueOnce(false)
+
+    await expect(
+      (toggleVoteFn as unknown as (args: unknown) => Promise<unknown>)({
+        data: { postId: 'post_1' },
+      })
+    ).rejects.toThrow(/Too many votes/)
+    expect(hoisted.voteOnPost).not.toHaveBeenCalled()
+  })
+})

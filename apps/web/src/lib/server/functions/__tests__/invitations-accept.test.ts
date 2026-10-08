@@ -584,6 +584,15 @@ describe('setPasswordFn', () => {
     expect(hoisted.mockRevokeOtherSessions).not.toHaveBeenCalled()
   })
 
+  it('refuses a request with no session and sets nothing (J6)', async () => {
+    hoisted.mockGetSession.mockResolvedValue(null)
+
+    await expect(setPasswordHandler({ data: { newPassword: 'password1' } })).rejects.toThrow(
+      /Not authenticated/
+    )
+    expect(hoisted.mockSetPassword).not.toHaveBeenCalled()
+  })
+
   it('rejects a widget-scoped session', async () => {
     hoisted.mockGetSession.mockResolvedValue({
       session: { id: 'sess_1', scope: 'widget' },

@@ -148,6 +148,17 @@ describe('mcpDcrRegistrationBody', () => {
     expect(body.application_type).toBeUndefined()
   })
 
+  it('does not count an unreadable redirect as web-valid, and passes it on untouched (J25, J26)', () => {
+    // An untyped client is web only when every redirect is HTTPS on a public
+    // host; a value that is no URI at all is not, so the client is not left as
+    // web. The value itself goes on unchanged for Better Auth to refuse (J26).
+    const body = mcpDcrRegistrationBody({
+      redirect_uris: ['https://example.com/oauth/callback', 'not a uri'],
+    })
+    expect(body.application_type).toBe('native')
+    expect(body.redirect_uris).toEqual(['https://example.com/oauth/callback', 'not a uri'])
+  })
+
   it('does not override an explicit web client that registered a loopback redirect (J25)', () => {
     const body = mcpDcrRegistrationBody({
       application_type: 'web',

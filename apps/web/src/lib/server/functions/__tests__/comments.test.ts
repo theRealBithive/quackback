@@ -36,9 +36,17 @@ vi.mock('@/lib/server/domains/comments/comment.service', () => ({
   updateComment: vi.fn(),
 }))
 
+const mockAddReaction = vi.fn()
+const mockRemoveReaction = vi.fn()
+const mockResolvePortalAccess = vi.fn()
+
 vi.mock('@/lib/server/domains/comments/comment.reactions', () => ({
-  addReaction: vi.fn(),
-  removeReaction: vi.fn(),
+  addReaction: (...args: unknown[]) => mockAddReaction(...args),
+  removeReaction: (...args: unknown[]) => mockRemoveReaction(...args),
+}))
+
+vi.mock('@/lib/server/functions/portal-access', () => ({
+  resolvePortalAccessForRequest: () => mockResolvePortalAccess(),
 }))
 
 vi.mock('@/lib/server/domains/comments/comment.permissions', () => ({
@@ -66,6 +74,10 @@ vi.mock('@/lib/server/functions/auth-helpers', () => ({
   requireAuth: (...args: unknown[]) => mockRequireAuth(...args),
   hasAuthCredentials: () => mockHasAuthCredentials(),
   hasSessionCookie: vi.fn(),
+  policyActorFromAuth: async (auth: { principal: { id: string } }) => ({
+    principalId: auth.principal.id,
+    role: 'user',
+  }),
 }))
 
 // --- Mock: shared roles ---
@@ -94,6 +106,8 @@ vi.mock('@/lib/server/domains/activity/activity.service', () => ({
 // 0: createCommentFn, 1: addReactionFn, 2: removeReactionFn,
 // 3: getCommentPermissionsFn, 4: userEditCommentFn, 5: userDeleteCommentFn,
 // 6: restoreCommentFn, 7: pinCommentFn, 8: unpinCommentFn, 9: canPinCommentFn
+const HANDLER_INDEX_ADD_REACTION = 1
+const HANDLER_INDEX_REMOVE_REACTION = 2
 const HANDLER_INDEX_GET_COMMENT_PERMISSIONS = 3
 const HANDLER_INDEX_CAN_PIN_COMMENT = 9
 
@@ -197,5 +211,50 @@ describe('canPinCommentFn error handling', () => {
     await expect(canPinCommentHandler({ data: { commentId: COMMENT_ID } })).rejects.toThrow(
       TypeError
     )
+  })
+})
+
+// ============================================
+// addReactionFn / removeReactionFn on the portal site (J9, J21)
+// ============================================
+
+describe.each([
+  ['addReactionFn', HANDLER_INDEX_ADD_REACTION, mockAddReaction, { added: true }],
+  ['removeReactionFn', HANDLER_INDEX_REMOVE_REACTION, mockRemoveReaction, { removed: true }],
+] as const)('%s on the portal site (J9, J21)', (_name, index, service, answer) => {
+  const reaction = { commentId: COMMENT_ID, emoji: '👍' }
+
+  it('refuses a caller the private portal does not admit, before reading the session (J21)', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
+
+    await expect(handlersByIndex[index]({ data: reaction })).rejects.toThrow(
+      /Portal access required/
+    )
+    expect(mockRequireAuth).not.toHaveBeenCalled()
+    expect(service).not.toHaveBeenCalled()
+  })
+
+  it('refuses a widget session outright (J9)', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    mockRequireAuth.mockRejectedValue(
+      new Error('Access denied: Widget sessions cannot access this resource')
+    )
+
+    await expect(handlersByIndex[index]({ data: reaction })).rejects.toThrow(/Widget sessions/)
+    expect(service).not.toHaveBeenCalled()
+  })
+
+  it('reacts as the signed-in caller and answers what the service answers (J21)', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    mockRequireAuth.mockResolvedValue(MOCK_AUTH_CONTEXT)
+    service.mockResolvedValue(answer)
+
+    const result = await handlersByIndex[index]({ data: reaction })
+
+    expect(result).toEqual(answer)
+    expect(service).toHaveBeenCalledWith(COMMENT_ID, '👍', 'principal_test123', {
+      principalId: 'principal_test123',
+      role: 'user',
+    })
   })
 })
