@@ -4,7 +4,7 @@ import {
   isAllowedImageType,
   isAllowedMediaType,
   maxMediaFileSize,
-  resolveVideoMimeType,
+  resolveMediaMimeType,
 } from '@/lib/shared/storage-config'
 
 interface UseImageUploadOptions {
@@ -30,9 +30,7 @@ export function validateImageFile(file: File): Error | null {
 }
 
 export function validateMediaFile(file: File): Error | null {
-  const contentType = isAllowedImageType(file.type)
-    ? file.type
-    : resolveVideoMimeType(file.type, file.name)
+  const contentType = resolveMediaMimeType(file.type, file.name)
   if (!contentType || !isAllowedMediaType(contentType)) {
     return new Error(
       'Invalid file type. Allowed types: JPEG, PNG, GIF, WebP, AVIF, MP4, WebM, MOV, M4V.'
@@ -48,7 +46,7 @@ export function validateMediaFile(file: File): Error | null {
 type FileNormalizer = (file: File) => File
 
 function normalizeMediaFile(file: File): File {
-  const contentType = resolveVideoMimeType(file.type, file.name)
+  const contentType = resolveMediaMimeType(file.type, file.name)
   if (!contentType || contentType === file.type) return file
   return new File([file], file.name, { type: contentType, lastModified: file.lastModified })
 }

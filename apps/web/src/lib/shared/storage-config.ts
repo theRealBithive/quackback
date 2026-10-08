@@ -41,27 +41,61 @@ export function isAllowedVideoType(contentType: string): boolean {
   return ALLOWED_VIDEO_TYPES.has(contentType)
 }
 
+const VIDEO_TYPE_BY_EXTENSION: Record<string, string> = {
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  m4v: 'video/x-m4v',
+}
+
+const IMAGE_TYPE_BY_EXTENSION: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+}
+
+/** A type a file picker leaves behind when it does not know the file's. */
+function isGenericType(contentType: string): boolean {
+  return contentType === '' || contentType === 'application/octet-stream'
+}
+
+function lowerCaseExtension(filename: string): string {
+  const match = filename.toLowerCase().match(/\.([^.]+)$/)
+  if (!match) return ''
+  return match[1]
+}
+
+function typeByExtension(table: Record<string, string>, filename: string): string | null {
+  const extension = lowerCaseExtension(filename)
+  if (!Object.hasOwn(table, extension)) return null
+  return table[extension]
+}
+
 /**
  * Resolve video MIME types omitted by some desktop file pickers. The server
  * still verifies the file's container signature before storing it.
  */
 export function resolveVideoMimeType(contentType: string, filename = ''): string | null {
   if (isAllowedVideoType(contentType)) return contentType
-  if (contentType && contentType !== 'application/octet-stream') return null
+  if (!isGenericType(contentType)) return null
+  return typeByExtension(VIDEO_TYPE_BY_EXTENSION, filename)
+}
 
-  const extension = filename.toLowerCase().match(/\.([^.]+)$/)?.[1]
-  switch (extension) {
-    case 'mp4':
-      return 'video/mp4'
-    case 'webm':
-      return 'video/webm'
-    case 'mov':
-      return 'video/quicktime'
-    case 'm4v':
-      return 'video/x-m4v'
-    default:
-      return null
-  }
+/**
+ * The type an image or video upload is judged as: the declared type when it is
+ * an accepted one, otherwise — only for a missing or generic type — the type
+ * its extension names. The bytes are still checked against the result.
+ */
+export function resolveMediaMimeType(contentType: string, filename = ''): string | null {
+  if (isAllowedImageType(contentType)) return contentType
+  if (isAllowedVideoType(contentType)) return contentType
+  if (!isGenericType(contentType)) return null
+  const videoType = typeByExtension(VIDEO_TYPE_BY_EXTENSION, filename)
+  if (videoType) return videoType
+  return typeByExtension(IMAGE_TYPE_BY_EXTENSION, filename)
 }
 
 /** MIME value used by the HTML video element after persisted attrs are sanitized. */

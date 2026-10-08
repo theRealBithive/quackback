@@ -77,7 +77,7 @@ import {
   sniffImageMime,
   sniffVideoMime,
 } from '@/lib/server/content/magic-bytes'
-import { resolveVideoMimeType } from '@/lib/shared/storage-config'
+import { resolveMediaMimeType } from '@/lib/shared/storage-config'
 import {
   getCurrentWorkspace,
   getWorkspaceStorageCredential,
@@ -937,9 +937,11 @@ export async function uploadMediaFromFormData(
   if (!(file instanceof File)) {
     return Response.json({ error: 'No file provided' }, { status: 400 })
   }
+  // The server's image list is wider than the shared one (icons), so it is
+  // asked first; a missing or generic type is then judged by the extension.
   const contentType = isAllowedImageType(file.type)
     ? file.type
-    : resolveVideoMimeType(file.type, file.name)
+    : resolveMediaMimeType(file.type, file.name)
   if (!contentType || !isAllowedMediaType(contentType)) {
     return Response.json({ error: 'Invalid file type' }, { status: 400 })
   }
