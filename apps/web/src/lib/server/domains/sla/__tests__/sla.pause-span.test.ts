@@ -1,4 +1,19 @@
 /**
+ * Contract (batch I, confirmed 2026-10-08). Tests name these as I-R1 ... I-R7:
+ * the fork already uses R1-R13 for the session audience guarantees
+ * (auth-scope.test.ts), so the batch prefix keeps the two lists apart. The
+ * list itself is verbatim. This module holds the I-R3 cases for two runs of
+ * the same pause reaction at once; its other cases are upstream's and
+ * unnumbered.
+ *
+ * R1 Every event a reaction listens to (a new message, a conversation or ticket status change, a CSAT answer) gets its reactions run, however the event was produced.
+ * R2 The reactions are recorded in the same transaction as the event: if the event commits, its reactions will run; if it rolls back, none run.
+ * R3 Each reaction runs once per event in effect. A retry or a duplicate run never pauses, resumes or settles an SLA clock twice, never reopens a pair ticket twice, never writes a second summary.
+ * R4 A reaction that fails is retried, and its failure never undoes or blocks the change that caused the event, nor holds back the other reactions of the same event.
+ * R5 A failing delivery to an outbound target (webhook, integration) never delays or spends the reactions.
+ * R6 A close summary, which may wait on a slow AI call, never delays the SLA and reopen reactions of other events.
+ * R7 Rolling back to a build without the reaction queues loses no reaction silently: the runbook in JOBS.md states how to drain or purge them, and its SQL runs against the real schema.
+ *
  * A pause whose reaction runs only after the paused state already ended (a
  * backlog longer than the snooze, or the wake's reaction ran first) still
  * excludes the paused span, up to the recorded wake, as a pause and then a
@@ -330,6 +345,16 @@ describe.skipIf(!fixture.available)('SLA pauses reacted to after the paused stat
     expect(await conversationClock(conversationId)).toEqual(SPAN_EXCLUDED)
   })
 
+  it('a late snooze run twice at once, as by two workers, excludes the snooze once (I-R3)', async () => {
+    const { conversationId } = await seedConversation()
+    const snooze = await conversationMoves(conversationId, 'open', 'snoozed', '10:30')
+    await conversationMoves(conversationId, 'snoozed', 'open', '12:30')
+
+    await Promise.all([recordSlaFromEvent(snooze), recordSlaFromEvent(snooze)])
+
+    expect(await conversationClock(conversationId)).toEqual(SPAN_EXCLUDED)
+  })
+
   it('a snooze replayed after its own pause and resume ran excludes nothing more', async () => {
     const { conversationId } = await seedConversation()
     const snooze = await conversationMoves(conversationId, 'open', 'snoozed', '10:30')
@@ -409,6 +434,16 @@ describe.skipIf(!fixture.available)('SLA pauses reacted to after the paused stat
 
     await recordSlaFromEvent(pending)
     await recordSlaFromEvent(pending)
+
+    expect(await ticketClock(ticket.ticketId)).toEqual(SPAN_EXCLUDED)
+  })
+
+  it('a late ticket pending run twice at once, as by two workers, excludes the span once (I-R3)', async () => {
+    const ticket = await seedTicket()
+    const pending = await ticketMoves(ticket, 'open', 'pending', '10:30')
+    await ticketMoves(ticket, 'pending', 'open', '12:30')
+
+    await Promise.all([recordSlaFromEvent(pending), recordSlaFromEvent(pending)])
 
     expect(await ticketClock(ticket.ticketId)).toEqual(SPAN_EXCLUDED)
   })
