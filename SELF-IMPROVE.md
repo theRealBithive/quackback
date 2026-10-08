@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 17x — Test suites are flaky under parallel load
+## 18x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -164,6 +164,17 @@ the same `quackback_test` database (load average 53), and its DB suites
 other run was changing underneath them. Two checkouts must not share the
 test database while either runs a full set; give the second one its own
 `DATABASE_URL` (the web config already reads it from the environment).
+
+Eighteenth, upstream batch J, at a load average of 40-49 with two other
+batches running: one full coverage run lost 12 suites to timeouts that all
+passed alone, and two of this batch's own tests needed an explicit timeout.
+New detail worth knowing: a fast-check property that times out **keeps
+running** into the next test of the same file, and its calls land on the
+shared hoisted mocks, so the next test fails an assertion it never caused
+(`widget-portal-gate.test.ts`: the property timed out, the following
+"keeps a private workspace closed" test then saw a call it had not made).
+Read a red test right after a timed-out property as the timeout, not as a
+second finding, and give a heavy property its own timeout.
 
 ## 8x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 

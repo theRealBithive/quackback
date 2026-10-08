@@ -1537,7 +1537,7 @@ describe('the mutations excused as equivalent (B6)', () => {
         mutator: 'StringLiteral',
         line: "export const Route = createFileRoute('/auth/widget-handoff')({",
         replacement: '""',
-        why: "At runtime TanStack Router's createFileRoute ignores its argument (react-router dist/esm/fileRoute.js: `createFileRoute(path) { return (options) => createRoute(options) ... }`). The path is read by the route-tree generator, which rewrites it, and by the type checker, which rejects a path that is not a key of FileRoutesByPath. No test can observe it; `bun run typecheck` is what catches the mutant.",
+        why: "At runtime TanStack Router's createFileRoute ignores its argument (react-router dist/esm/fileRoute.js: `createFileRoute(path) { return (options) => createRoute(options) ... }`). The path is read by the route-tree generator, which rewrites it, and by the type checker, which rejects a path that is not a key of FileRoutesByPath. No test can observe it; the type checker catches the mutant (measured: blanking the literal makes tsc report TS2345, an empty string is not assignable to keyof FileRoutesByPath).",
       },
     ])
   })
