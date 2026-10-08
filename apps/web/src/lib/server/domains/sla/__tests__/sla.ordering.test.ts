@@ -1,4 +1,18 @@
 /**
+ * Contract (batch I, confirmed 2026-10-08). Tests name these as I-R1 ... I-R7:
+ * the fork already uses R1-R13 for the session audience guarantees
+ * (auth-scope.test.ts), so the batch prefix keeps the two lists apart. The
+ * list itself is verbatim. This module holds the I-R3 cases for the real
+ * SLA recorders: every schedule retries and duplicates reactions.
+ *
+ * R1 Every event a reaction listens to (a new message, a conversation or ticket status change, a CSAT answer) gets its reactions run, however the event was produced.
+ * R2 The reactions are recorded in the same transaction as the event: if the event commits, its reactions will run; if it rolls back, none run.
+ * R3 Each reaction runs once per event in effect. A retry or a duplicate run never pauses, resumes or settles an SLA clock twice, never reopens a pair ticket twice, never writes a second summary.
+ * R4 A reaction that fails is retried, and its failure never undoes or blocks the change that caused the event, nor holds back the other reactions of the same event.
+ * R5 A failing delivery to an outbound target (webhook, integration) never delays or spends the reactions.
+ * R6 A close summary, which may wait on a slow AI call, never delays the SLA and reopen reactions of other events.
+ * R7 Rolling back to a build without the reaction queues loses no reaction silently: the runbook in JOBS.md states how to drain or purge them, and its SQL runs against the real schema.
+ *
  * Randomized ordering: the SLA reactions run from queued jobs that can run
  * late, out of order, retried or twice, and the outcome must not depend on it.
  *
@@ -493,33 +507,36 @@ describe.skipIf(!fixture.available)('SLA reactions in any order reach the in-ord
   beforeEach(fixture.begin)
   afterEach(fixture.rollback)
 
-  it.each(CONVERSATION_SCENARIOS)('a conversation timeline (scenario %i)', async (scenario) => {
-    const policy = await createSlaPolicy({
-      name: `All clocks ${suffix()}`,
-      firstResponseTargetSecs: 3600,
-      nextResponseTargetSecs: 2 * 3600,
-      timeToCloseTargetSecs: 6 * 3600,
-      pauseOnSnooze: true,
-    })
-    const inOrder = await seedConversation(policy.id)
-    const steps = conversationTimeline(scenario, inOrder, policy.id)
-    await runTimeline(steps, null)
-    const expected = await conversationOutcome(inOrder.conversationId)
+  it.each(CONVERSATION_SCENARIOS)(
+    'a conversation timeline (scenario %i) (I-R3)',
+    async (scenario) => {
+      const policy = await createSlaPolicy({
+        name: `All clocks ${suffix()}`,
+        firstResponseTargetSecs: 3600,
+        nextResponseTargetSecs: 2 * 3600,
+        timeToCloseTargetSecs: 6 * 3600,
+        pauseOnSnooze: true,
+      })
+      const inOrder = await seedConversation(policy.id)
+      const steps = conversationTimeline(scenario, inOrder, policy.id)
+      await runTimeline(steps, null)
+      const expected = await conversationOutcome(inOrder.conversationId)
 
-    for (let schedule = 0; schedule < SCHEDULES; schedule++) {
-      const target = await seedConversation(policy.id)
-      await runTimeline(
-        conversationTimeline(scenario, target, policy.id),
-        random(scheduleSeed(scenario, schedule))
-      )
-      expect(
-        await conversationOutcome(target.conversationId),
-        failure(scenario, schedule, steps)
-      ).toEqual(expected)
+      for (let schedule = 0; schedule < SCHEDULES; schedule++) {
+        const target = await seedConversation(policy.id)
+        await runTimeline(
+          conversationTimeline(scenario, target, policy.id),
+          random(scheduleSeed(scenario, schedule))
+        )
+        expect(
+          await conversationOutcome(target.conversationId),
+          failure(scenario, schedule, steps)
+        ).toEqual(expected)
+      }
     }
-  })
+  )
 
-  it.each(TICKET_SCENARIOS)('a ticket timeline (scenario %i)', async (scenario) => {
+  it.each(TICKET_SCENARIOS)('a ticket timeline (scenario %i) (I-R3)', async (scenario) => {
     const policy = await createSlaPolicy({
       name: `TTR ${suffix()}`,
       timeToResolveTargetSecs: 6 * 3600,

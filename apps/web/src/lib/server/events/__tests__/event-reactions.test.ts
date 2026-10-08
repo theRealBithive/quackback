@@ -1,19 +1,35 @@
 /**
+ * Contract (batch I, confirmed 2026-10-08). Tests name these as I-R1 ... I-R7:
+ * the fork already uses R1-R13 for the session audience guarantees
+ * (auth-scope.test.ts), so the batch prefix keeps the two lists apart. The
+ * list itself is verbatim.
+ *
+ * R1 Every event a reaction listens to (a new message, a conversation or ticket status change, a CSAT answer) gets its reactions run, however the event was produced.
+ * R2 The reactions are recorded in the same transaction as the event: if the event commits, its reactions will run; if it rolls back, none run.
+ * R3 Each reaction runs once per event in effect. A retry or a duplicate run never pauses, resumes or settles an SLA clock twice, never reopens a pair ticket twice, never writes a second summary.
+ * R4 A reaction that fails is retried, and its failure never undoes or blocks the change that caused the event, nor holds back the other reactions of the same event.
+ * R5 A failing delivery to an outbound target (webhook, integration) never delays or spends the reactions.
+ * R6 A close summary, which may wait on a slow AI call, never delays the SLA and reopen reactions of other events.
+ * R7 Rolling back to a build without the reaction queues loses no reaction silently: the runbook in JOBS.md states how to drain or purge them, and its SQL runs against the real schema.
+ *
  * The event reactions run from durable jobs that `emit()` queues in the
  * event's own transaction, whichever path produced the event:
  *
  * - `event-reactions` runs the reactions that read earlier state (SLA clocks,
  *   pair-ticket reopen, CSAT confirm), one job at a time per worker process in
  *   enqueue order. What happens when that order breaks is covered by
- *   event-reactions-sla-order.test.ts.
+ *   event-reactions-sla.test.ts.
  * - `event-summaries` runs the close summaries, slow AI calls that do not
  *   depend on order, off that serial queue.
  *
  * Both jobs exist the moment the event commits, before and apart from the
  * event-dispatch drain, so a failing target resolver or a crash after publish
- * cannot lose them. A native `emit()` producer (here the integration status
- * sync) and a legacy `dispatch*()` producer both get their reactions from the
- * jobs, and neither `processEvent` nor the drain runs them a second time.
+ * cannot lose them. A native `emit()` producer and a legacy `dispatch*()`
+ * producer both get their reactions from the jobs, and neither `processEvent`
+ * nor the drain runs them a second time. Upstream drives the native path
+ * through the integration inbound sync, which this fork does not have; here a
+ * ticket close is written and emitted in one transaction, the way a native
+ * producer does it.
  *
  * Real DB (rolled back per test), real producers, outbox, drain, job runner
  * and handlers. Only the five reaction entry points are mocked, so every call
@@ -78,7 +94,8 @@ import { runEventReactions } from '../event-reactions-queue'
 import { runEventSummaries } from '../event-summaries-queue'
 import { runEventDispatch } from '../event-dispatch-queue'
 import * as dispatch from '../dispatch'
-import { applySyncedTicketStatus } from '@/lib/server/domains/tickets/ticket-status-sync'
+import { emit } from '../emit'
+import { ticketExternalStatusChanged, ticketStatusChanged } from '../catalogue'
 import { privateReactionQueue } from './private-reaction-queue'
 
 const fixture = await createDbTestFixture({
@@ -193,22 +210,52 @@ async function seedTicket() {
   }
 }
 
-/** Close the ticket through the integration inbound sync, a native `emit()` producer. */
-async function closeBySync() {
+/**
+ * Close the ticket the way a native `emit()` producer does: the status write
+ * and its events in one transaction. Upstream closes it through the
+ * integration inbound sync, which writes `ticket.external_status_changed` next
+ * to the status change; the fork has no inbound sync, so both rows are emitted
+ * here directly. The sibling has no reactions, which the first test asserts.
+ */
+async function closeByNativeEmit() {
   const { ticketId, closedStatusId, principalId } = await seedTicket()
-  await testDb.transaction((tx) =>
-    applySyncedTicketStatus(tx, ticketId, closedStatusId, principalId, {
-      integrationType: 'linear',
-      externalDisplayId: 'ENG-1',
-      externalUrl: null,
-      externalStatus: 'Done',
-      transition: 'closed',
-      deliveryKey: `delivery_${suffix()}`,
+  await testDb.transaction(async (tx) => {
+    const [ticket] = await tx
+      .update(tickets)
+      .set({ statusId: closedStatusId })
+      .where(eq(tickets.id, ticketId))
+      .returning()
+    const ref = {
+      id: ticket.id,
+      number: ticket.number,
+      type: ticket.type,
+      priority: ticket.priority,
+      assignedPrincipalId: null,
+      assignedTeamId: null,
+    }
+    const serviceActor = { type: 'service' as const, id: principalId }
+    await emit(tx, ticketStatusChanged, {
+      payload: { ticket: ref, previousStatus: 'open', newStatus: 'closed', stage: null },
+      actor: serviceActor,
+      entityId: ticketId,
     })
-  )
+    await emit(tx, ticketExternalStatusChanged, {
+      payload: {
+        ticket: ref,
+        title: ticket.title,
+        integrationType: 'linear',
+        externalDisplayId: 'ENG-1',
+        externalUrl: null,
+        externalStatus: 'Done',
+        transition: 'closed',
+      },
+      actor: serviceActor,
+      entityId: ticketId,
+    })
+  })
   const rows = await eventRowsFor(ticketId)
   const statusRow = rows.find((row) => row.type === 'ticket.status_changed')
-  if (!statusRow) throw new Error('status sync wrote no ticket.status_changed event')
+  if (!statusRow) throw new Error('native emit wrote no ticket.status_changed event')
   return { ticketId, rows, statusRow }
 }
 
@@ -270,11 +317,16 @@ describe.skipIf(!fixture.available)('event reactions (real DB, rolled back)', ()
   })
   afterEach(fixture.rollback)
 
-  it('a ticket closed by integration status sync commits its reaction jobs with the event', async () => {
-    const { ticketId, rows, statusRow } = await closeBySync()
+  it('a natively emitted ticket close commits its reaction jobs with the event (I-R1, I-R2)', async () => {
+    const { ticketId, rows, statusRow } = await closeByNativeEmit()
 
     // Queued in the event's transaction: there before any drain has run.
     expect(statusRow.publishedAt).toBeNull()
+    // The non-reacted sibling is really there, so the loop below asserts something.
+    expect(rows.map((row) => row.type).sort()).toEqual([
+      'ticket.external_status_changed',
+      'ticket.status_changed',
+    ])
     for (const row of rows) {
       if (row.type === 'ticket.status_changed') continue
       expect(await reactionJobsFor(row.eventId), row.type).toEqual([])
@@ -304,8 +356,8 @@ describe.skipIf(!fixture.available)('event reactions (real DB, rolled back)', ()
     })
   })
 
-  it('a failing target resolver does not hold the reactions back, and publishing does not spend them', async () => {
-    const { ticketId, statusRow } = await closeBySync()
+  it('a failing target resolver does not hold the reactions back, and publishing does not spend them (I-R5)', async () => {
+    const { ticketId, statusRow } = await closeByNativeEmit()
 
     // Outbound delivery fails and retries: the event stays unpublished.
     await expect(
@@ -328,7 +380,7 @@ describe.skipIf(!fixture.available)('event reactions (real DB, rolled back)', ()
     expectReacted(ticketClosedReactions, ticketId)
   })
 
-  it("a drain of the test's own jobs never claims or changes another suite's row", async () => {
+  it("a drain of the test's own jobs runs this event's reactions and never claims another suite's row (I-R1)", async () => {
     // A row another suite queued on the shipped queue, older than this test's
     // jobs, so a drain of the shipped queue would claim it first.
     const foreignEventId = createId('event')
@@ -371,7 +423,7 @@ describe.skipIf(!fixture.available)('event reactions (real DB, rolled back)', ()
     ])
   })
 
-  it("within one worker process, runs one event's reactions to completion before the next, in enqueue order", async () => {
+  it("within one worker process, runs one event's reactions to completion before the next, in enqueue order (I-R3)", async () => {
     const conversation = convRef()
     const visitor = messageIn(conversation, 'visitor')
     const reply = messageIn(conversation, 'agent')
@@ -408,7 +460,7 @@ describe.skipIf(!fixture.available)('event reactions (real DB, rolled back)', ()
   })
 
   it(
-    'a reaction that never settles fails its job at the deadline, and the next event runs',
+    'a reaction that never settles fails its job at the deadline, and the next event runs (I-R4)',
     { timeout: 10_000 },
     async () => {
       const stuck = convRef()
@@ -456,7 +508,7 @@ describe.skipIf(!fixture.available)('event reactions (real DB, rolled back)', ()
   )
 
   it(
-    'a summary still running at its deadline has its AI call aborted',
+    'a summary still running at its deadline has its AI call aborted (I-R6)',
     { timeout: 5_000 },
     async () => {
       const conversation = convRef()
@@ -482,7 +534,7 @@ describe.skipIf(!fixture.available)('event reactions (real DB, rolled back)', ()
     }
   )
 
-  it('a failing reaction does not starve the others on its job, and fails the job so it retries', async () => {
+  it('a failing reaction does not starve the others on its job, and fails the job so it retries (I-R4)', async () => {
     const conversation = convRef()
     await dispatch.dispatchMessageCreated(
       actor(),
@@ -503,7 +555,7 @@ describe.skipIf(!fixture.available)('event reactions (real DB, rolled back)', ()
     expect(reactions.autoReopenPairTicketFromEvent).toHaveBeenCalledTimes(1)
   })
 
-  it('a job whose event row is gone is a no-op', async () => {
+  it('a job whose event row is gone is a no-op (I-R2)', async () => {
     await expect(
       runEventReactions({
         id: '1',
@@ -601,7 +653,7 @@ describe.skipIf(!fixture.available)('event reactions (real DB, rolled back)', ()
   ]
 
   it.each(legacyCases)(
-    'a legacy-dispatched $type reacts once, from its reaction jobs',
+    'a legacy-dispatched $type reacts once, from its reaction jobs (I-R1, I-R3)',
     async ({ type, run, queues, expected }) => {
       const entityId = await run()
 

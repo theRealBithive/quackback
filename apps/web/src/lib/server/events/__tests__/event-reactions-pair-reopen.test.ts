@@ -1,4 +1,18 @@
 /**
+ * Contract (batch I, confirmed 2026-10-08). Tests name these as I-R1 ... I-R7:
+ * the fork already uses R1-R13 for the session audience guarantees
+ * (auth-scope.test.ts), so the batch prefix keeps the two lists apart. The
+ * list itself is verbatim. This module holds the I-R3 case for the real
+ * pair-ticket reopen; its other cases are upstream's and unnumbered.
+ *
+ * R1 Every event a reaction listens to (a new message, a conversation or ticket status change, a CSAT answer) gets its reactions run, however the event was produced.
+ * R2 The reactions are recorded in the same transaction as the event: if the event commits, its reactions will run; if it rolls back, none run.
+ * R3 Each reaction runs once per event in effect. A retry or a duplicate run never pauses, resumes or settles an SLA clock twice, never reopens a pair ticket twice, never writes a second summary.
+ * R4 A reaction that fails is retried, and its failure never undoes or blocks the change that caused the event, nor holds back the other reactions of the same event.
+ * R5 A failing delivery to an outbound target (webhook, integration) never delays or spends the reactions.
+ * R6 A close summary, which may wait on a slow AI call, never delays the SLA and reopen reactions of other events.
+ * R7 Rolling back to a build without the reaction queues loses no reaction silently: the runbook in JOBS.md states how to drain or purge them, and its SQL runs against the real schema.
+ *
  * The pair-ticket reopen runs from the `event-reactions` job, so it can run
  * well after the requester's message: sub-second normally, minutes behind a
  * backlog or a worker outage, and days late when a queue is drained after a
@@ -303,7 +317,7 @@ describe.skipIf(!fixture.available)('pair-ticket reopen from a late reaction job
     expect(await ticketState(ticketId)).toEqual({ category: 'open', reopenedCount: 1 })
   })
 
-  it('reopens once when two runs of the same reaction overlap', async () => {
+  it('reopens once when two runs of the same reaction overlap (I-R3)', async () => {
     const { statuses, requester, agent, ticketId, conversationId } = await seedPairedTicket()
     await setTicketStatus(ticketId, statuses.closed, agentActor(agent))
     await requesterWrites(conversationId, requester, new Date(Date.now() + 60_000))
