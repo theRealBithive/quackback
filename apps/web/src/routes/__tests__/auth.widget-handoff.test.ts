@@ -729,7 +729,14 @@ describe('a verify answer that does not name both a session and its user (J11, J
 
     await expect(handoff({ ott: 'tok' })).resolves.toEqual({ kind: 'error', status: 'invalid' })
     expect(hoisted.writes).toEqual([])
-    expect(auditReasons()).toEqual(['missing_session_info'])
+    expect(auditEvents()).toEqual([
+      {
+        event: REFUSED,
+        outcome: 'failure',
+        actor: {},
+        metadata: { reason: 'missing_session_info' },
+      },
+    ])
     expect(hoisted.log.warn).toHaveBeenCalledWith(
       'session/user id missing from verify response, handoff rejected'
     )
