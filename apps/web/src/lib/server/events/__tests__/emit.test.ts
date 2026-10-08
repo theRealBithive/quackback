@@ -28,7 +28,7 @@ vi.mock('@/lib/server/workspaces/workspace-context', async (importOriginal) => (
 import { db, events, auditLog, eq, and, sql } from '@/lib/server/db'
 import { getExecuteRows } from '@/lib/server/utils/execute-rows'
 import { createId } from '@quackback/ids'
-import { emit, inherit } from '../emit'
+import { emit, emitBestEffort, inherit } from '../emit'
 import type { EventDefinition } from '../catalogue/define'
 import type { DomainEvent } from '../envelope'
 
@@ -92,14 +92,17 @@ describe('emit()', () => {
 
   it('inserts exactly one events row with the envelope fields', async () => {
     const entityId = createId('post')
+    const actorId = createId('principal')
     const eventId = await db.transaction((tx) =>
       emit(tx, plainDef, {
         payload: { postId: entityId },
-        actor: { type: 'user', id: createId('principal') },
+        actor: { type: 'user', id: actorId },
         entityId,
         context: { source: 'api', correlationId: 'corr-1' },
+        dedupeKey: `dedupe-${entityId}`,
       })
     )
+    expect(eventId).toMatch(/^evt_/)
 
     const rows = await db.select().from(events).where(eq(events.eventId, eventId))
     expect(rows).toHaveLength(1)
@@ -108,6 +111,8 @@ describe('emit()', () => {
     expect(row.entityType).toBe('post')
     expect(row.entityId).toBe(entityId)
     expect(row.actorType).toBe('user')
+    expect(row.actorId).toBe(actorId)
+    expect(row.dedupeKey).toBe(`dedupe-${entityId}`)
     expect(row.schemaVersion).toBe(2)
     expect(row.payload).toEqual({ postId: entityId })
     expect((row.context as { depth: number; source: string }).depth).toBe(0)
@@ -154,6 +159,7 @@ describe('emit()', () => {
         payload: { postId: entityId, note: 'atomic' },
         actor: { type: 'user', id: createId('principal') },
         entityId,
+        context: { source: 'api', correlationId: 'corr-2' },
       })
     )
     const eventRows = await db.select().from(events).where(eq(events.eventId, eventId))
@@ -168,7 +174,35 @@ describe('emit()', () => {
     expect(eventRows).toHaveLength(1)
     expect(eventRows[0].dispatchOwner).toBe('job')
     expect(auditRows).toHaveLength(1)
+    expect(auditRows[0]).toMatchObject({
+      eventOutcome: 'success',
+      requestId: 'corr-2',
+      metadata: { eventId, source: 'api' },
+    })
     expect(getExecuteRows(jobs).length).toBeGreaterThan(0)
+  })
+
+  it('emitBestEffort() commits the event on its own transaction and swallows a failed write', async () => {
+    const entityId = createId('post')
+    await emitBestEffort(plainDef, {
+      payload: { postId: entityId },
+      actor: { type: 'service' },
+      entityId,
+    })
+    const written = await db.select().from(events).where(eq(events.entityId, entityId))
+    expect(written).toHaveLength(1)
+
+    const failedEntity = createId('post')
+    await expect(
+      emitBestEffort(plainDef, {
+        // @ts-expect-error: deliberately wrong payload shape, so the write fails
+        payload: { wrong: 1 },
+        actor: { type: 'service' },
+        entityId: failedEntity,
+      })
+    ).resolves.toBeUndefined()
+    const notWritten = await db.select().from(events).where(eq(events.entityId, failedEntity))
+    expect(notWritten).toHaveLength(0)
   })
 
   it('queues a job per reaction queue in the same tx, only for a type that has reactions', async () => {

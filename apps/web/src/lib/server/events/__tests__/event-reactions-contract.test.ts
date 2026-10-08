@@ -409,6 +409,25 @@ describe.skipIf(!fixture.available)('event reactions contract (real DB, rolled b
     expect(reactions.autoReopenPairTicketFromEvent).toHaveBeenCalledTimes(1)
   })
 
+  it('a job past its deadline names every reaction still running, so the retry is traceable (I-R4)', async () => {
+    const conversation = convRef()
+    await dispatch.dispatchMessageCreated(actor(), visitorMessage(conversation), conversation, true)
+    const [row] = await eventRowsFor(conversation.id)
+    reactions.recordSlaFromEvent.mockImplementation(() => new Promise(() => {}))
+    reactions.autoReopenPairTicketFromEvent.mockImplementation(() => new Promise(() => {}))
+
+    const deadline = REACTION_DEADLINE_MS[EVENT_REACTIONS_QUEUE]
+    REACTION_DEADLINE_MS[EVENT_REACTIONS_QUEUE] = 50
+    try {
+      const job = claimed(EVENT_REACTIONS_QUEUE, { eventId: row.eventId })
+      await expect(runEventReactions(job)).rejects.toThrow(
+        /^event reactions passed their 50ms deadline: sla, pair-ticket-reopen$/
+      )
+    } finally {
+      REACTION_DEADLINE_MS[EVENT_REACTIONS_QUEUE] = deadline
+    }
+  })
+
   it('a reaction job that names no event runs nothing (I-R2)', async () => {
     await expect(runEventReactions(claimed(EVENT_REACTIONS_QUEUE, {}))).resolves.toBeUndefined()
     await expect(
