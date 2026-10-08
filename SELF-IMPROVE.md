@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 16x — Test suites are flaky under parallel load
+## 17x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -155,6 +155,15 @@ went red on `mutations/__tests__/settings.test.ts` again (the 20s timeout),
 and the next run, with that one file left out, on a `socket hang up` in an
 unrelated suite. Both green alone. Two coverage runs lost before the third
 wrote a report.
+
+Seventeenth, on batch H: three `--changed origin/main` coverage runs went red
+on 3, 29 and 4 files, none of them touched by the batch, every one green
+alone. The 29-file run overlapped a second worktree's coverage run against
+the same `quackback_test` database (load average 53), and its DB suites
+(`signup-policy.db`, the ticket services) failed on counts and resets the
+other run was changing underneath them. Two checkouts must not share the
+test database while either runs a full set; give the second one its own
+`DATABASE_URL` (the web config already reads it from the environment).
 
 ## 7x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
@@ -2380,6 +2389,41 @@ A second worktree for a parallel batch shares the git objects but not the
 install. Until `bun install` runs inside it, vitest, tsc and the gates fail
 with module-resolution errors that read like a broken pick. Run `bun install`
 first in any new worktree.
+
+## 1x — Under Stryker, `process.env.TZ` does not move the clock
+
+Stryker's vitest runner forces `pool: 'threads'`, whatever `vitest.config.ts`
+says. In a worker thread `process.env` is a copy, and assigning `TZ` there
+does not reset V8's time-zone cache, so `getDate()`/`getHours()` stay in the
+zone the process started in (measured: `new Worker` without `SHARE_ENV`
+reads the same day for Pago Pago and Kiritimati). A suite that moves zones
+that way passes under `vitest run` (forks) and is vacuous, or red, under
+the mutation gate. Batch L's calendar-date suite has a canary that fails
+exactly there. For a suite meant to grade mutants, move the zone through
+the `Intl` stand-ins in `apps/web/src/test/runtime-locale.ts` or explicit
+`timeZone` options instead.
+
+## 1x — `new Request(…, { headers })` trims a header value, so a "malformed" generated header can arrive well-formed
+
+A property that feeds hostile header values to a route handler through a
+`Request` does not deliver them verbatim: the Fetch `Headers` class strips
+leading and trailing whitespace (RFC 9110 §5.5 says it is not part of the
+value). Batch H's range property drew `bytes=0-1 ` as a malformed range,
+the route answered 206, and the counterexample looked like a proxy bug for
+a round of reading. Only inner whitespace (`bytes= 0-1`) survives to the
+handler. Put outer-whitespace cases in a pure unit test of the parser, not
+in a property that goes through `Request`.
+
+## 1x — Calling an editor's `handlePaste` by hand reaches every other paste handler too
+
+`editor.view.someProp('handlePaste', …)` runs the next extension's handler
+whenever ours returns false, and those read `slice.content` and
+`event.clipboardData.getData`. A fake event with only `items`, or a `null`
+slice, fails inside someone else's extension with a `TypeError` that reads
+like a bug in the code under test. Pass `Slice.empty` from `@tiptap/pm/model`
+and give the fake clipboard a `getData: () => ''`. The mounted editor is on
+the ProseMirror DOM node as `.editor`, which is how a test gets at it
+without an `editorRef` seam.
 
 ## Resolved
 

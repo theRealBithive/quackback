@@ -1426,5 +1426,10 @@
   "onboarding.account.setupComplete.title": "Este espaço de trabalho já está configurado",
   "onboarding.account.setupComplete.signIn": "Entre com uma conta de administrador.",
   "onboarding.noAccess.alreadySetUpTitle": "Este espaço de trabalho já está configurado",
-  "onboarding.noAccess.alreadySetUpBody": "Entre com uma conta de administrador para gerenciá-lo."
+  "onboarding.noAccess.alreadySetUpBody": "Entre com uma conta de administrador para gerenciá-lo.",
+  "ui.editor.slash.video.title": "Vídeo",
+  "ui.editor.slash.video.description": "Envie um vídeo MP4, WebM, MOV ou M4V",
+  "ui.editor.video.uploadFailed": "Não foi possível enviar o vídeo. Tente novamente.",
+  "ui.editor.action.insertVideo": "Inserir vídeo",
+  "ui.editor.video.remove": "Remover vídeo"
 }

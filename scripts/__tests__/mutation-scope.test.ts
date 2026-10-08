@@ -443,6 +443,35 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/components/ui/__tests__/time-ago-hydration.test.tsx',
         ],
       },
+      {
+        file: 'apps/web/src/lib/server/content/magic-bytes.ts',
+        suites: [
+          'apps/web/src/lib/server/content/__tests__/magic-bytes.test.ts',
+          'apps/web/src/lib/server/content/__tests__/magic-bytes.batch-h.contract.test.ts',
+          'apps/web/src/lib/server/__tests__/upload-media.batch-h.contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/shared/storage-config.ts',
+        suites: [
+          'apps/web/src/lib/shared/__tests__/storage-config.batch-h.contract.test.ts',
+          'apps/web/src/lib/server/__tests__/upload-media.batch-h.contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/storage/byte-range.ts',
+        suites: [
+          'apps/web/src/lib/server/storage/__tests__/byte-range.batch-h.contract.test.ts',
+          'apps/web/src/routes/api/storage/__tests__/storage-range.batch-h.contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/routes/api/portal/upload.ts',
+        suites: [
+          'apps/web/src/routes/api/portal/__tests__/upload.test.ts',
+          'apps/web/src/routes/api/portal/__tests__/upload.batch-h.contract.test.ts',
+        ],
+      },
     ])
   })
 
@@ -1212,6 +1241,83 @@ describe('the mutations excused as equivalent (B6)', () => {
         line: 'if (ref.current && ref.current.textContent !== label) setRemount((n) => n + 1)',
         replacement: 'n - 1',
         why: 'Any change of the key remounts the span; counting down changes it on every call exactly as counting up does.',
+      },
+      {
+        file: 'apps/web/src/lib/server/content/magic-bytes.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (buf.length < offset + pattern.length) return false',
+        replacement: 'false',
+        why: "The length guard only spares the loop below from reading past the buffer, and a byte read past a Buffer's end is `undefined`, which never equals a pattern byte: the loop returns false for exactly the inputs the guard does.",
+      },
+      {
+        file: 'apps/web/src/lib/server/content/magic-bytes.ts',
+        mutator: 'ArithmeticOperator',
+        line: 'if (buf.length < offset + pattern.length) return false',
+        replacement: 'offset - pattern.length',
+        why: 'Same guard, made weaker: whatever it lets through reaches the loop, where a read past the end is `undefined` and fails the comparison, so the answer is false either way.',
+      },
+      {
+        file: 'apps/web/src/lib/server/content/magic-bytes.ts',
+        mutator: 'BooleanLiteral',
+        line: 'if (buf.length < offset + pattern.length) return false',
+        replacement: 'true',
+        why: 'Reached only from the EBML check with a buffer shorter than the four-byte magic (images are length-checked first). The next read is then at offset 4, past the end, which reads `undefined`, is no length marker, and returns null: a file that short is refused either way, measured with 0- and 3-byte buffers.',
+      },
+      {
+        file: 'apps/web/src/lib/server/content/magic-bytes.ts',
+        mutator: 'ConditionalExpression',
+        line: 'buf.length >= 12 &&',
+        replacement: 'true',
+        why: "Upstream's WebP check: a buffer shorter than 12 bytes yields a slice shorter than four characters, which cannot equal 'WEBP', so the length test decides nothing the comparison does not.",
+      },
+      {
+        file: 'apps/web/src/lib/server/content/magic-bytes.ts',
+        mutator: 'ConditionalExpression',
+        line: "if (buf.length >= 12 && buf.slice(4, 8).toString('ascii') === 'ftyp') {",
+        replacement: 'true',
+        why: "Upstream's AVIF check: below 12 bytes the brand slice is shorter than four characters and never equals 'avif' or 'avis', so the length test decides nothing the brand comparison does not. (The other `true` on this line, for the ftyp test, is killed.)",
+      },
+      {
+        file: 'apps/web/src/lib/server/content/magic-bytes.ts',
+        mutator: 'EqualityOperator',
+        line: 'if (end > limit) return null',
+        replacement: 'end >= limit',
+        why: 'A field that ends exactly at its limit leaves no room after it: for the header size that is an empty header, for an id or size inside the header an element with no payload left for a DocType. Both end in null whichever way this comparison falls, so no input separates `>` from `>=` in what the sniffer answers.',
+      },
+      {
+        file: 'apps/web/src/lib/server/content/magic-bytes.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (end > limit) return null',
+        replacement: 'false',
+        why: 'Without this bound a field running past its limit is still refused downstream: past the buffer the bytes read as `undefined`, the value becomes NaN and every following comparison fails; past the header, any payload that follows ends after the header and `payloadEnd > headerEnd` refuses it. Kept because relying on NaN is not something to read; no input distinguishes it.',
+      },
+      {
+        file: 'apps/web/src/lib/server/content/magic-bytes.ts',
+        mutator: 'EqualityOperator',
+        line: 'while (offset < headerEnd) {',
+        replacement: 'offset <= headerEnd',
+        why: "One more pass at offset == headerEnd reads a field whose limit is its own start: a length of at least one ends past the limit and returns null, and a zero length returns null, the same answer the loop's exit gives.",
+      },
+      {
+        file: 'apps/web/src/lib/shared/storage-config.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (extension === null || !Object.hasOwn(table, extension)) return null',
+        replacement: 'false',
+        why: "Without the null test, `Object.hasOwn(table, null)` looks up the key 'null', which neither extension table has, so a name without an extension is refused the same way.",
+      },
+      {
+        file: 'apps/web/src/routes/api/portal/upload.ts',
+        mutator: 'ConditionalExpression',
+        line: 'if (count === null || count <= limit) return null',
+        replacement: 'false',
+        why: 'A null count is a rate store outage, which fails open. Without the explicit test `null <= limit` is true in JavaScript (null compares as 0), so the outage still lets the upload through: no input separates the two.',
+      },
+      {
+        file: 'apps/web/src/routes/api/portal/upload.ts',
+        mutator: 'StringLiteral',
+        line: "export const Route = createFileRoute('/api/portal/upload')({",
+        replacement: '""',
+        why: 'The path argument is read by the route-tree generator from the source text and is kept nowhere on the route object at runtime (measured: the object createFileRoute returns has no path, id or options.path). The handler wiring that is runtime state is asserted.',
       },
     ])
   })

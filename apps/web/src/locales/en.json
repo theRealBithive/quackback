@@ -1426,5 +1426,10 @@
   "onboarding.account.setupComplete.title": "This workspace is already set up",
   "onboarding.account.setupComplete.signIn": "Sign in with an admin account.",
   "onboarding.noAccess.alreadySetUpTitle": "This workspace is already set up",
-  "onboarding.noAccess.alreadySetUpBody": "Sign in with an admin account to manage it."
+  "onboarding.noAccess.alreadySetUpBody": "Sign in with an admin account to manage it.",
+  "ui.editor.slash.video.title": "Video",
+  "ui.editor.slash.video.description": "Upload an MP4, WebM, MOV, or M4V video",
+  "ui.editor.video.uploadFailed": "Couldn't upload video. Try again.",
+  "ui.editor.action.insertVideo": "Insert Video",
+  "ui.editor.video.remove": "Remove video"
 }

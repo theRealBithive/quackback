@@ -56,6 +56,7 @@ vi.mock('@/lib/client/hooks/use-similar-posts', () => ({
 
 vi.mock('@/lib/client/hooks/use-image-upload', () => ({
   usePostImageUpload: () => ({ upload: vi.fn() }),
+  usePostMediaUpload: () => ({ upload: vi.fn() }),
 }))
 
 vi.mock('@/lib/client/mutations', () => ({

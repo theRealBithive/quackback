@@ -1426,5 +1426,10 @@
   "onboarding.account.setupComplete.title": "此工作区已完成设置",
   "onboarding.account.setupComplete.signIn": "请使用管理员帐户登录。",
   "onboarding.noAccess.alreadySetUpTitle": "此工作区已完成设置",
-  "onboarding.noAccess.alreadySetUpBody": "请使用管理员帐户登录以进行管理。"
+  "onboarding.noAccess.alreadySetUpBody": "请使用管理员帐户登录以进行管理。",
+  "ui.editor.slash.video.title": "视频",
+  "ui.editor.slash.video.description": "上传 MP4、WebM、MOV 或 M4V 视频",
+  "ui.editor.video.uploadFailed": "无法上传视频，请重试。",
+  "ui.editor.action.insertVideo": "插入视频",
+  "ui.editor.video.remove": "移除视频"
 }

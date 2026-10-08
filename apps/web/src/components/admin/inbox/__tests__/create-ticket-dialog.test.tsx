@@ -56,6 +56,7 @@ vi.mock('sonner', () => ({
 vi.mock('@/components/ui/rich-text-editor', () => ({ RichTextEditor: () => null }))
 vi.mock('@/lib/client/hooks/use-image-upload', () => ({
   useImageUpload: () => ({ upload: vi.fn() }),
+  useMediaUpload: () => ({ upload: vi.fn() }),
 }))
 vi.mock('@/lib/client/hooks/use-conversation-composer-attachments', () => ({
   useConversationComposerAttachments: () => ({

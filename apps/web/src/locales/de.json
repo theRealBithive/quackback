@@ -1426,5 +1426,10 @@
   "onboarding.account.setupComplete.title": "Dieser Workspace ist bereits eingerichtet",
   "onboarding.account.setupComplete.signIn": "Melden Sie sich mit einem Administratorkonto an.",
   "onboarding.noAccess.alreadySetUpTitle": "Dieser Workspace ist bereits eingerichtet",
-  "onboarding.noAccess.alreadySetUpBody": "Melden Sie sich mit einem Administratorkonto an, um ihn zu verwalten."
+  "onboarding.noAccess.alreadySetUpBody": "Melden Sie sich mit einem Administratorkonto an, um ihn zu verwalten.",
+  "ui.editor.slash.video.title": "Video",
+  "ui.editor.slash.video.description": "Ein Video im Format MP4, WebM, MOV oder M4V hochladen",
+  "ui.editor.video.uploadFailed": "Das Video konnte nicht hochgeladen werden. Bitte versuchen Sie es erneut.",
+  "ui.editor.action.insertVideo": "Video einfügen",
+  "ui.editor.video.remove": "Video entfernen"
 }

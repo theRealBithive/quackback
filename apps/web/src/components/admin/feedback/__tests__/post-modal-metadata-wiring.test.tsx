@@ -143,7 +143,9 @@ vi.mock('@/lib/client/hooks/use-url-modal', () => ({
 vi.mock('@/lib/client/hooks/use-permission', () => ({ usePermission: () => true }))
 vi.mock('@/lib/client/hooks/use-image-upload', () => ({
   usePostImageUpload: () => ({ upload: vi.fn() }),
+  usePostMediaUpload: () => ({ upload: vi.fn() }),
   usePortalImageUpload: () => ({ upload: vi.fn() }),
+  usePortalMediaUpload: () => ({ upload: vi.fn() }),
 }))
 vi.mock('@/lib/client/mutations/load-more-comments', () => ({
   useLoadMoreAdminComments: () => ({ loadMore: vi.fn(), isLoading: false, hasMore: false }),

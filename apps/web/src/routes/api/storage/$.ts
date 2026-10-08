@@ -3,6 +3,7 @@ import { readBodyWithLimit } from '@/lib/server/utils/read-body'
 import { logger } from '@/lib/server/logger'
 import { currentWorkspaceNamespace } from '@/lib/server/workspaces/workspace-keyed'
 import { redirectPolicy, servedFileHeaders } from '@/lib/server/storage/serve-policy'
+import { isSingleByteRange } from '@/lib/server/storage/byte-range'
 
 const log = logger.child({ component: 'storage' })
 
@@ -96,6 +97,11 @@ export function proxyCacheKey(key: string): string {
 function isNotFound(error: unknown): boolean {
   const e = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } }
   return e?.name === 'NoSuchKey' || e?.name === 'NotFound' || e?.$metadata?.httpStatusCode === 404
+}
+
+function isRangeNotSatisfiable(error: unknown): boolean {
+  const e = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } }
+  return e?.name === 'InvalidRange' || e?.$metadata?.httpStatusCode === 416
 }
 
 const KEY_PREFIX = '/api/storage/'
@@ -227,15 +233,26 @@ export async function handleStorageGet({ request }: { request: Request }): Promi
 
   // Force proxy for email embeds (?email=1) since email clients don't follow redirects
   const forceProxy = url.searchParams.has('email')
+  const requestedRange = request.headers.get('range')
+  if (requestedRange && !isSingleByteRange(requestedRange)) {
+    return new Response(null, { status: 416, headers: { 'Accept-Ranges': 'bytes' } })
+  }
 
   try {
     if (config.s3Proxy || forceProxy) {
-      const cached = proxyCache.get(proxyCacheKey(key))
+      const cached = requestedRange ? undefined : proxyCache.get(proxyCacheKey(key))
       if (cached) {
+        const isVideo = cached.contentType.startsWith('video/')
         return new Response(cached.data, {
           status: 200,
           headers: {
             'Content-Type': cached.contentType,
+            ...(isVideo
+              ? {
+                  'Accept-Ranges': 'bytes',
+                  'Content-Length': String(cached.data.byteLength),
+                }
+              : {}),
             'Cache-Control': isPublicStorageKey(key)
               ? 'public, max-age=31536000, immutable'
               : 'private, max-age=3600, immutable',
@@ -251,7 +268,33 @@ export async function handleStorageGet({ request }: { request: Request }): Promi
         })
       }
 
-      const { body, contentType } = await getS3Object(key)
+      const object = requestedRange
+        ? await getS3Object(key, requestedRange)
+        : await getS3Object(key)
+      const { body, contentType, contentLength, contentRange, acceptRanges } = object
+      const cacheControl = isPublicStorageKey(key)
+        ? 'public, max-age=31536000, immutable'
+        : 'private, max-age=3600, immutable'
+
+      // Video must stay streaming and byte-range aware. Buffering the whole
+      // object before answering makes playback wait for the complete upload and
+      // prevents seeking on self-hosted deployments that enable S3_PROXY.
+      if (contentType.startsWith('video/') || requestedRange) {
+        const headers = new Headers({
+          'Content-Type': contentType,
+          'Cache-Control': cacheControl,
+          Vary: 'Host',
+          'X-Content-Type-Options': 'nosniff',
+          'Accept-Ranges': acceptRanges || 'bytes',
+          // A range request is no way around the download rule: a stored
+          // HTML file fetched with `Range` must not render as a page either.
+          ...servedFileHeaders(key, contentType),
+        })
+        if (contentLength !== undefined) headers.set('Content-Length', String(contentLength))
+        if (contentRange) headers.set('Content-Range', contentRange)
+        return new Response(body, { status: contentRange ? 206 : 200, headers })
+      }
+
       const data = await new Response(body).arrayBuffer()
 
       proxyCache.set(proxyCacheKey(key), data, contentType)
@@ -260,9 +303,7 @@ export async function handleStorageGet({ request }: { request: Request }): Promi
         status: 200,
         headers: {
           'Content-Type': contentType,
-          'Cache-Control': isPublicStorageKey(key)
-            ? 'public, max-age=31536000, immutable'
-            : 'private, max-age=3600, immutable',
+          'Cache-Control': cacheControl,
           Vary: 'Host',
           'X-Content-Type-Options': 'nosniff',
           ...servedFileHeaders(key, contentType),
@@ -303,6 +344,9 @@ export async function handleStorageGet({ request }: { request: Request }): Promi
     // missing asset look like an outage.
     if (isNotFound(error)) {
       return Response.json({ error: 'Not found' }, { status: 404 })
+    }
+    if (isRangeNotSatisfiable(error)) {
+      return new Response(null, { status: 416, headers: { 'Accept-Ranges': 'bytes' } })
     }
     log.error({ err: error }, 'storage object serve failed')
     return Response.json({ error: 'Failed to resolve storage URL' }, { status: 500 })

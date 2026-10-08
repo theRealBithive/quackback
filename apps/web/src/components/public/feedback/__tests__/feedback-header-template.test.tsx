@@ -50,6 +50,7 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/lib/client/hooks/use-image-upload', () => ({
   usePortalImageUpload: () => ({ upload: vi.fn() }),
+  usePortalMediaUpload: () => ({ upload: vi.fn() }),
 }))
 
 vi.mock('@/lib/client/mutations/portal-posts', () => ({

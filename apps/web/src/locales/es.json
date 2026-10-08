@@ -1426,5 +1426,10 @@
   "onboarding.account.setupComplete.title": "Este espacio de trabajo ya está configurado",
   "onboarding.account.setupComplete.signIn": "Inicia sesión con una cuenta de administrador.",
   "onboarding.noAccess.alreadySetUpTitle": "Este espacio de trabajo ya está configurado",
-  "onboarding.noAccess.alreadySetUpBody": "Inicia sesión con una cuenta de administrador para gestionarlo."
+  "onboarding.noAccess.alreadySetUpBody": "Inicia sesión con una cuenta de administrador para gestionarlo.",
+  "ui.editor.slash.video.title": "Vídeo",
+  "ui.editor.slash.video.description": "Sube un vídeo MP4, WebM, MOV o M4V",
+  "ui.editor.video.uploadFailed": "No se pudo subir el vídeo. Inténtalo de nuevo.",
+  "ui.editor.action.insertVideo": "Insertar vídeo",
+  "ui.editor.video.remove": "Quitar vídeo"
 }
