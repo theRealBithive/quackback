@@ -165,7 +165,7 @@ other run was changing underneath them. Two checkouts must not share the
 test database while either runs a full set; give the second one its own
 `DATABASE_URL` (the web config already reads it from the environment).
 
-## 7x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+## 8x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
 `lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
 `error:03000098:digital envelope routines::invalid digest`. It is not the repo:
@@ -230,6 +230,13 @@ a forbidden request header; not verified. It cost a checkout of `main` and a
 second run to rule the batch out. Until it is fixed, treat these two failures
 as known on this machine and keep them out of any run whose coverage report
 matters.
+
+Sixth case, upstream batch J: the flag was passed, and the report was still
+lost. `--coverage.reportOnFailure` **without `=true`** does not turn the option
+on — the 861-file run ended `12 failed | 846 passed` after eighteen minutes and
+left `coverage/local/.tmp` behind with no `coverage-final.json`. Only the
+spelled-out `--coverage.reportOnFailure=true`, as in the block above, works.
+Both fixes above would have made the spelling irrelevant.
 
 ## 6x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
