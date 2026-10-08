@@ -290,6 +290,9 @@ export async function handleStorageGet({ request }: { request: Request }): Promi
           Vary: 'Host',
           'X-Content-Type-Options': 'nosniff',
           'Accept-Ranges': acceptRanges || 'bytes',
+          // A range request is no way around the download rule: a stored
+          // HTML file fetched with `Range` must not render as a page either.
+          ...servedFileHeaders(key, contentType),
         })
         if (contentLength !== undefined) headers.set('Content-Length', String(contentLength))
         if (contentRange) headers.set('Content-Range', contentRange)
