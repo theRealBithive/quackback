@@ -501,6 +501,35 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/lib/server/events/__tests__/event-reactions-contract.test.ts',
         ],
       },
+      {
+        file: 'apps/web/src/lib/server/functions/widget-portal-gate.ts',
+        suites: [
+          'apps/web/src/lib/server/functions/__tests__/widget-portal-gate.test.ts',
+          'apps/web/src/lib/server/functions/__tests__/widget-portal-gate.db.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/e2e-widget-harness.ts',
+        suites: [
+          'apps/web/src/lib/server/__tests__/e2e-widget-harness-gate.test.ts',
+          'apps/web/src/lib/server/__tests__/e2e-widget-harness.test.ts',
+          'apps/web/src/lib/server/__tests__/e2e-widget-harness-route.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/routes/auth.widget-handoff.tsx',
+        suites: [
+          'apps/web/src/routes/__tests__/auth.widget-handoff.test.ts',
+          'apps/web/src/routes/__tests__/auth.widget-handoff-promotion.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/auth/mcp-dcr-scopes.ts',
+        suites: [
+          'apps/web/src/lib/server/auth/__tests__/mcp-dcr-scopes.test.ts',
+          'apps/web/src/routes/api/auth/__tests__/dcr-redirect-restore.test.ts',
+        ],
+      },
     ])
   })
 
