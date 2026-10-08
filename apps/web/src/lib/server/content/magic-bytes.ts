@@ -96,8 +96,9 @@ export function sniffImageMime(buf: Buffer): string | null {
  * Sniff the browser-playable video formats accepted by feedback uploads.
  *
  * MP4 is an ISO Base Media File Format container, identified by its `ftyp`
- * box. AVIF uses the same container, so reject its brands before accepting the
- * file as video. WebM starts with the EBML header used by Matroska/WebM.
+ * box. AVIF and HEIC use the same container, so a file naming any of their
+ * brands is refused as a video. WebM is an EBML document whose DocType is `webm`;
+ * Matroska carries the same magic with another DocType.
  */
 export type SniffedVideoMime = 'video/mp4' | 'video/webm'
 
@@ -115,13 +116,98 @@ export function canonicalizeVideoMime(mime: string): SniffedVideoMime | null {
   return null
 }
 
-export function sniffVideoMime(buf: Buffer): SniffedVideoMime | null {
-  if (buf.length >= 12 && buf.slice(4, 8).toString('ascii') === 'ftyp') {
-    const brand = buf.slice(8, 12).toString('ascii')
-    if (!ISO_IMAGE_BRANDS.has(brand)) return 'video/mp4'
+/**
+ * The brands an ISO media `ftyp` box declares: the major brand, then every
+ * compatible brand inside the box. A still image may name its AVIF or HEIC
+ * family only among the compatible brands, behind a profile major brand, so the
+ * major brand alone does not say whether the file is an image.
+ */
+function isoMediaBrands(buf: Buffer): string[] {
+  const declaredBoxSize = buf.readUInt32BE(0)
+  const boxEnd = Math.min(declaredBoxSize, buf.length)
+  const brands = [buf.toString('latin1', 8, 12)]
+  const firstCompatibleBrand = 16
+  for (let offset = firstCompatibleBrand; offset + 4 <= boxEnd; offset += 4) {
+    brands.push(buf.toString('latin1', offset, offset + 4))
   }
+  return brands
+}
 
-  if (startsWithAt(buf, 0, [0x1a, 0x45, 0xdf, 0xa3])) return 'video/webm'
+function isIsoMediaVideo(buf: Buffer): boolean {
+  if (buf.length < 12) return false
+  if (buf.toString('latin1', 4, 8) !== 'ftyp') return false
+  const declaresAnImage = isoMediaBrands(buf).some((brand) => ISO_IMAGE_BRANDS.has(brand))
+  return !declaresAnImage
+}
 
+const EBML_MAGIC = [0x1a, 0x45, 0xdf, 0xa3]
+const EBML_DOCTYPE_ID = 0x4282
+
+/** Length in bytes of the EBML variable-length integer starting with `firstByte`, or 0. */
+function ebmlVarIntLength(firstByte: number): number {
+  for (let length = 1; length <= 8; length++) {
+    const marker = 0x80 >> (length - 1)
+    if (firstByte & marker) return length
+  }
+  return 0
+}
+
+/** Value of the variable-length integer at `offset`, its length marker removed. */
+function readEbmlVarInt(buf: Buffer, offset: number, length: number): number {
+  const marker = 0x80 >> (length - 1)
+  let value = buf[offset] & (marker - 1)
+  for (let index = 1; index < length; index++) {
+    value = value * 256 + buf[offset + index]
+  }
+  return value
+}
+
+/** Element id at `offset`, the length marker kept (ids are written that way). */
+function readEbmlId(buf: Buffer, offset: number, length: number): number {
+  let id = 0
+  for (let index = 0; index < length; index++) {
+    id = id * 256 + buf[offset + index]
+  }
+  return id
+}
+
+/**
+ * The DocType the EBML header at the start of `buf` declares, or null when the
+ * header is cut short, malformed, or names none. Reads only inside the header.
+ */
+function ebmlDocType(buf: Buffer): string | null {
+  if (!startsWithAt(buf, 0, EBML_MAGIC)) return null
+  const headerSizeOffset = EBML_MAGIC.length
+  if (buf.length <= headerSizeOffset) return null
+  const headerSizeLength = ebmlVarIntLength(buf[headerSizeOffset])
+  if (headerSizeLength === 0 || buf.length < headerSizeOffset + headerSizeLength) return null
+  const headerStart = headerSizeOffset + headerSizeLength
+  const headerSize = readEbmlVarInt(buf, headerSizeOffset, headerSizeLength)
+  const headerEnd = headerStart + headerSize
+  if (headerEnd > buf.length) return null
+
+  let offset = headerStart
+  while (offset < headerEnd) {
+    const idLength = ebmlVarIntLength(buf[offset])
+    if (idLength === 0 || idLength > 4) return null
+    const sizeOffset = offset + idLength
+    if (sizeOffset >= headerEnd) return null
+    const sizeLength = ebmlVarIntLength(buf[sizeOffset])
+    if (sizeLength === 0 || sizeOffset + sizeLength > headerEnd) return null
+    const payloadStart = sizeOffset + sizeLength
+    const payloadEnd = payloadStart + readEbmlVarInt(buf, sizeOffset, sizeLength)
+    if (payloadEnd > headerEnd) return null
+    if (readEbmlId(buf, offset, idLength) === EBML_DOCTYPE_ID) {
+      return buf.toString('latin1', payloadStart, payloadEnd)
+    }
+    offset = payloadEnd
+  }
+  return null
+}
+
+export function sniffVideoMime(buf: Buffer): SniffedVideoMime | null {
+  if (isIsoMediaVideo(buf)) return 'video/mp4'
+  // Matroska shares the EBML magic with WebM; only the DocType tells them apart.
+  if (ebmlDocType(buf) === 'webm') return 'video/webm'
   return null
 }

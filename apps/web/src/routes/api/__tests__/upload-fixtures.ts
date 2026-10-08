@@ -36,7 +36,18 @@ export function mockImageFile(name: string, type: string, extraBytes = 0): File 
 export function mockVideoFile(name = 'recording.mp4', type = 'video/mp4', extraBytes = 0): File {
   const bytes =
     type === 'video/webm'
-      ? [0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0]
+      ? // An EBML header whose DocType names WebM: the magic alone is Matroska's too.
+        [
+          0x1a,
+          0x45,
+          0xdf,
+          0xa3,
+          0x87,
+          0x42,
+          0x82,
+          0x84,
+          ...'webm'.split('').map((c) => c.charCodeAt(0)),
+        ]
       : [
           0,
           0,

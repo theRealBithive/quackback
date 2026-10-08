@@ -77,8 +77,13 @@ describe('sniffVideoMime', () => {
     expect(sniffVideoMime(Buffer.from('\0\0\0\x18ftypmp42\0\0\0\0', 'binary'))).toBe('video/mp4')
   })
 
-  it('detects WebM from the EBML header', () => {
-    expect(sniffVideoMime(bytes(0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0))).toBe('video/webm')
+  // Corrected for batch H (H2): the EBML magic alone is shared with Matroska,
+  // so a bare magic no longer proves WebM; the header's DocType has to say so.
+  it('detects WebM from the EBML header DocType', () => {
+    const docType = [0x42, 0x82, 0x84, ...Buffer.from('webm')]
+    expect(sniffVideoMime(bytes(0x1a, 0x45, 0xdf, 0xa3, 0x80 | docType.length, ...docType))).toBe(
+      'video/webm'
+    )
   })
 
   it('detects a QuickTime MOV container as ISO media', () => {
