@@ -35,6 +35,22 @@ import { enqueueJob, type ClaimedJob } from '@/lib/server/jobs/job-queue'
 import { getExecuteRows } from '@/lib/server/utils/execute-rows'
 import type { EventActor, EventConversationRef, EventData, EventMessageData } from '../types'
 
+/**
+ * The real logger, with every child it hands out kept by its component name,
+ * so a test can see whether a module wrote a log line at all.
+ */
+const loggers = vi.hoisted(() => new Map<string, Record<string, unknown>>())
+vi.mock('@/lib/server/logger', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/server/logger')>()
+  const realChild = actual.logger.child.bind(actual.logger)
+  const child = (bindings: Record<string, unknown>, ...rest: unknown[]) => {
+    const made = (realChild as (...args: unknown[]) => Record<string, unknown>)(bindings, ...rest)
+    if (typeof bindings.component === 'string') loggers.set(bindings.component, made)
+    return made
+  }
+  return { ...actual, logger: Object.assign(Object.create(actual.logger), { child }) }
+})
+
 vi.mock('@/lib/server/db', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/db')>()),
   db: (await import('@/lib/server/__tests__/db-test-fixture')).testDb,
@@ -293,6 +309,7 @@ describe.skipIf(!fixture.available)('event reactions contract (real DB, rolled b
     await closeTicketNatively(seeded)
     const [row] = await eventRowsFor(seeded.ticketId)
     reactions.recordSlaFromEvent.mockRejectedValueOnce(new Error('sla store down'))
+    const errorLog = vi.spyOn(loggers.get('event-reactions') as { error: () => void }, 'error')
 
     const queue = privateReactionQueue()
     try {
@@ -318,6 +335,10 @@ describe.skipIf(!fixture.available)('event reactions contract (real DB, rolled b
       queue.release()
     }
 
+    // The failed attempt is logged by the reaction runner itself, not only
+    // recorded on the job row.
+    expect(errorLog).toHaveBeenCalledTimes(1)
+    errorLog.mockRestore()
     expect(reactions.recordSlaFromEvent).toHaveBeenCalledTimes(2)
     for (const [event] of reactions.recordSlaFromEvent.mock.calls) {
       expect(event).toMatchObject({ type: 'ticket.status_changed', id: row.eventId })

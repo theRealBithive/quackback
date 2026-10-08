@@ -1409,13 +1409,6 @@
     },
     {
       "file": "apps/web/src/lib/server/events/event-reactions.ts",
-      "mutator": "BlockStatement",
-      "line": "for (const { reaction, err } of failures) {",
-      "replacement": "{}",
-      "why": "The loop body only logs each failed reaction. The job still fails with the first failure's error, which runJob records on the row as last_error and which retries the job, so the job's outcome, retry and row are identical without it. Only the per-reaction log lines are lost, which no test can see except through the logger."
-    },
-    {
-      "file": "apps/web/src/lib/server/events/event-reactions.ts",
       "mutator": "ObjectLiteral",
       "line": "log.error({ err, event_type: event.type, event_id: eventId, reaction }, 'event reaction failed')",
       "replacement": "{}",
@@ -1448,13 +1441,6 @@
       "line": "if (event.type !== 'ticket.status_changed' || event.data.newStatus !== 'closed') {",
       "replacement": "false",
       "why": "The type half narrows the event for TypeScript. runReactionJob calls this reaction only for the types EVENT_REACTIONS lists for it, which is ticket.status_changed alone, so that half is false for every event that reaches it; the close half, which does decide, is killed by the non-close status test."
-    },
-    {
-      "file": "apps/web/src/lib/server/events/emit.ts",
-      "mutator": "BlockStatement",
-      "line": "} catch (error) {",
-      "replacement": "{}",
-      "why": "The catch body only logs. Emptied, the failure is still swallowed (the try/catch stays), so emitBestEffort still resolves without writing anything and the caller's committed mutation stands, which emit.test asserts. Only the warning is lost, which no test can see except through the logger."
     }
   ]
 }

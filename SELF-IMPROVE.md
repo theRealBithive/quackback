@@ -2442,6 +2442,16 @@ Not every id column is a uuid: `events.event_id` is text and stores `evt_…`
 (not `event_…`) verbatim, which is also why a mutant of the prefix in
 `createId('event')` survives any test that only round-trips the id.
 
+## 1x — A coverage run without its own `reportsDirectory` deletes every report under `coverage/`
+
+`--coverage.enabled --coverage.reporter=text` for a quick look at one file
+writes to the default directory, `coverage/`, and cleans it first. That
+removed `coverage/local` from an 18-minute full run, so the next
+`diff-coverage-check.ts` judged only the quick run's suites and reported
+dozens of "never executed" lines that the full run had covered. Give every
+run its own `--coverage.reportsDirectory=coverage/<name>`; the gate merges all
+of them.
+
 ## Resolved
 
 Entries that were actually fixed, with what fixed them.

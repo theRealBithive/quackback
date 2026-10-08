@@ -20,6 +20,22 @@ vi.mock('@/lib/server/db', async (importOriginal) => {
   }
 })
 
+/**
+ * The real logger, with every child it hands out kept by its component name,
+ * so a test can see whether a module wrote a log line at all.
+ */
+const loggers = vi.hoisted(() => new Map<string, Record<string, unknown>>())
+vi.mock('@/lib/server/logger', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/server/logger')>()
+  const realChild = actual.logger.child.bind(actual.logger)
+  const child = (bindings: Record<string, unknown>, ...rest: unknown[]) => {
+    const made = (realChild as (...args: unknown[]) => Record<string, unknown>)(bindings, ...rest)
+    if (typeof bindings.component === 'string') loggers.set(bindings.component, made)
+    return made
+  }
+  return { ...actual, logger: Object.assign(Object.create(actual.logger), { child }) }
+})
+
 vi.mock('@/lib/server/workspaces/workspace-context', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/workspaces/workspace-context')>()),
   getCurrentWorkspace: () => ({ workspaceKey: 'ws_emit' }),
@@ -193,6 +209,7 @@ describe('emit()', () => {
     expect(written).toHaveLength(1)
 
     const failedEntity = createId('post')
+    const warn = vi.spyOn(loggers.get('emit') as { warn: () => void }, 'warn')
     await expect(
       emitBestEffort(plainDef, {
         // @ts-expect-error: deliberately wrong payload shape, so the write fails
@@ -203,6 +220,9 @@ describe('emit()', () => {
     ).resolves.toBeUndefined()
     const notWritten = await db.select().from(events).where(eq(events.entityId, failedEntity))
     expect(notWritten).toHaveLength(0)
+    // Swallowed, but not silently: a lost event leaves a trace for an operator.
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
   })
 
   it('queues a job per reaction queue in the same tx, only for a type that has reactions', async () => {
