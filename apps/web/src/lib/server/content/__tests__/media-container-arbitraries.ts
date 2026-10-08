@@ -145,12 +145,29 @@ const EBML_SIBLINGS: number[][] = [
   ebmlElement([0x42, 0x85], [2]), // DocTypeReadVersion
 ]
 
-/** An EBML header whose sizes are written in one to eight bytes, siblings in any order. */
+/** An EBML Void element (id 0xEC) of `length` zero bytes, its size written in `sizeWidth` bytes. */
+function ebmlVoid(length: number, sizeWidth: number): number[] {
+  return ebmlElement([0xec], new Array<number>(length).fill(0), sizeWidth)
+}
+
+/**
+ * An EBML header whose sizes are written in two to eight bytes (one when they
+ * fit), siblings in any order, padded with a Void element of up to 600 bytes so
+ * that a size can exceed one byte's worth of value.
+ */
 export function ebmlDocument(docType: 'webm' | 'matroska'): fc.Arbitrary<Buffer> {
   return withTrailer(
     fc
-      .tuple(fc.shuffledSubarray(EBML_SIBLINGS), fc.integer({ min: 1, max: 8 }))
-      .map(([siblings, sizeWidth]) => ebmlHeader(docType, siblings, sizeWidth))
+      .tuple(
+        fc.shuffledSubarray(EBML_SIBLINGS),
+        fc.integer({ min: 1, max: 8 }),
+        fc.option(fc.nat(600), { nil: undefined })
+      )
+      .map(([siblings, sizeWidth, voidLength]) => {
+        const padding = voidLength === undefined ? [] : [ebmlVoid(voidLength, 2)]
+        const width = voidLength !== undefined && sizeWidth === 1 ? 2 : sizeWidth
+        return ebmlHeader(docType, [...padding, ...siblings], width)
+      })
   )
 }
 

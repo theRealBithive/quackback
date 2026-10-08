@@ -98,6 +98,7 @@ describe('POST /api/portal/upload', () => {
     vi.mocked(isS3Configured).mockReturnValue(false)
     const res = await handlePortalUpload({ request: makeRequest() })
     expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: 'Storage not configured' })
   })
 
   it('returns 400 when no file provided', async () => {

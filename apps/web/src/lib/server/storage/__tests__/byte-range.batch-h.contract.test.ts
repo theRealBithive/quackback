@@ -60,6 +60,9 @@ describe('the Range headers the proxy passes on (H13, H14, H15)', () => {
       })
     )
     expect(isSingleByteRange('bytes=0-0')).toBe(true)
+    expect(isSingleByteRange('bytes=12-')).toBe(true)
+    expect(isSingleByteRange('bytes=-12')).toBe(true)
+    expect(isSingleByteRange('bytes=12-34')).toBe(true)
     expect(isSingleByteRange('bytes=7-7')).toBe(true)
   })
 
@@ -91,6 +94,12 @@ describe('the Range headers the proxy passes on (H13, H14, H15)', () => {
       'bytes=0-1x',
       '0-1',
       '',
+      'bytes=-5,',
+      'bytes=-5 1',
+      'abytes=-5',
+      'bytes=--5',
+      'bytes=5-x',
+      'abytes=5-6',
     ]) {
       expect(isSingleByteRange(header), header).toBe(false)
     }

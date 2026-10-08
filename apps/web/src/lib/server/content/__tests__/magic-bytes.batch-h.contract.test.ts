@@ -127,6 +127,85 @@ describe('what the bytes are decides the container (H2)', () => {
     expect(() => sniffVideoMime(truncated)).not.toThrow()
   })
 
+  it('does not take a header behind any other magic for WebM (H2)', () => {
+    const header = ebmlHeader('webm')
+    for (let index = 0; index < 4; index++) {
+      const altered = [...header]
+      altered[index] = altered[index] ^ 0x01
+      expect(sniffVideoMime(Buffer.from(altered)), `byte ${index}`).toBeNull()
+    }
+  })
+
+  it('does not read a header whose elements are malformed (H2)', () => {
+    const docType = [0x42, 0x82, 0x84, ...Buffer.from('webm')]
+    const withBody = (body: number[]) =>
+      Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x80 | body.length, ...body])
+    // An element id of 0x00 has no length marker.
+    expect(sniffVideoMime(withBody([0x00, 0x81, 0x01, ...docType]))).toBeNull()
+    // An element size of 0x00 has no length marker either.
+    expect(sniffVideoMime(withBody([0x42, 0x86, 0x00, ...docType]))).toBeNull()
+    // A header size of 0x00 is no size at all.
+    expect(sniffVideoMime(Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00, ...docType]))).toBeNull()
+    // An element whose payload runs past the header's end.
+    expect(sniffVideoMime(withBody([0x42, 0x86, 0x8f, 0x01, ...docType]))).toBeNull()
+    // An id that runs past the header's end.
+    expect(sniffVideoMime(withBody([...docType, 0x10]))).toBe('video/webm')
+    expect(sniffVideoMime(withBody([0x10, 0x00, ...docType]))).toBeNull()
+    // The DocType sitting right at the end of the header is read.
+    expect(sniffVideoMime(withBody(docType))).toBe('video/webm')
+  })
+
+  it('does not trust a header that claims more bytes than the file holds (H2)', () => {
+    // The DocType comes first and is complete, but the header it belongs to is cut short.
+    const docType = [0x42, 0x82, 0x84, ...Buffer.from('webm')]
+    const sibling = [0x42, 0x86, 0x81, 0x01]
+    const body = [...docType, ...sibling]
+    const complete = [0x1a, 0x45, 0xdf, 0xa3, 0x80 | body.length, ...body]
+    expect(sniffVideoMime(Buffer.from(complete))).toBe('video/webm')
+    expect(sniffVideoMime(Buffer.from(complete.slice(0, complete.length - 1)))).toBeNull()
+  })
+
+  it('does not read a DocType whose value runs past the header it belongs to (H2)', () => {
+    const docType = [0x42, 0x82, 0x84, ...Buffer.from('webm')]
+    // The header claims one byte less than its DocType element needs; the
+    // missing byte is there, but it belongs to whatever follows the header.
+    const bytes = [0x1a, 0x45, 0xdf, 0xa3, 0x80 | (docType.length - 1), ...docType]
+    expect(sniffVideoMime(Buffer.from(bytes))).toBeNull()
+  })
+
+  it('does not read a file shorter than the EBML magic as WebM (H2)', () => {
+    expect(sniffVideoMime(Buffer.from([0x1a, 0x45, 0xdf]))).toBeNull()
+    expect(sniffVideoMime(Buffer.from([]))).toBeNull()
+  })
+
+  it('needs a whole ftyp box before it calls a file a video (H2)', () => {
+    const box = ftypBox('isom', [])
+    expect(box).toHaveLength(16)
+    expect(sniffVideoMime(Buffer.from(box))).toBe('video/mp4')
+    for (let length = 8; length < 16; length++) {
+      expect(sniffVideoMime(Buffer.from(box.slice(0, length))), `length ${length}`).toBeNull()
+    }
+    const notFtyp = [...box]
+    notFtyp[4] = 0x67 // 'g' instead of 'f'
+    expect(sniffVideoMime(Buffer.from(notFtyp))).toBeNull()
+  })
+
+  it('identifies a still image only from a whole signature (H2)', () => {
+    const ascii = (text: string) => [...Buffer.from(text, 'latin1')]
+    expect(sniffImageMime(Buffer.from([0xff, 0xd8, 0xff]))).toBeNull()
+    expect(sniffImageMime(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]))).toBe('image/jpeg')
+    expect(sniffImageMime(Buffer.from([...ascii('RIFF'), 0, 0, 0, 0, ...ascii('WEBP')]))).toBe(
+      'image/webp'
+    )
+    expect(sniffImageMime(Buffer.from([...ascii('RIFX'), 0, 0, 0, 0, ...ascii('WEBP')]))).toBeNull()
+    expect(sniffImageMime(Buffer.from([...ascii('RIFF'), 0, 0, 0, 0, ...ascii('WAVE')]))).toBeNull()
+    expect(sniffImageMime(Buffer.from([...ascii('RIFF'), 0, 0, 0, 0, ...ascii('WEB')]))).toBeNull()
+    expect(sniffImageMime(Buffer.from([0, 0, 0, 12, ...ascii('ftypavif')]))).toBe('image/avif')
+    expect(sniffImageMime(Buffer.from([0, 0, 0, 12, ...ascii('ftypavis')]))).toBe('image/avif')
+    expect(sniffImageMime(Buffer.from([0, 0, 0, 12, ...ascii('xtypavif')]))).toBeNull()
+    expect(sniffImageMime(Buffer.from([0, 0, 0, 12, ...ascii('ftypmp42')]))).toBeNull()
+  })
+
   it('never reads a still image as a video, nor a video as a still image (H2)', async () => {
     await fc.assert(
       fc.property(anyRasterImage, ({ type, bytes }) => {

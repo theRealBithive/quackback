@@ -88,7 +88,7 @@ import { auth } from '@/lib/server/auth'
 import { db } from '@/lib/server/db'
 import { getSettings } from '@/lib/server/functions/workspace'
 import { uploadObject } from '@/lib/server/storage/s3'
-import { handlePortalUpload } from '../upload'
+import { handlePortalUpload, Route } from '../upload'
 
 const MEGABYTE = 1024 * 1024
 const PER_SESSION_LIMIT = 20
@@ -170,6 +170,44 @@ describe('nobody without a session can upload (H5)', () => {
     vi.mocked(db.query.principal.findFirst).mockResolvedValueOnce(undefined)
     const response = await uploadFrom('203.0.113.7')
     expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'Forbidden' })
+    expect(uploadObject).not.toHaveBeenCalled()
+  })
+
+  it('reads the session from the request itself, and the principal by that session (H5)', async () => {
+    freshSession('user')
+    const formData = new FormData()
+    formData.append('file', mockImageFile('shot.png', 'image/png'))
+    const request = new Request('http://localhost/api/portal/upload', {
+      method: 'POST',
+      body: formData,
+      headers: { cookie: 'session=abc' },
+    })
+    await handlePortalUpload({ request })
+    expect(auth.api.getSession).toHaveBeenCalledWith({ headers: request.headers })
+    expect(db.query.principal.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ columns: { type: true } })
+    )
+  })
+
+  it('is the handler the route serves for POST (H5)', () => {
+    const options = Route.options as unknown as {
+      server: { handlers: { POST: unknown } }
+    }
+    expect(options.server.handlers.POST).toBe(handlePortalUpload)
+  })
+
+  it('refuses a body that is not a form, and stores nothing (H4)', async () => {
+    freshSession('user')
+    const response = await handlePortalUpload({
+      request: new Request('http://localhost/api/portal/upload', {
+        method: 'POST',
+        body: 'not a form',
+        headers: { 'content-type': 'multipart/form-data; boundary=x' },
+      }),
+    })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'Invalid request body' })
     expect(uploadObject).not.toHaveBeenCalled()
   })
 })
@@ -230,6 +268,7 @@ describe('an anonymous visitor uploads only where anonymous visitors may post (H
       freshSession('anonymous')
       const response = await uploadFrom('203.0.113.7')
       expect(response.status, JSON.stringify(settings)).toBe(403)
+      expect(await response.json()).toEqual({ error: 'Forbidden' })
     }
     expect(uploadObject).not.toHaveBeenCalled()
   })
