@@ -100,7 +100,17 @@ function keepSsrOnlyDepsOutOfClientOptimizer(): PluginOption {
  * exactly that shape, so the splat route never runs and Vite answers
  * `Cannot GET`. Clear the asset signals for this prefix only; Nitro's
  * post-middleware then serves the bytes.
+ *
+ * The widget SDK has the same shape: a host page's
+ * `<script src="/api/widget/sdk.js">` arrives with `sec-fetch-dest: script`
+ * and a `.js` extension, so under `vite dev` it got `Cannot GET` and the e2e
+ * harness page (J31) never mounted the widget. That one path is let through
+ * too.
  */
+function isServedByNitroDespiteAssetShape(pathname: string): boolean {
+  return pathname.startsWith('/api/storage/') || pathname === '/api/widget/sdk.js'
+}
+
 function letNitroServeStorageAssets(): PluginOption {
   return {
     name: 'quackback:let-nitro-serve-storage-assets',
@@ -108,7 +118,7 @@ function letNitroServeStorageAssets(): PluginOption {
     configureServer(server) {
       server.middlewares.use((req, _res, next) => {
         const pathname = req.url?.split('?')[0] ?? ''
-        if (!pathname.startsWith('/api/storage/')) {
+        if (!isServedByNitroDespiteAssetShape(pathname)) {
           next()
           return
         }
