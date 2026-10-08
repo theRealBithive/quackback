@@ -45,6 +45,7 @@ import {
   anyRasterImage,
   ebmlDocument,
   ebmlHeader,
+  ebmlWithoutDocType,
   ftypBox,
   isoMediaImage,
   isoMediaVideo,
@@ -85,6 +86,26 @@ describe('what the bytes are decides the container (H2)', () => {
   it('does not take a bare EBML magic, with no DocType to read, for WebM (H2)', () => {
     expect(sniffVideoMime(Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0]))).toBeNull()
     expect(sniffVideoMime(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))).toBeNull()
+  })
+
+  it('does not take an EBML header that names no DocType for WebM (H2)', async () => {
+    await fc.assert(
+      fc.property(ebmlWithoutDocType, (bytes) => {
+        expect(sniffVideoMime(bytes)).toBeNull()
+      })
+    )
+  })
+
+  it('reads the DocType whatever width its sizes are written in (H2)', () => {
+    for (let width = 1; width <= 8; width++) {
+      expect(sniffVideoMime(Buffer.from(ebmlHeader('webm', [], width))), `width ${width}`).toBe(
+        'video/webm'
+      )
+      expect(
+        sniffVideoMime(Buffer.from(ebmlHeader('matroska', [], width))),
+        `width ${width}`
+      ).toBeNull()
+    }
   })
 
   it('does not read a DocType past the end of a truncated header (H2)', () => {

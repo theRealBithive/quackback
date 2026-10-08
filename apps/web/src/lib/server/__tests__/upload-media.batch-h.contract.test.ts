@@ -273,6 +273,14 @@ describe('what a file is decides whether it is stored (H2, H4)', () => {
     }
   })
 
+  it('reports a store that failed as a failure, never with an address (H4)', async () => {
+    mockSend.mockRejectedValueOnce(new Error('bucket unavailable'))
+    const bytes = fc.sample(isoMediaVideo, 1)[0]
+    const response = await upload(bytes, 'clip.mp4', 'video/mp4')
+    expect(response.status).toBe(500)
+    expect(await response.json()).not.toHaveProperty('publicUrl')
+  })
+
   it('stores nothing when the form carries no file (H4)', async () => {
     const response = await uploadMediaFromFormData(new FormData(), 'portal-media')
     expect(response.status).toBe(400)

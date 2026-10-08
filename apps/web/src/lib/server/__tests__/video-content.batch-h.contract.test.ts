@@ -55,6 +55,7 @@ vi.mock('@/lib/server/config', () => ({ config: mockConfig }))
 
 import { sanitizeTiptapContent } from '../sanitize-tiptap'
 import { generateContentHTML } from '@/lib/shared/content-html'
+import { contentJsonToMarkdown } from '../markdown-tiptap'
 import type { TiptapContent } from '@/lib/server/db'
 
 const ACCEPTED_VIDEO_TYPES = [
@@ -266,6 +267,34 @@ describe('a video source that is not http(s) is never rendered (H9)', () => {
     expect(generateContentHTML(postWithVideo({ src: 'data:video/mp4;base64,AAAA' }))).not.toContain(
       '<video'
     )
+  })
+})
+
+describe('a source no URL parser can read is never rendered (H9)', () => {
+  it('renders nothing for a source that does not parse (H9)', () => {
+    for (const src of ['http://[::1', 'https://exa mple.com:99999/x.mp4', 'http://%zz/']) {
+      expect(videoElements(generateContentHTML(postWithVideo({ src }))), src).toHaveLength(0)
+      expect(save({ src }).content?.[1]?.attrs?.src, src).toBe('')
+    }
+  })
+})
+
+describe('a saved video stays in the post’s markdown (H12)', () => {
+  it('keeps a saved video as a link to its source when the post is turned into markdown (H12)', async () => {
+    await fc.assert(
+      fc.property(ownStorageSrc, (src) => {
+        const markdown = contentJsonToMarkdown(save({ src, mimeType: 'video/mp4' }), 'fallback')
+        expect(markdown).toContain(src)
+        expect(markdown).toContain('Steps to reproduce')
+      })
+    )
+  })
+
+  it('marks a video whose source was removed, instead of dropping it silently (H12)', () => {
+    const markdown = contentJsonToMarkdown(save({ src: 'https://evil.test/x.mp4' }), 'fallback')
+    // Markdown escapes the brackets so the placeholder is not read as a link.
+    expect(markdown).toContain('\\[video\\]')
+    expect(markdown).not.toContain('evil.test')
   })
 })
 

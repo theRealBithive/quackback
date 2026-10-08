@@ -320,6 +320,21 @@ describe('videos saved before an editor offered them stay (H12)', () => {
     })
   }
 
+  it('reads a video saved as editor HTML back into the same video (H12)', () => {
+    const editor = new Editor({
+      extensions: buildExtensions({}, { placeholder: '', intl: intlFor('en') }),
+      content:
+        '<video data-quackback-video="1" src="/api/storage/portal-media/old.webm" type="video/webm" title="Old"></video>' +
+        '<video data-quackback-video="1" src="/api/storage/portal-media/untyped.mp4"></video>',
+    })
+    const videos = editor.getJSON().content?.filter((node) => node.type === 'video')
+    expect(videos?.map((node) => node.attrs)).toEqual([
+      { src: '/api/storage/portal-media/old.webm', mimeType: 'video/webm', title: 'Old' },
+      { src: '/api/storage/portal-media/untyped.mp4', mimeType: 'video/mp4', title: null },
+    ])
+    editor.destroy()
+  })
+
   it('the reader still sees a saved video (H12)', () => {
     renderInGerman(<RichTextContent content={POST_WITH_VIDEO} />)
     const video = document.querySelector('video')
@@ -380,6 +395,8 @@ describe('every control and message the video feature adds reads in the page’s
     const remove = await screen.findByLabelText(german['ui.editor.video.remove'])
     expect(screen.queryByLabelText('Remove video')).toBeNull()
     const editor = await mountedEditor()
+    // Pressing the button must not take the selection away from the video first.
+    expect(fireEvent.mouseDown(remove)).toBe(false)
     fireEvent.click(remove)
     await waitFor(() =>
       expect(editor.getJSON().content?.some((node) => node.type === 'video')).toBe(false)
