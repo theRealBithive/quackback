@@ -183,7 +183,8 @@ describe('owner and lifecycle actions (J7)', () => {
         })
       }
     }
-  })
+    // Cold imports of the ownership and wipe modules dominate this test.
+  }, 60_000)
 })
 
 describe('finishing onboarding (J7)', () => {

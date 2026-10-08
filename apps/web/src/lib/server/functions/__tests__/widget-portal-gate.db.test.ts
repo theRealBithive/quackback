@@ -93,7 +93,7 @@ vi.mock('@/lib/server/functions/workspace', () => ({
 }))
 
 import { getOptionalWidgetAuth, requireWidgetAuth } from '../widget-auth'
-import { isPortalGateLiftedForWidget } from '../widget-portal-gate'
+import { hasSignedWidgetIdentity, isPortalGateLiftedForWidget } from '../widget-portal-gate'
 
 const fixture = await createDbTestFixture({
   probe: async (db) => {
@@ -249,6 +249,27 @@ describe.skipIf(!fixture.available)('the signed flag on a real widget session (J
 
     expect(ctx.scope).toBe('widget')
     expect(ctx.signedWidgetIdentity).toBe(true)
+  })
+
+  it('is false when the provenance lookup fails, so an outage never lifts the gate (J22)', async () => {
+    const { sessionId } = await seedBearerSession({
+      role: 'user',
+      type: 'user',
+      scope: 'widget',
+      provenance: 'signed row',
+    })
+    const lookup = vi
+      .spyOn(testDb.query.widgetIdentifiedSession, 'findFirst')
+      .mockRejectedValueOnce(new Error('connection terminated'))
+
+    try {
+      await expect(hasSignedWidgetIdentity(sessionId)).resolves.toBe(false)
+    } finally {
+      lookup.mockRestore()
+    }
+    // The same row, read once the database answers again, is signed: the
+    // false above came from the failure, not from the row.
+    await expect(hasSignedWidgetIdentity(sessionId)).resolves.toBe(true)
   })
 
   it('carries no flag at all when there is no Bearer token (J22)', async () => {

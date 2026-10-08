@@ -553,6 +553,33 @@ describe('a token Better Auth refuses (J11)', () => {
 // The two lookups, read directly
 // ---------------------------------------------------------------------------
 
+describe('the route loader (J11)', () => {
+  type Loader = (args: { location: { search: unknown } }) => Promise<unknown>
+
+  async function routeLoader(): Promise<Loader> {
+    const { Route } = await import('../auth.widget-handoff')
+    return (Route.options as unknown as { loader: Loader }).loader
+  }
+
+  it('sends a signed-in customer on to the destination by throwing the redirect (J11)', async () => {
+    const loader = await routeLoader()
+
+    await expect(
+      loader({ location: { search: { ott: 'tok', returnTo: '/posts/123' } } })
+    ).rejects.toMatchObject({ options: { to: '/posts/123' } })
+  })
+
+  it('renders the error page for a token the server refused, with nothing installed (J11)', async () => {
+    fetchMock.mockResolvedValue(refusedToken(500))
+    const loader = await routeLoader()
+
+    await expect(loader({ location: { search: { ott: 'bad' } } })).resolves.toEqual({
+      status: 'error',
+    })
+    expect(hoisted.cookies).toEqual([])
+  })
+})
+
 describe('isHandoffPrincipalTeammate (J12, J14)', () => {
   it('is true for admin and member, false for a customer or no principal (J12)', async () => {
     hoisted.principalRow.mockResolvedValueOnce({ role: 'admin' })

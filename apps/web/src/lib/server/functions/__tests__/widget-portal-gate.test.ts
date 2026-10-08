@@ -526,7 +526,10 @@ describe('the private-portal gate on the widget endpoints (J20, J22)', () => {
       ),
       { numRuns: 400 }
     )
-  })
+    // 400 runs over cold dynamic imports of every widget module: ten seconds
+    // alone, more under coverage and load. A timeout here leaves the property
+    // running into the next test, which then sees its calls.
+  }, 90_000)
 
   it.each(GATED_ENDPOINTS.map((spec) => [spec.name, spec] as const))(
     'keeps a private workspace closed to an anonymous widget visitor on %s (J22)',
