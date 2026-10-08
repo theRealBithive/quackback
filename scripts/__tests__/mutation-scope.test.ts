@@ -443,6 +443,35 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/components/ui/__tests__/time-ago-hydration.test.tsx',
         ],
       },
+      {
+        file: 'apps/web/src/lib/server/content/magic-bytes.ts',
+        suites: [
+          'apps/web/src/lib/server/content/__tests__/magic-bytes.test.ts',
+          'apps/web/src/lib/server/content/__tests__/magic-bytes.batch-h.contract.test.ts',
+          'apps/web/src/lib/server/__tests__/upload-media.batch-h.contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/shared/storage-config.ts',
+        suites: [
+          'apps/web/src/lib/shared/__tests__/storage-config.batch-h.contract.test.ts',
+          'apps/web/src/lib/server/__tests__/upload-media.batch-h.contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/storage/byte-range.ts',
+        suites: [
+          'apps/web/src/lib/server/storage/__tests__/byte-range.batch-h.contract.test.ts',
+          'apps/web/src/routes/api/storage/__tests__/storage-range.batch-h.contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/routes/api/portal/upload.ts',
+        suites: [
+          'apps/web/src/routes/api/portal/__tests__/upload.test.ts',
+          'apps/web/src/routes/api/portal/__tests__/upload.batch-h.contract.test.ts',
+        ],
+      },
     ])
   })
 
