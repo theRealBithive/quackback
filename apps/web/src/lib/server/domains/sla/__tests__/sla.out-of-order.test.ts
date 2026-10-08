@@ -49,6 +49,24 @@ vi.mock('@/lib/server/db', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/db')>()),
   db: (await import('@/lib/server/__tests__/db-test-fixture')).testDb,
 }))
+/**
+ * A seam in front of the message read a cycle adoption makes, so a test can
+ * land a second worker's write between the adoption's read and its commit.
+ * Null (the default) passes straight through to the real read.
+ */
+const concurrent = vi.hoisted(() => ({ beforeAdoptionRead: null as null | (() => Promise<void>) }))
+vi.mock('../sla.messages', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../sla.messages')>()
+  return {
+    ...real,
+    latestOpenersBetween: async (...args: Parameters<typeof real.latestOpenersBetween>) => {
+      const hook = concurrent.beforeAdoptionRead
+      concurrent.beforeAdoptionRead = null
+      if (hook) await hook()
+      return real.latestOpenersBetween(...args)
+    },
+  }
+})
 // No workspace office hours: the clocks run 24/7.
 vi.mock('@/lib/server/domains/settings/settings.office-hours', () => ({
   getOfficeHoursSchedule: vi.fn(async () => ({ enabled: false, timezone: 'UTC', intervals: [] })),
@@ -574,5 +592,26 @@ describe.skipIf(!fixture.available)('a cycle an earlier build armed', () => {
     expect(after.nextResponseCycleAt).toBeUndefined()
     expect(after.nextResponseDueAt).toBe(before.nextResponseDueAt)
     expect(after.nextResponseAt).toBe(before.nextResponseAt)
+  })
+
+  it('an adoption that loses to a second worker re-reads the stamp and logs the outcome once (I-R3)', async () => {
+    const thread = await seedAnsweredThread()
+    await write(thread, 'visitor', '11:00')
+    await armedByEarlierBuild(thread.conversationId, { nextResponseDueAt: iso('13:00') })
+    const reply = await write(thread, 'agent', '11:30')
+    // The second worker runs the same reaction to the end while the first is
+    // between reading the stamp and adopting its cycle.
+    concurrent.beforeAdoptionRead = () => recordSlaFromEvent(reply)
+
+    await recordSlaFromEvent(reply)
+
+    expect(concurrent.beforeAdoptionRead).toBeNull()
+    expect(await stampOf(thread.conversationId)).toMatchObject({
+      nextResponseCycleAt: iso('11:00'),
+      nextResponseAt: iso('11:30'),
+    })
+    expect(await nextResponseEvents(thread.conversationId)).toEqual([
+      { kind: 'next_response_met', dueAt: iso('13:00'), at: iso('11:30') },
+    ])
   })
 })
