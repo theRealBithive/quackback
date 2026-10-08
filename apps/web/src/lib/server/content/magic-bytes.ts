@@ -133,8 +133,11 @@ function isoMediaBrands(buf: Buffer): string[] {
   return brands
 }
 
+/** Size, type, major brand and minor version: the smallest whole `ftyp` box. */
+const MINIMAL_FTYP_BOX_BYTES = 16
+
 function isIsoMediaVideo(buf: Buffer): boolean {
-  if (buf.length < 12) return false
+  if (buf.length < MINIMAL_FTYP_BOX_BYTES) return false
   if (buf.toString('latin1', 4, 8) !== 'ftyp') return false
   const declaresAnImage = isoMediaBrands(buf).some((brand) => ISO_IMAGE_BRANDS.has(brand))
   return !declaresAnImage
@@ -152,23 +155,35 @@ function ebmlVarIntLength(firstByte: number): number {
   return 0
 }
 
-/** Value of the variable-length integer at `offset`, its length marker removed. */
-function readEbmlVarInt(buf: Buffer, offset: number, length: number): number {
-  const marker = 0x80 >> (length - 1)
-  let value = buf[offset] & (marker - 1)
-  for (let index = 1; index < length; index++) {
-    value = value * 256 + buf[offset + index]
-  }
-  return value
+interface EbmlField {
+  value: number
+  /** Offset of the first byte after the field. */
+  end: number
 }
 
-/** Element id at `offset`, the length marker kept (ids are written that way). */
-function readEbmlId(buf: Buffer, offset: number, length: number): number {
-  let id = 0
-  for (let index = 0; index < length; index++) {
-    id = id * 256 + buf[offset + index]
+/**
+ * The EBML variable-length integer at `offset`, read no further than `limit`,
+ * or null when it is malformed or does not fit. An element id keeps its length
+ * marker (ids are written that way); a size has it removed.
+ */
+function readEbmlField(
+  buf: Buffer,
+  offset: number,
+  limit: number,
+  keepMarker: boolean
+): EbmlField | null {
+  // At or past `limit` the byte read is outside the field's room (or the buffer,
+  // where it reads as undefined and so as length 0); either way it fails below.
+  const length = ebmlVarIntLength(buf[offset])
+  if (length === 0) return null
+  const end = offset + length
+  if (end > limit) return null
+  const marker = 0x80 >> (length - 1)
+  let value = keepMarker ? buf[offset] : buf[offset] & (marker - 1)
+  for (let index = offset + 1; index < end; index++) {
+    value = value * 256 + buf[index]
   }
-  return id
+  return { value, end }
 }
 
 /**
@@ -177,29 +192,20 @@ function readEbmlId(buf: Buffer, offset: number, length: number): number {
  */
 function ebmlDocType(buf: Buffer): string | null {
   if (!startsWithAt(buf, 0, EBML_MAGIC)) return null
-  const headerSizeOffset = EBML_MAGIC.length
-  if (buf.length <= headerSizeOffset) return null
-  const headerSizeLength = ebmlVarIntLength(buf[headerSizeOffset])
-  if (headerSizeLength === 0 || buf.length < headerSizeOffset + headerSizeLength) return null
-  const headerStart = headerSizeOffset + headerSizeLength
-  const headerSize = readEbmlVarInt(buf, headerSizeOffset, headerSizeLength)
-  const headerEnd = headerStart + headerSize
+  const headerSize = readEbmlField(buf, EBML_MAGIC.length, buf.length, false)
+  if (!headerSize) return null
+  const headerEnd = headerSize.end + headerSize.value
   if (headerEnd > buf.length) return null
 
-  let offset = headerStart
+  let offset = headerSize.end
   while (offset < headerEnd) {
-    const idLength = ebmlVarIntLength(buf[offset])
-    if (idLength === 0 || idLength > 4) return null
-    const sizeOffset = offset + idLength
-    if (sizeOffset >= headerEnd) return null
-    const sizeLength = ebmlVarIntLength(buf[sizeOffset])
-    if (sizeLength === 0 || sizeOffset + sizeLength > headerEnd) return null
-    const payloadStart = sizeOffset + sizeLength
-    const payloadEnd = payloadStart + readEbmlVarInt(buf, sizeOffset, sizeLength)
+    const id = readEbmlField(buf, offset, headerEnd, true)
+    if (!id) return null
+    const size = readEbmlField(buf, id.end, headerEnd, false)
+    if (!size) return null
+    const payloadEnd = size.end + size.value
     if (payloadEnd > headerEnd) return null
-    if (readEbmlId(buf, offset, idLength) === EBML_DOCTYPE_ID) {
-      return buf.toString('latin1', payloadStart, payloadEnd)
-    }
+    if (id.value === EBML_DOCTYPE_ID) return buf.toString('latin1', size.end, payloadEnd)
     offset = payloadEnd
   }
   return null
