@@ -3,6 +3,7 @@ import { readBodyWithLimit } from '@/lib/server/utils/read-body'
 import { logger } from '@/lib/server/logger'
 import { currentWorkspaceNamespace } from '@/lib/server/workspaces/workspace-keyed'
 import { redirectPolicy, servedFileHeaders } from '@/lib/server/storage/serve-policy'
+import { isSingleByteRange } from '@/lib/server/storage/byte-range'
 
 const log = logger.child({ component: 'storage' })
 
@@ -127,11 +128,6 @@ function extractKey(url: URL): string | null {
     return null
   }
   return key && !key.includes('..') ? key : null
-}
-
-function isSingleByteRange(value: string): boolean {
-  const match = /^bytes=(\d*)-(\d*)$/.exec(value)
-  return !!match && (match[1] !== '' || match[2] !== '')
 }
 
 export async function handleProxyUpload({ request }: { request: Request }): Promise<Response> {
