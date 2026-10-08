@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mockSession, mockImageFile } from '../../__tests__/upload-fixtures'
+import { mockVideoFile, mockSession, mockImageFile } from '../../__tests__/upload-fixtures'
 
 vi.mock('@/lib/server/auth', () => ({
   auth: { api: { getSession: vi.fn() } },
@@ -56,6 +56,15 @@ describe('POST /api/widget/upload', () => {
     mockGetSettings.mockResolvedValue({ id: 'settings_1' })
     mockIncrementBucket.mockResolvedValue({ count: 1 })
     mockBucketRetryAfter.mockResolvedValue(42)
+  })
+
+  // Batch H contract: H5 Nobody without a session can upload. H4 A refused
+  // upload stores nothing.
+  it('refuses a video upload without a session and stores nothing (H5, H4)', async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValueOnce(null)
+    const res = await handleWidgetUpload({ request: makeRequest(mockVideoFile()) })
+    expect(res.status).toBe(401)
+    expect(uploadObject).not.toHaveBeenCalled()
   })
 
   it('returns 401 when there is no valid widget session', async () => {

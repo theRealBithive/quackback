@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mockSession, mockPrincipal, mockImageFile } from '../../__tests__/upload-fixtures'
+import {
+  mockVideoFile,
+  mockSession,
+  mockPrincipal,
+  mockImageFile,
+} from '../../__tests__/upload-fixtures'
 
 vi.mock('@/lib/server/auth', () => ({
   auth: {
@@ -52,6 +57,15 @@ describe('POST /api/upload/image', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(isS3Usable).mockReturnValue(true)
+  })
+
+  // Batch H contract: H5 Nobody without a session can upload. H4 A refused
+  // upload stores nothing.
+  it('refuses a video upload without a session and stores nothing (H5, H4)', async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValueOnce(null)
+    const res = await handleAdminUpload({ request: makeRequest(mockVideoFile()) })
+    expect(res.status).toBe(401)
+    expect(uploadObject).not.toHaveBeenCalled()
   })
 
   it('returns 401 when no session', async () => {
