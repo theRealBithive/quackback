@@ -1383,7 +1383,7 @@
       "file": "apps/web/src/lib/server/events/event-reactions.ts",
       "mutator": "OptionalChaining",
       "line": "timer.unref?.()",
-      "replacement": "timer.unref",
+      "replacement": "timer.unref()",
       "why": "The optional call guards runtimes whose setTimeout returns a number. Every runtime this runs on (Node and Bun) returns a Timeout object that has unref, so the plain call does exactly what the optional one does."
     },
     {
@@ -1448,6 +1448,13 @@
       "line": "if (event.type !== 'ticket.status_changed' || event.data.newStatus !== 'closed') {",
       "replacement": "false",
       "why": "The type half narrows the event for TypeScript. runReactionJob calls this reaction only for the types EVENT_REACTIONS lists for it, which is ticket.status_changed alone, so that half is false for every event that reaches it; the close half, which does decide, is killed by the non-close status test."
+    },
+    {
+      "file": "apps/web/src/lib/server/events/emit.ts",
+      "mutator": "BlockStatement",
+      "line": "} catch (error) {",
+      "replacement": "{}",
+      "why": "The catch body only logs. Emptied, the failure is still swallowed (the try/catch stays), so emitBestEffort still resolves without writing anything and the caller's committed mutation stands, which emit.test asserts. Only the warning is lost, which no test can see except through the logger."
     }
   ]
 }
