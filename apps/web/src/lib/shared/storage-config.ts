@@ -62,15 +62,15 @@ function isGenericType(contentType: string): boolean {
   return contentType === '' || contentType === 'application/octet-stream'
 }
 
-function lowerCaseExtension(filename: string): string {
+function lowerCaseExtension(filename: string): string | null {
   const match = filename.toLowerCase().match(/\.([^.]+)$/)
-  if (!match) return ''
+  if (!match) return null
   return match[1]
 }
 
 function typeByExtension(table: Record<string, string>, filename: string): string | null {
   const extension = lowerCaseExtension(filename)
-  if (!Object.hasOwn(table, extension)) return null
+  if (extension === null || !Object.hasOwn(table, extension)) return null
   return table[extension]
 }
 
@@ -78,7 +78,7 @@ function typeByExtension(table: Record<string, string>, filename: string): strin
  * Resolve video MIME types omitted by some desktop file pickers. The server
  * still verifies the file's container signature before storing it.
  */
-export function resolveVideoMimeType(contentType: string, filename = ''): string | null {
+export function resolveVideoMimeType(contentType: string, filename: string): string | null {
   if (isAllowedVideoType(contentType)) return contentType
   if (!isGenericType(contentType)) return null
   return typeByExtension(VIDEO_TYPE_BY_EXTENSION, filename)
@@ -89,7 +89,7 @@ export function resolveVideoMimeType(contentType: string, filename = ''): string
  * an accepted one, otherwise — only for a missing or generic type — the type
  * its extension names. The bytes are still checked against the result.
  */
-export function resolveMediaMimeType(contentType: string, filename = ''): string | null {
+export function resolveMediaMimeType(contentType: string, filename: string): string | null {
   if (isAllowedImageType(contentType)) return contentType
   if (isAllowedVideoType(contentType)) return contentType
   if (!isGenericType(contentType)) return null

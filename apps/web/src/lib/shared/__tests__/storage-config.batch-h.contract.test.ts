@@ -174,7 +174,7 @@ describe('a file with no type or a generic one (H3)', () => {
     expect(resolveVideoMimeType('', 'photo.png')).toBeNull()
     expect(resolveVideoMimeType('video/webm', 'photo.png')).toBe('video/webm')
     expect(resolveVideoMimeType('image/png', 'clip.mp4')).toBeNull()
-    expect(resolveVideoMimeType('')).toBeNull()
+    expect(resolveVideoMimeType('', '')).toBeNull()
   })
 })
 

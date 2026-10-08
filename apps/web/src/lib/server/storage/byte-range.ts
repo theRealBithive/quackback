@@ -7,21 +7,22 @@
  * slice would be sent the full 100 MB, and the answer would look like success.
  */
 
-const SINGLE_BYTE_RANGE = /^bytes=(\d*)-(\d*)$/
+/** `bytes=-N`: the last N bytes. */
+const SUFFIX_RANGE = /^bytes=-(\d+)$/
+/** `bytes=A-` or `bytes=A-B`: from A to the end, or from A to B. */
+const RANGE_FROM_START = /^bytes=(\d+)-(\d*)$/
 
 export function isSingleByteRange(value: string): boolean {
-  const match = SINGLE_BYTE_RANGE.exec(value)
-  if (!match) return false
-  const first = match[1]
-  const last = match[2]
-  if (first === '' && last === '') return false
-
-  const isSuffixRange = first === ''
-  if (isSuffixRange) {
+  const suffix = SUFFIX_RANGE.exec(value)
+  if (suffix) {
     // `bytes=-0` asks for the last zero bytes, which no file can satisfy.
-    return BigInt(last) > 0n
+    return BigInt(suffix[1]) > 0n
   }
 
+  const fromStart = RANGE_FROM_START.exec(value)
+  if (!fromStart) return false
+  const first = fromStart[1]
+  const last = fromStart[2]
   const isOpenEnded = last === ''
   if (isOpenEnded) return true
   // Compared as BigInt: positions longer than 2^53 would compare wrongly as numbers.
