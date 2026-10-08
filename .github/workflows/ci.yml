@@ -237,6 +237,11 @@ jobs:
     env:
       SECRET_KEY: e2e-smoke-secret-key-for-ci-only-at-least-32-chars
       BASE_URL: http://acme.localhost:3000
+      # The widget specs drive /e2e/widget, which signs widget identities with
+      # the real secret and therefore exists only under this flag (J31). It
+      # reaches the dev server through the job environment; never set it on a
+      # deployment.
+      E2E_HARNESS: '1'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -407,6 +412,8 @@ jobs:
     env:
       SECRET_KEY: e2e-full-secret-key-for-ci-only-at-least-32-chars
       BASE_URL: http://acme.localhost:3000
+      # See e2e-smoke: the widget harness exists only under this flag (J31).
+      E2E_HARNESS: '1'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2

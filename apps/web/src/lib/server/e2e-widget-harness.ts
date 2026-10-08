@@ -1,4 +1,3 @@
-import { isProduction } from '@/lib/server/config'
 import { createWidgetIdentityToken } from '@/lib/server/widget/identity-token'
 import { ensureWidgetSecret } from '@/lib/server/domains/settings/settings.widget'
 
@@ -12,9 +11,14 @@ export const E2E_WIDGET_CSAT_SUBJECT = 'E2E CSAT thread'
 
 export type E2eWidgetPersona = 'anon' | 'customer' | 'teammate'
 
+/**
+ * The harness signs widget identities with the real widget secret, so it
+ * exists only when the operator turned it on for tests (J31). Nothing else
+ * counts: not development mode, not another truthy spelling, and nothing read
+ * from configuration, so a configuration that cannot be read leaves it off.
+ */
 export function isE2eWidgetHarnessEnabled(): boolean {
-  if (process.env.E2E_HARNESS === '1') return true
-  return !isProduction()
+  return process.env.E2E_HARNESS === '1'
 }
 
 export function parseE2eWidgetPersona(raw: string | null): E2eWidgetPersona {
