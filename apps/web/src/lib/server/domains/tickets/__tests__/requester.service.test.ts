@@ -6,7 +6,7 @@
  * ticket header/list reads live in requester-conversation-ticket.test.ts.
  * Runs inside the db-test-fixture rollback transaction.
  */
-import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest'
 import {
   createId,
   type PrincipalId,
@@ -176,6 +176,16 @@ async function readTicketRow(id: TicketId) {
   return row
 }
 
+/** How many event-reactions jobs are queued for a ticket's events. */
+async function countTicketReactionJobs(ticketId: TicketId): Promise<number> {
+  const result = await testDb.execute(sql`
+    SELECT j.job_id FROM job_queue j
+    JOIN ${events} e ON e.event_id = j.payload->>'eventId'
+    WHERE j.queue = 'event-reactions' AND e.entity_id = ${ticketId}
+  `)
+  return getExecuteRows<{ job_id: string }>(result).length
+}
+
 /** Run the event-reactions jobs queued for a ticket's events, as the job worker would. */
 async function runTicketReactionJobs(ticketId: TicketId): Promise<number> {
   const result = await testDb.execute(sql`
@@ -213,6 +223,14 @@ async function currentStatusCategory(ticketId: TicketId): Promise<string> {
 }
 
 describe.skipIf(!fixture.available)('requester ticket service (real DB, rolled back)', () => {
+  // The event dispatch bridge loads the outbox writer with a call-time
+  // import(). Cold, that module graph takes seconds to transform, which the
+  // reopen test would otherwise spend inside its wait for the reaction job.
+  // Loading it here keeps module load time out of a behavioural assertion.
+  beforeAll(async () => {
+    await import('@/lib/server/events/process')
+    await import('@/lib/server/events/outbox-dispatch')
+  }, 60_000)
   beforeEach(fixture.begin)
   afterEach(fixture.rollback)
   afterAll(fixture.close)
@@ -394,9 +412,10 @@ describe.skipIf(!fixture.available)('requester ticket service (real DB, rolled b
     // The reopen emits ticket.status_changed like any other status move, so
     // the resume rides that event's SLA reaction, queued as an event-reactions
     // job: pausedAt cleared, deadline shifted by the paused span.
-    await vi.waitFor(async () => expect(await runTicketReactionJobs(ticketId)).toBe(1), {
+    await vi.waitFor(async () => expect(await countTicketReactionJobs(ticketId)).toBe(1), {
       timeout: 5000,
     })
+    expect(await runTicketReactionJobs(ticketId)).toBe(1)
     const stamp = (await readTicketRow(ticketId)).slaApplied as {
       pausedAt?: string | null
       timeToResolveDueAt: string

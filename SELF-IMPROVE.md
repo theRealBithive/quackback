@@ -2452,6 +2452,20 @@ dozens of "never executed" lines that the full run had covered. Give every
 run its own `--coverage.reportsDirectory=coverage/<name>`; the gate merges all
 of them.
 
+## 1x — A `vi.waitFor` budget silently includes cold call-time `import()`s
+
+The event dispatch bridge (`dispatch.ts` → `process.ts` → `outbox-dispatch.ts`)
+loads its module graph with call-time `import()`, and cold under vitest that
+takes seconds (measured 3.8 s locally for one `ticket.status_changed`). Batch
+I's `requester.service` reopen test polled `vi.waitFor(…, { timeout: 5000 })`
+around a callback that both looked for the reaction job and ran it, which
+cold-loaded the SLA modules too; the budget ran out mid-callback and vitest
+reported the last failed poll, `expected 0 to be 1`, which reads as "the job
+was never queued". It failed on every run, locally and in CI, and the batch
+agent's coverage run had filed it under load timeouts. Load the lazily
+imported modules in a `beforeAll`, and keep a `waitFor` callback to the one
+cheap observation it waits for.
+
 ## Resolved
 
 Entries that were actually fixed, with what fixed them.
