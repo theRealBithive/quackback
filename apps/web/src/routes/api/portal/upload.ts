@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import type { UserId } from '@quackback/ids'
 import { auth } from '@/lib/server/auth'
 import { db, eq, principal } from '@/lib/server/db'
+import { getClientIp } from '@/lib/server/domains/api/rate-limit'
 import { workspaceAllowsAnonymous } from '@/lib/server/domains/settings/settings.types'
 import { getSettings } from '@/lib/server/functions/workspace'
 import { isS3Configured, uploadMediaFromFormData } from '@/lib/server/storage/s3'
@@ -13,6 +14,12 @@ import {
 
 const UPLOAD_WINDOW_SECONDS = 60
 const UPLOADS_PER_SESSION = 20
+/**
+ * An anonymous session costs nothing to mint, so the per-session limit alone
+ * does not bound what one client can upload. Ten 100 MB videos a minute from
+ * one address is 1 GB, half of what a single session may send.
+ */
+const ANONYMOUS_UPLOADS_PER_ADDRESS = 10
 
 /** The 429 for a bucket over its limit, or null when the request may proceed. */
 async function refuseOverLimit(bucket: RateBucketSpec, limit: number): Promise<Response | null> {
@@ -54,6 +61,15 @@ export async function handlePortalUpload({ request }: { request: Request }): Pro
   }
   const sessionRefusal = await refuseOverLimit(sessionBucket, UPLOADS_PER_SESSION)
   if (sessionRefusal) return sessionRefusal
+
+  if (isAnonymous) {
+    const addressBucket = {
+      key: `portal-upload:ip:${getClientIp(request)}`,
+      windowSeconds: UPLOAD_WINDOW_SECONDS,
+    }
+    const addressRefusal = await refuseOverLimit(addressBucket, ANONYMOUS_UPLOADS_PER_ADDRESS)
+    if (addressRefusal) return addressRefusal
+  }
 
   if (!isS3Configured()) {
     return Response.json({ error: 'Storage not configured' }, { status: 503 })
