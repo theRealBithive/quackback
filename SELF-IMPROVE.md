@@ -2381,6 +2381,19 @@ install. Until `bun install` runs inside it, vitest, tsc and the gates fail
 with module-resolution errors that read like a broken pick. Run `bun install`
 first in any new worktree.
 
+## 1x — Under Stryker, `process.env.TZ` does not move the clock
+
+Stryker's vitest runner forces `pool: 'threads'`, whatever `vitest.config.ts`
+says. In a worker thread `process.env` is a copy, and assigning `TZ` there
+does not reset V8's time-zone cache, so `getDate()`/`getHours()` stay in the
+zone the process started in (measured: `new Worker` without `SHARE_ENV`
+reads the same day for Pago Pago and Kiritimati). A suite that moves zones
+that way passes under `vitest run` (forks) and is vacuous, or red, under
+the mutation gate. Batch L's calendar-date suite has a canary that fails
+exactly there. For a suite meant to grade mutants, move the zone through
+the `Intl` stand-ins in `apps/web/src/test/runtime-locale.ts` or explicit
+`timeZone` options instead.
+
 ## Resolved
 
 Entries that were actually fixed, with what fixed them.
