@@ -472,6 +472,35 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/routes/api/portal/__tests__/upload.batch-h.contract.test.ts',
         ],
       },
+      {
+        file: 'apps/web/src/lib/server/events/emit.ts',
+        suites: [
+          'apps/web/src/lib/server/events/__tests__/emit.test.ts',
+          'apps/web/src/lib/server/events/__tests__/event-reactions.test.ts',
+          'apps/web/src/lib/server/events/__tests__/event-reactions-contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/events/event-reactions.ts',
+        suites: [
+          'apps/web/src/lib/server/events/__tests__/event-reactions.test.ts',
+          'apps/web/src/lib/server/events/__tests__/event-reactions-contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/events/event-reactions-queue.ts',
+        suites: [
+          'apps/web/src/lib/server/events/__tests__/event-reactions.test.ts',
+          'apps/web/src/lib/server/events/__tests__/event-reactions-contract.test.ts',
+        ],
+      },
+      {
+        file: 'apps/web/src/lib/server/events/event-summaries-queue.ts',
+        suites: [
+          'apps/web/src/lib/server/events/__tests__/event-reactions.test.ts',
+          'apps/web/src/lib/server/events/__tests__/event-reactions-contract.test.ts',
+        ],
+      },
     ])
   })
 
