@@ -36,6 +36,7 @@ import { AnalyticsCsatDistribution } from './analytics-csat-card'
 import { AnalyticsResponseDistribution } from './analytics-response-distribution'
 import { AnalyticsTeammatePerformance } from './analytics-teammate-performance'
 import { ChartSkeleton, StatusChartSkeleton, SectionSkeleton } from './analytics-skeletons'
+import { useFormatNumber, type NumberFormatter } from '@/components/ui/format-number'
 
 // Defer recharts (~580KB minified, including victory-vendor) and the chart
 // primitives that wrap it. Analytics is admin-gated and rarely the first
@@ -82,6 +83,7 @@ function AiOutcomeBreakdown({
 }: {
   ai: { resolved: number; escalated: number; pending: number }
 }) {
+  const formatNumber = useFormatNumber()
   const items = [
     { label: 'Resolved', value: ai.resolved, className: 'bg-emerald-500' },
     { label: 'Escalated', value: ai.escalated, className: 'bg-amber-500' },
@@ -105,7 +107,7 @@ function AiOutcomeBreakdown({
             <span className={cn('h-2 w-2 rounded-full', i.className)} />
             <span className="text-muted-foreground">{i.label}</span>
             <span className="font-medium tabular-nums text-foreground">
-              {i.value.toLocaleString()}
+              {formatNumber(i.value)}
             </span>
           </div>
         ))}
@@ -115,8 +117,8 @@ function AiOutcomeBreakdown({
 }
 
 /** Integer average, guarding divide-by-zero, with thousands separators. */
-function avgPerItem(total: number, count: number): string {
-  return count > 0 ? Math.round(total / count).toLocaleString() : '0'
+function avgPerItem(formatNumber: NumberFormatter, total: number, count: number): string {
+  return count > 0 ? formatNumber(Math.round(total / count)) : '0'
 }
 
 /** Period total per channel, in the series' volume-desc channel order. */
@@ -147,6 +149,7 @@ const periods: Array<{ value: AnalyticsPeriod; label: string }> = [
 
 export function AnalyticsPage() {
   const { settings } = useRouteContext({ from: '__root__' })
+  const formatNumber = useFormatNumber()
   const flags = settings?.featureFlags as FeatureFlags | undefined
   // Product reports follow product availability. Visitor reporting is always on.
   const sections = SECTION_NAV_ITEMS.filter(
@@ -332,7 +335,7 @@ export function AnalyticsPage() {
                       stats={[
                         {
                           label: 'Posts',
-                          value: data.summary.posts.total.toLocaleString(),
+                          value: formatNumber(data.summary.posts.total),
                           delta: data.summary.posts.delta,
                         },
                         {
@@ -346,7 +349,7 @@ export function AnalyticsPage() {
                         },
                         {
                           label: 'Followers',
-                          value: data.followers.toLocaleString(),
+                          value: formatNumber(data.followers),
                           caption: 'current',
                         },
                       ]}
@@ -382,7 +385,7 @@ export function AnalyticsPage() {
                       stats={[
                         {
                           label: 'New conversations',
-                          value: data.conversationVolume.total.toLocaleString(),
+                          value: formatNumber(data.conversationVolume.total),
                           delta: data.conversationVolume.delta,
                         },
                         // Per-channel totals for the top channels, in the same
@@ -391,7 +394,7 @@ export function AnalyticsPage() {
                           .slice(0, 3)
                           .map((c) => ({
                             label: channelLabel(c.channel),
-                            value: c.total.toLocaleString(),
+                            value: formatNumber(c.total),
                           })),
                       ]}
                     >
@@ -407,7 +410,7 @@ export function AnalyticsPage() {
                         },
                         {
                           label: 'Answered',
-                          value: data.firstResponse.responded.toLocaleString(),
+                          value: formatNumber(data.firstResponse.responded),
                           caption: 'conversations',
                         },
                       ]}
@@ -432,7 +435,7 @@ export function AnalyticsPage() {
                         },
                         {
                           label: 'Closed',
-                          value: data.timeToClose.closed.toLocaleString(),
+                          value: formatNumber(data.timeToClose.closed),
                           caption: 'conversations',
                         },
                       ]}
@@ -462,7 +465,7 @@ export function AnalyticsPage() {
                             suffix: '/ 5',
                             delta: data.csat.avgRatingDelta,
                           },
-                          { label: 'Responses', value: data.csat.responseCount.toLocaleString() },
+                          { label: 'Responses', value: formatNumber(data.csat.responseCount) },
                           { label: 'Response rate', value: `${data.csat.responseRate}%` },
                         ]}
                       >
@@ -482,7 +485,7 @@ export function AnalyticsPage() {
                       stats={[
                         {
                           label: 'Conversations',
-                          value: data.ai.involved.toLocaleString(),
+                          value: formatNumber(data.ai.involved),
                           caption: 'Quinn engaged',
                         },
                         { label: 'Resolution rate', value: `${data.ai.resolutionRate}%` },
@@ -504,16 +507,20 @@ export function AnalyticsPage() {
                     stats={[
                       {
                         label: 'Published',
-                        value: data.changelog.publishedInPeriod.toLocaleString(),
+                        value: formatNumber(data.changelog.publishedInPeriod),
                       },
                       {
                         label: 'Total views',
-                        value: data.changelog.totalViews.toLocaleString(),
+                        value: formatNumber(data.changelog.totalViews),
                         caption: 'all time',
                       },
                       {
                         label: 'Avg / entry',
-                        value: avgPerItem(data.changelog.totalViews, data.changelog.publishedCount),
+                        value: avgPerItem(
+                          formatNumber,
+                          data.changelog.totalViews,
+                          data.changelog.publishedCount
+                        ),
                         caption: 'all time',
                       },
                     ]}
@@ -528,17 +535,17 @@ export function AnalyticsPage() {
                       stats={[
                         {
                           label: 'Signups',
-                          value: data.summary.users.total.toLocaleString(),
+                          value: formatNumber(data.summary.users.total),
                           delta: data.summary.users.delta,
                         },
                         {
                           label: 'New leads',
-                          value: data.newLeads.total.toLocaleString(),
+                          value: formatNumber(data.newLeads.total),
                           delta: data.newLeads.delta,
                         },
-                        { label: 'Active users', value: data.activeUsers.toLocaleString() },
+                        { label: 'Active users', value: formatNumber(data.activeUsers) },
                         { label: 'Verified', value: `${data.verifiedRate}%`, caption: 'all time' },
-                        { label: 'Contributors', value: data.contributorCount.toLocaleString() },
+                        { label: 'Contributors', value: formatNumber(data.contributorCount) },
                       ]}
                     >
                       <AnalyticsTopContributors contributors={data.topContributors} />

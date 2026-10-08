@@ -393,6 +393,28 @@
     {
       "file": "apps/web/src/lib/shared/widget-visible-board.ts",
       "suites": ["apps/web/src/lib/shared/__tests__/widget-visible-board.test.ts"]
+    },
+    {
+      "file": "apps/web/src/components/ui/format-number.ts",
+      "suites": [
+        "apps/web/src/components/ui/__tests__/format-number.test.tsx",
+        "apps/web/src/components/ui/__tests__/format-number.batch-l.contract.test.tsx"
+      ]
+    },
+    {
+      "file": "apps/web/src/components/ui/local-date.tsx",
+      "suites": [
+        "apps/web/src/components/ui/__tests__/local-date.batch-l.contract.test.tsx",
+        "apps/web/src/components/ui/__tests__/local-date-hydration.test.tsx"
+      ]
+    },
+    {
+      "file": "apps/web/src/components/ui/time-ago.tsx",
+      "suites": [
+        "apps/web/src/components/ui/__tests__/time-ago.batch-l.contract.test.tsx",
+        "apps/web/src/components/ui/__tests__/time-ago.contract.test.tsx",
+        "apps/web/src/components/ui/__tests__/time-ago-hydration.test.tsx"
+      ]
     }
   ],
   "equivalents": [
@@ -1046,6 +1068,90 @@
       "line": "columns: { id: true },",
       "replacement": "false",
       "why": "The lookup is read only for whether a row came back. `{ id: false }` selects every column but the id, and measured against the real schema it returns a row for a linked account and undefined for an unlinked one, exactly like `{ id: true }`. (The other mutant on this line, `{}`, is not equivalent: drizzle refuses a projection with no fields, and user-update.db.test.ts catches it.)"
+    },
+    {
+      "file": "apps/web/src/components/ui/local-date.tsx",
+      "mutator": "ConditionalExpression",
+      "line": "if (!formatter) {",
+      "replacement": "true",
+      "why": "The formatter cache only saves rebuilding an Intl formatter. Skipping the lookup or the store builds an identical formatter for the same locale and options, so every rendered string is the same; the only difference is how often a constructor runs, which no contract item speaks to."
+    },
+    {
+      "file": "apps/web/src/components/ui/local-date.tsx",
+      "mutator": "CallExpression",
+      "line": "firstRenderFormatters.set(key, formatter)",
+      "replacement": ";",
+      "why": "The formatter cache only saves rebuilding an Intl formatter. Skipping the lookup or the store builds an identical formatter for the same locale and options, so every rendered string is the same; the only difference is how often a constructor runs, which no contract item speaks to."
+    },
+    {
+      "file": "apps/web/src/components/ui/local-date.tsx",
+      "mutator": "ConditionalExpression",
+      "line": "if (date === null || date === undefined || date === '') return null",
+      "replacement": "false",
+      "why": "Without this clause an undefined or empty value falls through to `new Date(undefined)` or `new Date('')`, both an Invalid Date, and the `isNaN` check on the next line returns null for exactly those inputs. No input reaches a different result."
+    },
+    {
+      "file": "apps/web/src/components/ui/local-date.tsx",
+      "mutator": "StringLiteral",
+      "line": "if (date === null || date === undefined || date === '') return null",
+      "replacement": "\"Stryker was here!\"",
+      "why": "Same as the clause beside it: an empty string that misses this check becomes an Invalid Date on the next line and returns null there. The only string that now matches early is one no caller passes, and it too would be an Invalid Date."
+    },
+    {
+      "file": "apps/web/src/components/ui/local-date.tsx",
+      "mutator": "ArrowFunction",
+      "line": "() => false",
+      "replacement": "() => undefined",
+      "why": "The server snapshot is only read as 'hydrated or not' in a boolean position; undefined and false take the same branch everywhere it is used."
+    },
+    {
+      "file": "apps/web/src/components/ui/local-date.tsx",
+      "mutator": "ArrowFunction",
+      "line": "const subscribe = () => () => {}",
+      "replacement": "() => undefined",
+      "why": "The store never changes, so the unsubscribe React receives does nothing either way; React accepts an undefined cleanup as no cleanup."
+    },
+    {
+      "file": "apps/web/src/components/ui/time-ago.tsx",
+      "mutator": "ConditionalExpression",
+      "line": "if (!formatter) {",
+      "replacement": "true",
+      "why": "The formatter cache only saves rebuilding an Intl formatter. Skipping the lookup or the store builds an identical formatter for the same locale and options, so every rendered string is the same; the only difference is how often a constructor runs, which no contract item speaks to."
+    },
+    {
+      "file": "apps/web/src/components/ui/time-ago.tsx",
+      "mutator": "CallExpression",
+      "line": "unitFormatters.set(key, formatter)",
+      "replacement": ";",
+      "why": "The formatter cache only saves rebuilding an Intl formatter. Skipping the lookup or the store builds an identical formatter for the same locale and options, so every rendered string is the same; the only difference is how often a constructor runs, which no contract item speaks to."
+    },
+    {
+      "file": "apps/web/src/components/ui/time-ago.tsx",
+      "mutator": "CallExpression",
+      "line": "relativeFormatters.set(key, formatter)",
+      "replacement": ";",
+      "why": "The formatter cache only saves rebuilding an Intl formatter. Skipping the lookup or the store builds an identical formatter for the same locale and options, so every rendered string is the same; the only difference is how often a constructor runs, which no contract item speaks to."
+    },
+    {
+      "file": "apps/web/src/components/ui/time-ago.tsx",
+      "mutator": "ConditionalExpression",
+      "line": "const d = typeof date === 'string' ? new Date(date) : date",
+      "replacement": "true",
+      "why": "`new Date(aDate)` copies the same instant, so converting a Date that was already a Date yields the same moment and the same label for every input the type allows (string or Date)."
+    },
+    {
+      "file": "apps/web/src/components/ui/time-ago.tsx",
+      "mutator": "ArrowFunction",
+      "line": "if (ref.current && ref.current.textContent !== label) setRemount((n) => n + 1)",
+      "replacement": "() => undefined",
+      "why": "The remount only exists to replace text that hydration kept from the server. The first call changes the key (0 to undefined), which is that replacement. After it React owns the text and `setTimeAgo` patches it on every later change, so a key that stops changing afterwards shows the same label."
+    },
+    {
+      "file": "apps/web/src/components/ui/time-ago.tsx",
+      "mutator": "ArithmeticOperator",
+      "line": "if (ref.current && ref.current.textContent !== label) setRemount((n) => n + 1)",
+      "replacement": "n - 1",
+      "why": "Any change of the key remounts the span; counting down changes it on every call exactly as counting up does."
     }
   ]
 }

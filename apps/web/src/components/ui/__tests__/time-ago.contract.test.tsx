@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * A relative age ("5m", "about 1 hour ago") across server render, hydration
+ * A relative age ("5m", "1 hour ago") across server render, hydration
  * and the minutes after.
  *
  * Contract for the batch F pick (upstream f63d503f8, #624) -- the confirmed
@@ -15,6 +15,15 @@
  * the tree runs its effect first and reads the text then. The server clock and
  * the browser clock are set apart by a generated drift, so both sides of every
  * minute / hour / day boundary are reached, not one hand-picked pair.
+ *
+ * Corrected: T7 replaced date-fns wording, confirmed 2026-10-07. The long
+ * form's expected text was built with date-fns `formatDistanceToNow`
+ * ("less than a minute ago", "about 1 hour ago"); batch L contract T7 words it
+ * with `Intl.RelativeTimeFormat` ("now", "1 hour ago") and rounds 45 minutes up
+ * to an hour. F22 pins *when* the text changes, not its wording, so the long
+ * form's oracle is now `getTimeAgo` at the same clock -- the wording itself is
+ * pinned by `time-ago.batch-l.contract.test.tsx` (T7). The compact form's
+ * oracle stays independent, as it was.
  */
 import { act } from 'react'
 import { hydrateRoot } from 'react-dom/client'
@@ -22,8 +31,7 @@ import { renderToString } from 'react-dom/server'
 import { useEffect } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
-import { formatDistanceToNow } from 'date-fns'
-import { TimeAgo } from '../time-ago'
+import { getTimeAgo, TimeAgo } from '../time-ago'
 
 const POSTED = new Date('2026-09-26T10:00:00.000Z')
 const MINUTE_MS = 60_000
@@ -42,7 +50,7 @@ function expectedShortAge(clock: Date): string {
 
 function expectedLongAge(clock: Date): string {
   vi.setSystemTime(clock)
-  return formatDistanceToNow(POSTED, { addSuffix: true })
+  return getTimeAgo(POSTED)
 }
 
 function ageAt(form: 'short' | 'long', clock: Date): string {
@@ -198,9 +206,9 @@ describe('TimeAgo across server render and hydration', () => {
 
     const long = await serverRenderThenHydrate('long', 59 * MINUTE_MS + 10_000, 91 * MINUTE_MS)
     expect([long.serverText, long.textAfterFirstCommit, long.textAfterHydration]).toEqual([
-      'about 1 hour ago',
-      'about 1 hour ago',
-      'about 2 hours ago',
+      '1 hour ago',
+      '1 hour ago',
+      '2 hours ago',
     ])
     long.unmount()
   })

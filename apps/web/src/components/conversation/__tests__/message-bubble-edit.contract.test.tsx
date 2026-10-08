@@ -12,6 +12,10 @@
  *   G11 A teammate can delete their own message while they hold the permission that writes it; a moderator can delete any message that is not a system message; a customer can delete their own message in their own conversation; nobody can delete a system message.
  *   G12 A teammate without moderator rights can no longer delete a message someone else wrote, on conversations and on tickets alike.
  *
+ * And from the batch L contract (dates in the app's language):
+ *
+ *   T4 A date inside copy of a fixed language (an English admin sentence) stays in that language, so a sentence never mixes languages.
+ *
  * What the bubble owns: it offers the menu entries it is told to offer (the
  * thread decides, see agent-thread-message-edit.contract.test.tsx), it shows
  * the mark exactly for a message that carries `editedAt`, and its editor never
@@ -28,7 +32,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest'
 import fc from 'fast-check'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import type { AgentConversationMessageDTO } from '@/lib/shared/conversation/types'
-import { renderWithIntl } from '@/test/render-with-intl'
+import { renderInGerman, renderWithIntl } from '@/test/render-with-intl'
 import {
   CONVERSATION_EDITOR_FEATURES,
   CONVERSATION_NOTE_FEATURES,
@@ -191,6 +195,17 @@ describe('AgentMessageBubble edited mark (G3)', () => {
       <AgentMessageBubble message={ownReply({ editedAt: '2026-07-01T01:00:00.000Z' })} />
     )
     expect(screen.getByText('(edited)').getAttribute('title')).toMatch(/^Edited /)
+  })
+
+  it('keeps the time in the English title English on a German page (T4)', () => {
+    renderInGerman(
+      <AgentMessageBubble message={ownReply({ editedAt: '2026-07-01T13:05:00.000Z' })} />
+    )
+    // en-US writes a 12-hour time with a day period; German writes 24-hour
+    // time without one, so the period is what tells the two apart.
+    expect(screen.getByText('(edited)').getAttribute('title')).toMatch(
+      /^Edited \d{1,2}:\d{2}\s[AP]M$/
+    )
   })
 })
 

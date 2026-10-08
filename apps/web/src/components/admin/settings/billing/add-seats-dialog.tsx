@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { useLocalDateFormatter } from '@/components/ui/local-date'
 import { billingQueries } from '@/lib/client/queries/billing'
 import { formatUsd } from '@/lib/shared/format-usd'
 import { QuantityStepper } from './quantity-stepper'
@@ -28,11 +29,11 @@ export function AddSeatsDialog(props: { open: boolean; onOpenChange: (open: bool
     enabled: props.open && nextQuantity > purchased,
   })
 
+  const formatLocalDate = useLocalDateFormatter()
+
+  /** e.g. "Oct 1, 2026"; a value that is not a date reads as given. */
   function formatDate(iso: string): string {
-    const date = new Date(iso)
-    return Number.isNaN(date.getTime())
-      ? iso
-      : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    return formatLocalDate(iso, { year: 'numeric', month: 'short', day: 'numeric' }) || iso
   }
 
   return (

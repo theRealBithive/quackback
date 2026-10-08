@@ -1,13 +1,15 @@
 'use client'
 
 import * as React from 'react'
-import { format, isSameDay, parseISO, startOfDay } from 'date-fns'
+import { isSameDay, startOfDay } from 'date-fns'
 import { CalendarIcon, ClockIcon, XMarkIcon } from '@heroicons/react/24/outline'
 
 import { cn } from '@/lib/shared/utils'
+import { toIsoDateOnly } from '@/lib/shared/utils/date'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
+import { LocalDate } from '@/components/ui/local-date'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { FormattedMessage, useIntl } from 'react-intl'
 
@@ -19,7 +21,7 @@ interface DateTimePickerProps {
   /** Maximum selectable date */
   maxDate?: Date
   /** Placeholder text when no date selected */
-  placeholder?: string
+  placeholder?: React.ReactNode
   /** Whether the picker is disabled */
   disabled?: boolean
   /** Date-only mode: calendar without time input */
@@ -28,6 +30,73 @@ interface DateTimePickerProps {
   onClear?: () => void
   /** Additional class names for trigger button */
   className?: string
+}
+
+const PICKED_DAY: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' }
+const PICKED_TIME: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' }
+
+/**
+ * The picked value, as the reader's language writes it rather than as one
+ * pattern does.
+ *
+ * `MMM d, yyyy` is a pattern in a language: it puts the month first and uses
+ * a comma, which is English and wrong in most of the nine we ship. Handing
+ * `Intl` the fields instead lets the locale decide the order, the separators
+ * and the month's own abbreviation -- `Sep 7, 2026` against `7. Sept. 2026`.
+ * The `·` between date and time stays, because it is the design rather than
+ * language, and each half is formatted on its own so it survives.
+ *
+ * A date-only pick (noon UTC on its day) shows as that calendar day, formatted
+ * in UTC so every viewer sees it; a date and time follows the viewer's zone
+ * once hydrated. `locale` is the app's, from the surrounding IntlProvider.
+ */
+function PickedValue({
+  value,
+  dateOnly,
+  locale,
+}: {
+  value: Date
+  dateOnly: boolean
+  locale: string
+}) {
+  if (dateOnly) {
+    return <LocalDate date={value} options={{ ...PICKED_DAY, timeZone: 'UTC' }} locale={locale} />
+  }
+  return (
+    <>
+      <LocalDate date={value} options={PICKED_DAY} locale={locale} /> ·{' '}
+      <LocalDate date={value} options={PICKED_TIME} locale={locale} />
+    </>
+  )
+}
+
+/**
+ * A date-only value (noon UTC on its day) as the local midnight of that same
+ * day, which is what the calendar grid compares against. Handing the grid the
+ * stored moment would mark the neighbouring day east of UTC+11.
+ */
+function calendarDayInGrid(value: Date): Date {
+  return new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())
+}
+
+/** A day of the calendar grid (local midnight) as "YYYY-MM-DD". */
+function gridDayKey(gridDay: Date): string {
+  const month = String(gridDay.getMonth() + 1).padStart(2, '0')
+  const day = String(gridDay.getDate()).padStart(2, '0')
+  return `${gridDay.getFullYear()}-${month}-${day}`
+}
+
+/**
+ * Whether a date-only pick of this grid day would leave the bounds. The pick
+ * is stored as noon UTC on the day, so the bounds are compared as UTC days:
+ * east of UTC the viewer's today can be a day the UTC clock has not reached,
+ * and offering it under a `maxDate` of now would store the day before.
+ */
+function isCalendarDayOutsideBounds(gridDay: Date, minDate?: Date, maxDate?: Date): boolean {
+  const day = gridDayKey(gridDay)
+  if (minDate && day < toIsoDateOnly(minDate)) return true
+  if (maxDate && day > toIsoDateOnly(maxDate)) return true
+  return false
 }
 
 function clampToBounds(date: Date, minDate?: Date, maxDate?: Date): Date {
@@ -66,27 +135,6 @@ export function DateTimePicker({
       })
   const resolvedPlaceholder = placeholder ?? defaultPlaceholder
 
-  /**
-   * The date as the reader's language writes it, not as one pattern does.
-   *
-   * `MMM d, yyyy` is a pattern in a language: it puts the month first and uses
-   * a comma, which is English and wrong in most of the nine we ship. Handing
-   * `Intl` the fields instead lets the locale decide the order, the separators
-   * and the month's own abbreviation -- `Sep 7, 2026` against `7. Sept. 2026`.
-   *
-   * The `·` between date and time stays, because it is the design rather than
-   * language, and each half is formatted on its own so it survives.
-   *
-   * `date-fns` keeps the machine formats below untouched: `yyyy-MM-dd` and the
-   * `HH:mm` the time input takes are wire values, and formatting those for a
-   * reader would break them.
-   */
-  const readableDate = (date: Date) => {
-    const day = intl.formatDate(date, { day: 'numeric', month: 'short', year: 'numeric' })
-    if (dateOnly) return day
-    return `${day} · ${intl.formatTime(date, { hour: '2-digit', minute: '2-digit' })}`
-  }
-
   const applyBounds = React.useCallback(
     (date: Date) => clampToBounds(date, minDate, maxDate),
     [minDate, maxDate]
@@ -101,7 +149,10 @@ export function DateTimePicker({
     if (!date) return
 
     if (dateOnly) {
-      onChange(applyBounds(parseISO(`${format(date, 'yyyy-MM-dd')}T12:00:00.000Z`)))
+      // Noon UTC on the picked day names that day in every zone from UTC-12 to UTC+11.
+      onChange(
+        applyBounds(new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12)))
+      )
       setOpen(false)
       return
     }
@@ -126,6 +177,7 @@ export function DateTimePicker({
   }
 
   const isDateDisabled = (date: Date) => {
+    if (dateOnly) return isCalendarDayOutsideBounds(date, minDate, maxDate)
     if (minDate && date < startOfDay(minDate)) return true
     if (maxDate && date > startOfDay(maxDate)) return true
     return false
@@ -133,12 +185,17 @@ export function DateTimePicker({
 
   const timeMax = maxDate && value && isSameDay(value, maxDate) ? maxDate : undefined
   const showClear = value !== undefined && onClear !== undefined
+  const selectedDay = dateOnly && value ? calendarDayInGrid(value) : value
 
   const triggerContent = (
     <>
       <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">
-        {value ? readableDate(value) : resolvedPlaceholder}
+        {value ? (
+          <PickedValue value={value} dateOnly={dateOnly} locale={intl.locale} />
+        ) : (
+          resolvedPlaceholder
+        )}
       </span>
     </>
   )
@@ -200,7 +257,7 @@ export function DateTimePicker({
       <PopoverContent className="w-auto p-0" align="end">
         <Calendar
           mode="single"
-          selected={value}
+          selected={selectedDay}
           onSelect={handleDateSelect}
           disabled={isDateDisabled}
           autoFocus
