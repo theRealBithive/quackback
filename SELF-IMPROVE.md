@@ -2394,6 +2394,28 @@ exactly there. For a suite meant to grade mutants, move the zone through
 the `Intl` stand-ins in `apps/web/src/test/runtime-locale.ts` or explicit
 `timeZone` options instead.
 
+## 1x — `new Request(…, { headers })` trims a header value, so a "malformed" generated header can arrive well-formed
+
+A property that feeds hostile header values to a route handler through a
+`Request` does not deliver them verbatim: the Fetch `Headers` class strips
+leading and trailing whitespace (RFC 9110 §5.5 says it is not part of the
+value). Batch H's range property drew `bytes=0-1 ` as a malformed range,
+the route answered 206, and the counterexample looked like a proxy bug for
+a round of reading. Only inner whitespace (`bytes= 0-1`) survives to the
+handler. Put outer-whitespace cases in a pure unit test of the parser, not
+in a property that goes through `Request`.
+
+## 1x — Calling an editor's `handlePaste` by hand reaches every other paste handler too
+
+`editor.view.someProp('handlePaste', …)` runs the next extension's handler
+whenever ours returns false, and those read `slice.content` and
+`event.clipboardData.getData`. A fake event with only `items`, or a `null`
+slice, fails inside someone else's extension with a `TypeError` that reads
+like a bug in the code under test. Pass `Slice.empty` from `@tiptap/pm/model`
+and give the fake clipboard a `getData: () => ''`. The mounted editor is on
+the ProseMirror DOM node as `.editor`, which is how a test gets at it
+without an `editorRef` seam.
+
 ## Resolved
 
 Entries that were actually fixed, with what fixed them.
