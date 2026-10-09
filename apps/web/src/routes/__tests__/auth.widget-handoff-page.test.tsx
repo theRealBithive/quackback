@@ -67,6 +67,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import type { ComponentType } from 'react'
+import deMessages from '@/locales/de.json'
+import enMessages from '@/locales/en.json'
 import { Route } from '../auth.widget-handoff'
 
 afterEach(() => {
@@ -74,40 +76,53 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function renderPageFor(status: 'invalid' | 'expired' | 'error') {
-  vi.spyOn(Route, 'useLoaderData').mockReturnValue({ status } as never)
+/**
+ * The page renders under the catalogue its loader hands it, so the suite
+ * hands it German: English would pass even for a page that never read the
+ * catalogue, because every id's default is the English text.
+ */
+function renderPageInGermanFor(status: 'invalid' | 'expired' | 'error') {
+  vi.spyOn(Route, 'useLoaderData').mockReturnValue({
+    status,
+    locale: 'de',
+    messages: deMessages,
+  } as never)
   const Page = Route.options.component as ComponentType
   return render(<Page />)
 }
 
+const TITLE = 'portal.auth.widgetHandoff.title'
+const ERROR_BODY = 'portal.auth.widgetHandoff.errorBody'
+const EXPIRED_BODY = 'portal.auth.widgetHandoff.expiredBody'
+
 describe('the handoff error page (J11)', () => {
+  it('has German texts that differ from the English ones, so a German render proves the catalogue was read', () => {
+    for (const id of [TITLE, ERROR_BODY, EXPIRED_BODY] as const) {
+      expect(deMessages[id]).toBeTruthy()
+      expect(deMessages[id]).not.toBe(enMessages[id])
+    }
+  })
+
   it.each(['invalid', 'expired'] as const)(
     'tells a visitor whose token was %s to reopen the widget for a new link (J11)',
     (status) => {
-      renderPageFor(status)
+      renderPageInGermanFor(status)
 
-      expect(screen.getByRole('heading', { name: 'Sign-in link expired' })).toBeTruthy()
-      expect(
-        screen.getByText(
-          'This sign-in link has expired or has already been used. Please reopen the widget to get a new link.'
-        )
-      ).toBeTruthy()
+      expect(screen.getByRole('heading', { name: deMessages[TITLE] })).toBeTruthy()
+      expect(screen.getByText(deMessages[EXPIRED_BODY])).toBeTruthy()
+      expect(screen.queryByText(deMessages[ERROR_BODY])).toBeNull()
     }
   )
 
   it('tells a visitor the server failed, rather than blaming the link (J11)', () => {
-    renderPageFor('error')
+    renderPageInGermanFor('error')
 
-    expect(
-      screen.getByText(
-        'Something went wrong while processing your sign-in link. Please reopen the widget and try again.'
-      )
-    ).toBeTruthy()
-    expect(screen.queryByText(/has expired or has already been used/)).toBeNull()
+    expect(screen.getByText(deMessages[ERROR_BODY])).toBeTruthy()
+    expect(screen.queryByText(deMessages[EXPIRED_BODY])).toBeNull()
   })
 
   it('shows the message inside the branded card and backdrop (J11)', () => {
-    const { container } = renderPageFor('invalid')
+    const { container } = renderPageInGermanFor('invalid')
 
     const backdrop = container.querySelector('.pointer-events-none') as HTMLElement
     const card = screen.getByRole('heading').parentElement as HTMLElement

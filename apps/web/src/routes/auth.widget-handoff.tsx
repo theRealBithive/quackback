@@ -43,6 +43,10 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { getRequestHeaders, setResponseHeader } from '@tanstack/react-start/server'
 import { z } from 'zod'
+import { FormattedMessage } from 'react-intl'
+import { PortalIntlProvider } from '@/components/portal-intl-provider'
+import { loadPortalIntl } from '@/lib/server/functions/locale'
+import { DEFAULT_LOCALE, type SupportedLocale } from '@/lib/shared/i18n'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import { buildSigninRedirect } from '@/lib/shared/auth-prompt'
 import type { UserId } from '@quackback/ids'
@@ -139,7 +143,11 @@ const searchSchema = z.object({
 // Loader data type
 // ---------------------------------------------------------------------------
 
-type LoaderData = { status: 'invalid' | 'expired' | 'error' }
+type LoaderData = {
+  status: 'invalid' | 'expired' | 'error'
+  locale: SupportedLocale
+  messages: Record<string, string>
+}
 
 // ---------------------------------------------------------------------------
 // Server fn: server-side OTT consumption
@@ -365,7 +373,7 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
 
 export const Route = createFileRoute('/auth/widget-handoff')({
   validateSearch: searchSchema.parse,
-  loader: async ({ location }): Promise<LoaderData> => {
+  loader: async ({ location, context }): Promise<LoaderData> => {
     // The search schema is shared between validateSearch and the server fn's
     // validator, so location.search is shape-compatible with the fn's
     // expected input.
@@ -376,7 +384,10 @@ export const Route = createFileRoute('/auth/widget-handoff')({
     if (result.kind === 'redirect') {
       throw redirect({ to: result.to, search: result.search })
     }
-    return { status: result.status }
+    // The error page is a route of its own, outside every layout that mounts
+    // a provider, so it loads its own slice the way `/auth/auth-complete` does.
+    const intl = await loadPortalIntl(context.resolvedLocale ?? DEFAULT_LOCALE)
+    return { status: result.status, locale: intl.locale, messages: intl.messages }
   },
   component: WidgetHandoffErrorPage,
 })
@@ -386,19 +397,41 @@ export const Route = createFileRoute('/auth/widget-handoff')({
 // ---------------------------------------------------------------------------
 
 function WidgetHandoffErrorPage() {
-  const data = Route.useLoaderData()
+  const { status, locale, messages } = Route.useLoaderData()
 
   return (
-    <PageShell>
-      <Card>
-        <h1 className="text-xl font-semibold tracking-tight">Sign-in link expired</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {data.status === 'error'
-            ? 'Something went wrong while processing your sign-in link. Please reopen the widget and try again.'
-            : 'This sign-in link has expired or has already been used. Please reopen the widget to get a new link.'}
-        </p>
-      </Card>
-    </PageShell>
+    <PortalIntlProvider locale={locale} messages={messages}>
+      <PageShell>
+        <Card>
+          <h1 className="text-xl font-semibold tracking-tight">
+            <FormattedMessage
+              id="portal.auth.widgetHandoff.title"
+              defaultMessage="Sign-in link expired"
+            />
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            <WidgetHandoffErrorBody status={status} />
+          </p>
+        </Card>
+      </PageShell>
+    </PortalIntlProvider>
+  )
+}
+
+function WidgetHandoffErrorBody({ status }: { status: LoaderData['status'] }) {
+  if (status === 'error') {
+    return (
+      <FormattedMessage
+        id="portal.auth.widgetHandoff.errorBody"
+        defaultMessage="Something went wrong while processing your sign-in link. Please reopen the widget and try again."
+      />
+    )
+  }
+  return (
+    <FormattedMessage
+      id="portal.auth.widgetHandoff.expiredBody"
+      defaultMessage="This sign-in link has expired or has already been used. Please reopen the widget to get a new link."
+    />
   )
 }
 
@@ -421,6 +454,7 @@ function PageShell({ children }: { children: React.ReactNode }) {
       <div className="relative w-full max-w-md py-12">
         <div className="mb-8 flex items-center justify-center gap-2">
           <img src="/logo.png" alt="" className="h-6 w-6 rounded" />
+          {/* i18n-allow: the product name, the same in every language */}
           <span className="text-sm font-medium text-muted-foreground">Quackback</span>
         </div>
         {children}

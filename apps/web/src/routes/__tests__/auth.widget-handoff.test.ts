@@ -84,6 +84,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
+import deMessages from '@/locales/de.json'
 
 type HandoffResult = {
   kind: 'redirect' | 'error'
@@ -565,7 +566,10 @@ describe('a token Better Auth refuses (J11)', () => {
 // ---------------------------------------------------------------------------
 
 describe('the route loader (J11)', () => {
-  type Loader = (args: { location: { search: unknown } }) => Promise<unknown>
+  type Loader = (args: {
+    location: { search: unknown }
+    context: { resolvedLocale?: string }
+  }) => Promise<unknown>
 
   async function routeLoader(): Promise<Loader> {
     const { Route } = await import('../auth.widget-handoff')
@@ -576,7 +580,7 @@ describe('the route loader (J11)', () => {
     const loader = await routeLoader()
 
     await expect(
-      loader({ location: { search: { ott: 'tok', returnTo: '/posts/123' } } })
+      loader({ location: { search: { ott: 'tok', returnTo: '/posts/123' } }, context: {} })
     ).rejects.toMatchObject({ options: { to: '/posts/123' } })
   })
 
@@ -584,10 +588,29 @@ describe('the route loader (J11)', () => {
     fetchMock.mockResolvedValue(refusedToken(500))
     const loader = await routeLoader()
 
-    await expect(loader({ location: { search: { ott: 'bad' } } })).resolves.toEqual({
-      status: 'error',
-    })
+    const data = (await loader({
+      location: { search: { ott: 'bad' } },
+      context: { resolvedLocale: 'de' },
+    })) as { status: string; locale: string; messages: Record<string, string> }
+
+    expect(data.status).toBe('error')
+    // The page renders in the visitor's resolved language.
+    expect(data.locale).toBe('de')
+    expect(data.messages['portal.auth.widgetHandoff.errorBody']).toBe(
+      deMessages['portal.auth.widgetHandoff.errorBody']
+    )
     expect(hoisted.cookies).toEqual([])
+  })
+
+  it('renders the error page in English when no language was resolved (J11)', async () => {
+    fetchMock.mockResolvedValue(refusedToken(500))
+    const loader = await routeLoader()
+
+    const data = (await loader({ location: { search: { ott: 'bad' } }, context: {} })) as {
+      locale: string
+    }
+
+    expect(data.locale).toBe('en')
   })
 })
 
