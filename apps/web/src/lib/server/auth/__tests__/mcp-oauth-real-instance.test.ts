@@ -409,12 +409,10 @@ describe('authorization and the code exchange (J26, J27, J28)', () => {
   const REDIRECT = 'http://127.0.0.1:43123/callback'
 
   /**
-   * A different port on the same loopback host is not in this list, and that
-   * is a reported finding, not a pinned behaviour: Better Auth follows RFC
-   * 8252 §7.3 and lets a native client's loopback redirect use any port, so
-   * `http://127.0.0.1:43124/callback` receives a code for a client that
-   * registered port 43123. J26 says "exactly matches"; the case was red, and
-   * whether J26 should allow the RFC's port variance is put to the user.
+   * A different port on the same loopback host is the one permitted variance
+   * (J26, port clause revised 2026-10-08): RFC 8252 §7.3 has a native app
+   * pick its port at run time. Everything else must match: path, query,
+   * host (another loopback name included) and scheme.
    */
   it('redirects only to the registered URI: no other path, query or host (J26)', async () => {
     const clientId = await registerPublicClient(REDIRECT)
@@ -423,7 +421,10 @@ describe('authorization and the code exchange (J26, J27, J28)', () => {
     for (const other of [
       'http://127.0.0.1:43123/callback/other',
       'http://127.0.0.1:43123/callback?x=1',
+      'http://127.0.0.1:43124/other',
+      'http://localhost:43123/callback',
       'http://evil.example.com/callback',
+      'https://127.0.0.1:43123/callback',
     ]) {
       const { location, code } = await authorizationCode({
         clientId,
@@ -435,6 +436,21 @@ describe('authorization and the code exchange (J26, J27, J28)', () => {
       expect(code).toBeNull()
       expect(redirectedThere).toBe(false)
     }
+  })
+
+  it('accepts a different port on the same loopback host and path (J26)', async () => {
+    const clientId = await registerPublicClient(REDIRECT)
+    const { challenge } = pkcePair()
+    const otherPort = 'http://127.0.0.1:43124/callback'
+
+    const { location, code } = await authorizationCode({
+      clientId,
+      redirectUri: otherPort,
+      challenge,
+    })
+
+    expect(code).not.toBeNull()
+    expect((location ?? '').startsWith(`${otherPort}?`)).toBe(true)
   })
 
   it('refuses to start a public client authorization without a PKCE challenge (J27)', async () => {
