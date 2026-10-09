@@ -39,7 +39,10 @@ beforeEach(() => {
 describe('readSsoClaimsWithProvenance', () => {
   it('returns the claims the resolver validated for this sign-in, marked fresh', async () => {
     mockAccountFindFirst.mockResolvedValue({ accountId: 'sub-1', idToken: null })
-    stashResolvedClaims(PROVIDER, 'sub-1', { sub: 'sub-1', department: 'Engineering' })
+    stashResolvedClaims(PROVIDER, 'sub-1', {
+      claims: { sub: 'sub-1', department: 'Engineering' },
+      profile: { generatedNames: [] },
+    })
 
     await expect(readSsoClaimsWithProvenance(USER, PROVIDER)).resolves.toEqual({
       claims: { sub: 'sub-1', department: 'Engineering' },
@@ -49,7 +52,10 @@ describe('readSsoClaimsWithProvenance', () => {
 
   it('hands the stash out once: a second read falls back to the stored token', async () => {
     mockAccountFindFirst.mockResolvedValue({ accountId: 'sub-1', idToken: null })
-    stashResolvedClaims(PROVIDER, 'sub-1', { department: 'Engineering' })
+    stashResolvedClaims(PROVIDER, 'sub-1', {
+      claims: { department: 'Engineering' },
+      profile: { generatedNames: [] },
+    })
 
     await readSsoClaimsWithProvenance(USER, PROVIDER)
 

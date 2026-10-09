@@ -142,7 +142,6 @@ function makeProvider(over: Partial<IdentityProvider> = {}): IdentityProvider {
     autoCreateUsers: true,
     autoProvisionRole: null,
     claimMapping: null,
-    redirectStyle: 'current',
     showButton: false,
     logoKey: null,
     logoUrl: null,

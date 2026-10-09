@@ -1,3 +1,4 @@
+import type { Logger } from 'drizzle-orm'
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import * as schema from './schema'
@@ -11,6 +12,8 @@ export interface CreateDbOptions {
   prepare?: boolean
   /** Close idle connections after this many seconds (default: 20). */
   idleTimeout?: number
+  /** Sees every statement Drizzle sends. */
+  logger?: Logger
 }
 
 /**
@@ -23,7 +26,7 @@ export function createDb(connectionString: string, options?: CreateDbOptions): D
     prepare: options?.prepare ?? true,
     idle_timeout: options?.idleTimeout ?? 20,
   })
-  return drizzle(sql, { schema })
+  return drizzle(sql, { schema, logger: options?.logger })
 }
 
 /**

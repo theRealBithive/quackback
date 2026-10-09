@@ -30,9 +30,10 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('@/lib/client/queries/settings', () => ({
   settingsQueries: { teamMembersAndInvitations: () => ({}) },
 }))
-vi.mock('@/lib/client/hooks/use-root-context', () => ({
-  useSessionContext: () => ({ user: { email: 'ada@example.com' } }),
-  useWorkspaceSettings: () => ({ name: 'Acme' }),
+// The fork's members tab reads the session from the root route context and
+// takes the workspace name as a prop.
+vi.mock('@tanstack/react-router', () => ({
+  useRouteContext: () => ({ session: { user: { email: 'ada@example.com' } } }),
 }))
 vi.mock('@/components/admin/settings/team/add-people-dialog', () => ({
   AddPeopleDialog: (props: { open: boolean; canGrantAdmin: boolean; workspaceName?: string }) =>
@@ -58,6 +59,7 @@ describe('MembersTab add people', () => {
   ] as const)('opens the dialog for a %s, who may grant Admin: %s', async (role, canGrant) => {
     render(
       <MembersTab
+        workspaceName="Acme"
         currentMember={{ id: 'principal_admin' as never, role, userId: 'user_admin' as never }}
         canManageMembers
       />
@@ -75,6 +77,7 @@ describe('MembersTab add people', () => {
   it('offers no Add people to someone who cannot manage members', () => {
     render(
       <MembersTab
+        workspaceName="Acme"
         currentMember={{
           id: 'principal_admin' as never,
           role: 'member',
