@@ -658,11 +658,15 @@ describe('resolveIdentity avatar URL rules', () => {
     return result.identity.image
   }
 
-  it('trims an http(s) URL and refuses anything else', async () => {
+  /**
+   * This case used to accept a plain `http` avatar. The contract changed by the
+   * user's decision D2 in batch M (M2: an avatar is only ever taken from an
+   * absolute `https` address), so the `http` line now expects nothing rather
+   * than the address. The other refusals are unchanged.
+   */
+  it('trims an https URL and refuses anything else, plain http included (M2)', async () => {
     expect(await imageFrom({ picture: '  https://x.test/a.png\n' })).toBe('https://x.test/a.png')
-    expect(await imageFrom({ picture: 'http://idp.internal/avatar.jpg' })).toBe(
-      'http://idp.internal/avatar.jpg'
-    )
+    expect(await imageFrom({ picture: 'http://idp.internal/avatar.jpg' })).toBeUndefined()
     expect(await imageFrom({ picture: 'javascript:alert(1)' })).toBeUndefined()
     expect(await imageFrom({ picture: '/relative/a.png' })).toBeUndefined()
     expect(await imageFrom({ picture: { url: 'https://x.test/a.png' } })).toBeUndefined()

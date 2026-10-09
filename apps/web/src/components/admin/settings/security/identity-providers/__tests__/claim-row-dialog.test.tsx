@@ -419,8 +419,31 @@ describe('ClaimRowDialog avatar', () => {
   it('blocks Apply for a claim that is not an image URL', () => {
     const { onCommit } = renderAvatarDialog()
     typeClaim('name')
-    expect(screen.getByRole('status')).toHaveTextContent('Not an image URL')
+    // The wording names https since only https avatars are taken (batch M, D2/M2).
+    expect(screen.getByRole('status')).toHaveTextContent('Not an https image URL')
     expect(claimInput()).toHaveAttribute('aria-invalid', 'true')
+    expect(applyButton()).toBeDisabled()
+    fireEvent.click(applyButton())
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
+  // Batch M, decision D2: only an https avatar is taken.
+  it('blocks Apply for a plain http picture address and shows no thumbnail for it (M2)', () => {
+    const idToken = avatarCapture.replay!.sources[0]!
+    const capture: SsoTestCapture = {
+      ...avatarCapture,
+      replay: {
+        sources: [
+          { ...idToken, claims: { ...idToken.claims, http_photo: 'http://cdn.example.com/p.png' } },
+          avatarCapture.replay!.sources[1]!,
+        ],
+      },
+    }
+    const { onCommit } = renderAvatarDialog({ capture })
+    typeClaim('http_photo')
+    expect(screen.getByRole('status')).toHaveTextContent('Not an https image URL')
+    expect(claimInput()).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.queryByRole('img', { name: 'Picture from the test sign-in' })).toBeNull()
     expect(applyButton()).toBeDisabled()
     fireEvent.click(applyButton())
     expect(onCommit).not.toHaveBeenCalled()

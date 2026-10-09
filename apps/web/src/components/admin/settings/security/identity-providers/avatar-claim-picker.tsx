@@ -5,7 +5,7 @@
  *
  * The preview replays the test through the same binder sign-in uses, under
  * the draft mapping with the typed claim as the avatar claim. So it reads the
- * same sources in the same order, takes the first http(s) URL any of them
+ * same sources in the same order, takes the first https URL any of them
  * holds, and a value that is not one blocks Apply. Avatar URLs often have no
  * file extension, so none is required. A claim the test did not send is
  * allowed, because the next sign-in may carry it, and a picture that fails to
@@ -23,12 +23,8 @@ import {
   identityMappingFor,
   type IdentityProviderClaimMapping,
 } from '@/lib/shared/oidc-claim-mapping'
-import {
-  asHttpUrl,
-  claimIsMissing,
-  finishBinding,
-  replayClaimMapping,
-} from '@/lib/shared/sso-claim-binder'
+import { asHttpsAvatarUrl } from '@/lib/shared/avatar-url'
+import { claimIsMissing, finishBinding, replayClaimMapping } from '@/lib/shared/sso-claim-binder'
 import { previewProfileValues } from '@/lib/shared/sso-mapping-preview'
 import {
   isReplayableCapture,
@@ -109,7 +105,7 @@ function statusFor(check: AvatarClaimCheck, loadFailed: boolean): { text: string
     case 'missing':
       return { text: 'Not in the last test sign-in', tone: 'text-muted-foreground' }
     case 'not_url':
-      return { text: 'Not an image URL', tone: 'text-destructive' }
+      return { text: 'Not an https image URL', tone: 'text-destructive' }
     case 'url':
       return loadFailed
         ? { text: 'Could not load this picture', tone: 'text-warning' }
@@ -146,13 +142,13 @@ export function AvatarClaimPicker({
   const listLabelId = `${id}-claims`
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
 
-  // Every leaf claim, with its value and, for an http(s) URL, a thumbnail.
+  // Every leaf claim, with its value and, for an https URL, a thumbnail.
   const options = useMemo(
     () =>
       claims
         ? deriveAttributeClaimPaths(claims).map(({ path }) => {
             const claimValue = getClaimByPath(claims, path)
-            return { path, display: displayValue(claimValue), url: asHttpUrl(claimValue) }
+            return { path, display: displayValue(claimValue), url: asHttpsAvatarUrl(claimValue) }
           })
         : [],
     [claims]
