@@ -33,8 +33,18 @@ describe('RBAC schema', () => {
 
   it('principal_role_assignments columns', () => {
     const cols = Object.keys(getTableColumns(principalRoleAssignments))
+    // grantedBySso (0284, batch M): whether a sign-in wrote the assignment,
+    // which is all "Every sign-in" role sync may change (M38).
     expect(cols.sort()).toEqual(
-      ['id', 'principalId', 'roleId', 'teamId', 'grantedByPrincipalId', 'createdAt'].sort()
+      [
+        'id',
+        'principalId',
+        'roleId',
+        'teamId',
+        'grantedByPrincipalId',
+        'grantedBySso',
+        'createdAt',
+      ].sort()
     )
   })
 

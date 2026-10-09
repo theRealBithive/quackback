@@ -358,6 +358,7 @@ describe('replayGateVerdict', () => {
       '0281_identity_provider_id_token_nonce',
       '0282_conversation_message_edited_at',
       '0283_account_profile_sync',
+      '0284_role_assignment_granted_by_sso',
     ])
     const verdict = replayGateVerdict(before, verdictsFor(replaySetFor(before)), false)
     expect(verdict.ok).toBe(false)

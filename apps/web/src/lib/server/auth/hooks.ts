@@ -59,6 +59,7 @@ import { readSsoClaims, readSsoClaimsWithProvenance, type ClaimRead } from './re
 import { applyClaimAttributesAfter } from './apply-claim-attributes'
 import type { ResolvedProfile } from './resolved-claims-stash'
 import { profileSyncEnabled } from '@/lib/shared/oidc-claim-mapping'
+import { planSignInRoleChange, signInMayChangeRole, type HeldAssignment } from './sso-role-sync'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'auth-hooks' })
@@ -658,7 +659,9 @@ export function shouldBootstrapPromote(
  *
  * Invariants:
  *  - Only upgrades from `role='user'`; `admin` and `member` are left
- *    alone unless `claimMapping.role.syncOnEverySignIn` is set. The special
+ *    alone unless `claimMapping.role.syncOnEverySignIn` is set, and even then
+ *    only while their workspace role was written by a sign-in: a role an admin
+ *    assigned by hand is never changed here (sso-role-sync.ts). The special
  *    `autoProvisionRole='user'` disables default-role promotion entirely.
  *  - A returning user with no principal row (soft-removed via "Remove from
  *    portal", which keeps the auth identity) is treated as a fresh sign-in:
@@ -747,15 +750,12 @@ export async function handleAutoProvisionAfter(
   // the lazy getOptionalAuth path would recreate them as a plain 'user'.
   const currentRole = p?.role ?? 'user'
 
-  // Sync mode: re-apply on every sign-in, including for existing
-  // admin/member users. Without sync, JIT semantics — only a fresh
-  // first sign-in (role='user') gets touched.
+  // Sync mode: re-apply on every sign-in, for roles a sign-in gave. Without
+  // sync, JIT semantics — only a fresh first sign-in (role='user') gets
+  // touched. 'user' as the target is the explicit no-promote choice, which
+  // only takes someone back to portal user under sync.
   const syncOnEverySignIn = roleMapping?.syncOnEverySignIn === true
-  if (!syncOnEverySignIn && currentRole !== 'user') return
-
-  // 'user' as the target is the explicit no-promote choice — only
-  // demote an existing team-role user to 'user' under sync mode.
-  if (targetRole === 'user' && !syncOnEverySignIn) return
+  if (!signInMayChangeRole({ currentRole, syncOnEverySignIn, targetRole })) return
 
   // A rule may grant a workspace role on top of the member tier, through the
   // same assignment path custom-role invites and role changes use. Looked up
@@ -769,26 +769,31 @@ export async function handleAutoProvisionAfter(
   // hand out the member preset, which can exceed the role the admin chose.
   if (claimMatch?.roleId && !targetCustom) return
 
-  // Under sync the provider owns roles: a plain-member outcome (a rule with no
-  // workspace role, or the default) moves a member holding another workspace
-  // role back to the plain member role.
-  const plainMember = targetRole === 'member' && !targetCustom
-  const syncedMember = syncOnEverySignIn && plainMember && currentRole === 'member'
-  const currentCustom =
-    p && (targetCustom || syncedMember) ? await workspaceAssignmentOf(p.id as PrincipalId) : null
-  // Under sync, a person whose matched rule now names a different workspace
-  // role moves to it even when the tier is unchanged.
-  const customMoves = targetCustom != null && currentCustom?.id !== targetCustom.id
-  const clearsCustom =
-    syncedMember && currentCustom != null && currentCustom.key !== SYSTEM_ROLES.MANAGER
-  if (currentRole === targetRole && !customMoves && !clearsCustom) return // no-op
-  const assignRoleId = targetCustom?.id
+  // Under sync the provider owns the roles a sign-in gave, and only those
+  // (fork, batch M decision D6c): a role an admin assigned by hand is never
+  // changed here. See sso-role-sync.ts for the whole rule.
+  // A portal user's first promotion needs no lookup: they hold no workspace
+  // role, unless a rule names one to compare with.
+  const assignmentMatters = currentRole !== 'user' || targetCustom !== null
+  const currentAssignment =
+    p && assignmentMatters ? await workspaceAssignmentOf(p.id as PrincipalId) : null
+  const plan = planSignInRoleChange({
+    hasPrincipal: p !== undefined,
+    currentRole,
+    syncOnEverySignIn,
+    targetRole,
+    targetCustom,
+    currentAssignment,
+  })
+  if (!plan) return
+  const { assignRoleId, customMoves, clearsCustom } = plan
 
   if (p) {
     // No tx -> the factory busts PRINCIPAL_BY_USER itself.
     await setPrincipalRole({ userId: userIdTyped }, targetRole, {
       assignRoleId,
-      resetAssignment: clearsCustom,
+      resetAssignment: plan.resetAssignment,
+      assignedBySso: true,
     })
   } else {
     // Recreate the soft-removed principal in-band with the provisioned role.
@@ -810,10 +815,16 @@ export async function handleAutoProvisionAfter(
     })
     // If a concurrent lazy create won the race it seeded role 'user'; reapply the
     // provisioned role so the SSO attestation isn't silently dropped. A
-    // workspace role is written through the role writer either way, since a
-    // plain create records no assignment.
-    if (assignRoleId || (!created && rebuilt.role !== targetRole)) {
-      await setPrincipalRole({ userId: userIdTyped }, targetRole, { assignRoleId })
+    // team role is written through the role writer either way, since a plain
+    // create records no assignment, and the assignment must say a sign-in
+    // gave it so a later sync sign-in may still change it.
+    const lostTheRace = !created && rebuilt.role !== targetRole
+    if (assignRoleId || targetRole !== 'user' || lostTheRace) {
+      await setPrincipalRole({ userId: userIdTyped }, targetRole, {
+        assignRoleId,
+        resetAssignment: true,
+        assignedBySso: true,
+      })
     }
   }
 
@@ -826,8 +837,8 @@ export async function handleAutoProvisionAfter(
       target: { type: 'user', id: userIdTyped },
       before: {
         role: p.role,
-        ...((customMoves || clearsCustom) && currentCustom
-          ? { assignedRole: currentCustom.name }
+        ...((customMoves || clearsCustom) && currentAssignment
+          ? { assignedRole: currentAssignment.name }
           : {}),
       },
       after: { role: targetRole, ...(targetCustom ? { assignedRole: targetCustom.name } : {}) },
@@ -869,12 +880,15 @@ async function grantableRuleRole(
 }
 
 /** The principal's workspace-wide role assignment, if any. */
-async function workspaceAssignmentOf(
-  principalId: PrincipalId
-): Promise<{ id: RoleId; key: string; name: string } | null> {
+async function workspaceAssignmentOf(principalId: PrincipalId): Promise<HeldAssignment | null> {
   const { db, roles, principalRoleAssignments, and, eq, isNull } = await import('@/lib/server/db')
   const [row] = await db
-    .select({ id: roles.id, key: roles.key, name: roles.name })
+    .select({
+      id: roles.id,
+      key: roles.key,
+      name: roles.name,
+      grantedBySso: principalRoleAssignments.grantedBySso,
+    })
     .from(principalRoleAssignments)
     .innerJoin(roles, eq(roles.id, principalRoleAssignments.roleId))
     .where(

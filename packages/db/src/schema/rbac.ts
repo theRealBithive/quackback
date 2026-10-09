@@ -73,6 +73,9 @@ export const principalRoleAssignments = pgTable(
     // the retype from a plain uuid to a typed team FK is a pure ALTER.
     teamId: typeIdColumnNullable('team')('team_id'),
     grantedByPrincipalId: typeIdColumnNullable('principal')('granted_by_principal_id'),
+    // Written by a sign-in (a role rule or the provider's default role), not
+    // by a person. Role sync on sign-in changes only such rows. See 0284.
+    grantedBySso: boolean('granted_by_sso').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [

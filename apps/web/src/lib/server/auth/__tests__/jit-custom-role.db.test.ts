@@ -62,7 +62,17 @@ if (fixture.available) {
 
 const suffix = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
-async function seedUser(role: 'admin' | 'member' | 'user' | null, assignRoleId?: RoleId) {
+/**
+ * `grantedBySso` says the assignment was written by an earlier sign-in. Since
+ * batch M (decision D6c, M38) "Every sign-in" changes only such a role; the
+ * sync cases below seed it that way, and a role assigned by hand is pinned as
+ * unchanged in jit-role-origin.db.test.ts.
+ */
+async function seedUser(
+  role: 'admin' | 'member' | 'user' | null,
+  assignRoleId?: RoleId,
+  grantedBySso = false
+) {
   const userId = createId('user') as UserId
   const email = `p-${suffix()}@elsewhere.com`
   await testDb.insert(user).values({ id: userId, name: 'P', email })
@@ -73,7 +83,9 @@ async function seedUser(role: 'admin' | 'member' | 'user' | null, assignRoleId?:
       .insert(principal)
       .values({ id: principalId, userId, role, type: 'user', createdAt: new Date() })
     if (assignRoleId) {
-      await testDb.insert(principalRoleAssignments).values({ principalId, roleId: assignRoleId })
+      await testDb
+        .insert(principalRoleAssignments)
+        .values({ principalId, roleId: assignRoleId, grantedBySso })
     }
   }
   return { userId, email, principalId }
@@ -157,7 +169,7 @@ describe.skipIf(!fixture.available)('SSO role rules granting a workspace role', 
   it('under sync, a person whose rule now names another role moves to it, audited', async () => {
     const support = await insertRole('Support')
     const billing = await insertRole('Billing')
-    const who = await seedUser('member', support)
+    const who = await seedUser('member', support, true)
     // Without sync an existing member is left alone.
     await signIn(who, [{ whenContains: 'support', role: 'member', roleId: billing }], ['support'])
     expect(await state(who.userId)).toEqual({ role: 'member', assignments: [support] })
@@ -185,7 +197,7 @@ describe.skipIf(!fixture.available)('SSO role rules granting a workspace role', 
     // A second admin, so the last-admin rail does not refuse the demotion.
     await seedUser('admin')
     const owner = await testDb.select().from(roles).where(eq(roles.key, SYSTEM_ROLES.OWNER))
-    const who = await seedUser('admin', owner[0]?.id as RoleId | undefined)
+    const who = await seedUser('admin', owner[0]?.id as RoleId | undefined, true)
     await signIn(
       who,
       [{ whenContains: 'support', role: 'member', roleId: support }],
@@ -229,7 +241,7 @@ describe.skipIf(!fixture.available)('SSO role rules granting a workspace role', 
 
   it('under sync, a plain-member rule moves a custom-role holder back to the plain member role, audited', async () => {
     const support = await insertRole('Support')
-    const who = await seedUser('member', support)
+    const who = await seedUser('member', support, true)
     // First sign-in mode leaves a returning teammate alone.
     await signIn(who, [{ whenContains: 'eng', role: 'member' }], ['eng'])
     expect(await state(who.userId)).toEqual({ role: 'member', assignments: [support] })
@@ -248,7 +260,7 @@ describe.skipIf(!fixture.available)('SSO role rules granting a workspace role', 
 
   it('under sync, the verified-domain default clears a custom role too', async () => {
     const support = await insertRole('Support')
-    const who = await seedUser('member', support)
+    const who = await seedUser('member', support, true)
     const domain = who.email.split('@')[1]!
     await signIn(who, [{ whenContains: 'admins', role: 'admin' }], ['eng'], true, domain)
     const [manager] = await testDb.select().from(roles).where(eq(roles.key, SYSTEM_ROLES.MANAGER))
