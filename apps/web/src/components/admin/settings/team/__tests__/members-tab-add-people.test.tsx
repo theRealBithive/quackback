@@ -47,6 +47,10 @@ vi.mock('@/components/admin/settings/team/cloud-ownership-actions', () => ({
   CloudOwnershipActions: () => null,
 }))
 vi.mock('@/components/admin/settings/team/member-actions', () => ({ MemberActions: () => null }))
+// The fork keeps its Add seat dialog beside Add people; it is not under test here.
+vi.mock('@/components/admin/settings/billing/add-seats-dialog', () => ({
+  AddSeatsDialog: () => null,
+}))
 
 import { MembersTab } from '../members-tab'
 
