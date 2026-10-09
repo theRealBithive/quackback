@@ -334,10 +334,6 @@ export const Route = createFileRoute('/api/widget/identify')({
               // First verified sight of this account — stamp the durable subject.
               updates.externalId = externalId
             }
-            if (!userRecord.emailVerified) {
-              // Address came from a signed JWT.
-              updates.emailVerified = true
-            }
           }
 
           if (Object.keys(updates).length > 0) {
@@ -357,7 +353,11 @@ export const Route = createFileRoute('/api/widget/identify')({
               // index-eligible and the "one email per account" invariant
               // holds across mixed-case identify calls.
               email: normalizedEmail,
-              emailVerified: true,
+              // Not verified (J23): the widget secret vouches for who the
+              // host's user is, not for ownership of the address. Marking it
+              // verified let a trusted sign-in provider that never verified
+              // the address link into this account.
+              emailVerified: false,
               image: identified.avatarURL ?? null,
               metadata: hasAttrs ? JSON.stringify(validAttrs) : null,
               country: country ?? null,

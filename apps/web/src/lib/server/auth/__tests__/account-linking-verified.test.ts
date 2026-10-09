@@ -1,11 +1,16 @@
 /**
  * Implicit account linking on the app's own linking rules (J23).
  *
- * Since #572 a signed widget identify marks the person's address verified.
+ * #572 made a signed widget identify mark the person's address verified.
  * Better Auth uses that mark when an OAuth or OIDC sign-in arrives with the
- * same address: it is one of the conditions for attaching the incoming
- * credential to the existing account. J23's second sentence says the mark
- * must never be the whole reason.
+ * same address: for a provider the fork trusts by name (every configured OIDC
+ * and social provider, see `index.ts` and `provider-trust.ts`) it is the only
+ * condition, so the provider's own word on the address did not matter. A
+ * probe showed it: an unverified address from a trusted provider linked into
+ * a widget-identified account. J23 was revised on 2026-10-08 by the user's
+ * decision and the fork reverts that part of #572: identify leaves the
+ * address unverified (pinned in `identify-external-id.test.ts`), and this
+ * suite pins that the path is closed for such an account.
  *
  * How this is asked: the app's real `createAuth()` runs with its edges
  * stubbed, and the `account` options it hands Better Auth are captured. Those
@@ -13,11 +18,11 @@
  * adapter, whose own `handleOAuthUserInfo` decides each sign-in. So a change
  * to the fork's linking options or to the library's linking rule fails here.
  *
- * What this suite does not claim: for a provider the fork trusts by name
- * (every configured OIDC and social provider, see `index.ts` and
- * `provider-trust.ts`), Better Auth links an incoming address the provider
- * did not verify into an account whose address is verified. That is reported
- * as an open finding against J23, not pinned here.
+ * What this suite does not claim: an account whose address was verified by
+ * some other means (an email link) is still linked into by a trusted provider
+ * on an unverified incoming address. That is Better Auth's rule for trusted
+ * providers and the fork's recorded "observed, not enforced" decision in
+ * `provider-trust.ts`; it is outside what a widget identify can cause.
  *
  * Trust boundary (OWASP A07, identification and authentication failures): the
  * incoming identity is the provider's assertion, and the local mark is ours.
@@ -62,13 +67,13 @@
  * J20 A visitor identified in the widget by a signed token may read, post, vote and comment on the boards their tier allows, even when the workspace's portal is private and they have no portal access of their own. Board audience tiers still apply in full.
  * J21 On the portal site, the private-portal gate applies to every visitor exactly as before.
  * J22 On the widget's endpoints, the private-portal gate is lifted only for a session with a signed identify. A caller with no widget session, an anonymous widget session and an email-capture (unsigned) widget session meet the private-portal gate exactly as on the portal site: they cannot list or read posts or the changelog of a private workspace, nor vote, post or comment there, and the messenger asks them for portal access as before.
- * J23 A signed identify marks the person's email address as verified, so a domain allowlist can match it: the widget secret vouches for email ownership. No sign-in path links a different credential to an account merely because its address is marked verified.
+ * J23 A signed identify does not mark the person's email address as verified; the widget secret vouches for who the host's user is, not for ownership of the address. No sign-in path links a different credential to an account merely because its address is marked verified. (Revised 2026-10-08 by the user's decision: #572 marked it verified, which let a trusted provider that never verified the address link into the account.)
  *
  * ## F. MCP OAuth with every major client (#583)
  *
  * J24 The protected-resource document names this instance's authorization server by its issuer identifier, and the authorization-server metadata found at that issuer's well-known locations (RFC 8414 path-inserted, OpenID path-inserted, and the root form) carries exactly that issuer.
  * J25 A client that registers dynamically without saying what kind of application it is, and lists a loopback or private-use redirect, is registered as a native app. One that states its kind keeps it. A web client still needs HTTPS redirects on a non-loopback host.
- * J26 Dynamic registration never accepts a redirect with a reserved scheme (javascript:, data:, file:, vbscript:, mailto:, ftp:), a fragment, or embedded credentials. Authorization only redirects to a URI that exactly matches one registered for that client. A native client may use plain http only on the exact loopback hosts localhost, 127.0.0.1 and [::1]; an untyped client turned native does not admit http on any other host.
+ * J26 Dynamic registration never accepts a redirect with a reserved scheme (javascript:, data:, file:, vbscript:, mailto:, ftp:), a fragment, or embedded credentials. Authorization only redirects to a URI that matches one registered for that client exactly, except that on the loopback hosts localhost, 127.0.0.1 and [::1] the port may differ, as RFC 8252 §7.3 requires for native apps. A native client may use plain http only on those exact loopback hosts; an untyped client turned native does not admit http on any other host. (Port clause revised 2026-10-08 by the user's decision.)
  * J27 Every authorization-code exchange by a public (native or browser) client is bound to PKCE with S256. A code without its verifier is refused.
  * J28 Access tokens are issued for, and accepted only at, this instance's MCP resource. A token minted for another audience is refused. Scopes stay the first-connect read set until the user grants more.
  * J29 Browser-hosted MCP clients may call discovery, registration, token, revocation, JWKS and the MCP endpoint itself from any origin, without credentials. No endpoint that a cookie authorizes (sign-in, session, authorize, consent) answers cross-origin.
@@ -248,6 +253,19 @@ describe('a sign-in from a provider the app does not trust (J23)', () => {
     const { linked } = await signInFrom(instance, 'stranger', true)
 
     expect(linked).toBe(true)
+  })
+})
+
+describe('an account a signed widget identify created (J23)', () => {
+  it('is not linked into by a trusted provider that did not verify the address (J23)', async () => {
+    // identify writes emailVerified = false (J23, revised), so this is the
+    // account it leaves behind. Before the revision the same sign-in linked.
+    const instance = await instanceWithLocalAccount(false)
+
+    const { result, linked } = await signInFrom(instance, 'oidc_acme', false)
+
+    expect(linked).toBe(false)
+    expect(result).toMatchObject({ error: 'account not linked' })
   })
 })
 

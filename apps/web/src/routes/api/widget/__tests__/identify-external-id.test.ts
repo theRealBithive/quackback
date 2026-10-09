@@ -121,7 +121,11 @@ beforeEach(() => {
 })
 
 describe('POST /api/widget/identify — external_id resolution (verified path)', () => {
-  it('creates a new user stamped with the verified sub as external_id (J23)', async () => {
+  // J23 was revised on 2026-10-08 by the user's decision: a signed identify no
+  // longer marks the address verified. The two tests below asserted the
+  // opposite under the old wording; they now state the revised contract, which
+  // is a contract change, not a softened test.
+  it('creates a new user stamped with the verified sub, its address left unverified (J23)', async () => {
     mockVerifyJWT.mockReturnValue({ sub: 'sub_alice', email: 'alice@acme.com', name: 'Alice' })
     mockUserFindFirst.mockResolvedValue(null) // no external_id match, no email match
     mockPrincipalFindFirst.mockResolvedValue(null)
@@ -130,7 +134,7 @@ describe('POST /api/widget/identify — external_id resolution (verified path)',
 
     expect(res.status).toBe(200)
     expect(userInsertValues()?.externalId).toBe('sub_alice')
-    expect(userInsertValues()?.emailVerified).toBe(true)
+    expect(userInsertValues()?.emailVerified).toBe(false)
   })
 
   it('resolves a returning sub to the same user and adopts the new email (J19, J23)', async () => {
@@ -156,9 +160,9 @@ describe('POST /api/widget/identify — external_id resolution (verified path)',
     // No new user row — resolved by the stable subject, not the email.
     expect(userInsertValues()).toBeUndefined()
     // sub is authoritative: the changed email is adopted onto the same account.
-    expect(updateSet).toHaveBeenCalledWith(
-      expect.objectContaining({ email: 'bob-new@acme.com', emailVerified: true })
-    )
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ email: 'bob-new@acme.com' }))
+    // J23: adopting the address does not vouch for owning it.
+    expect(updateSet.mock.calls[0]?.[0]).not.toHaveProperty('emailVerified')
     const body = (await res.json()) as { user?: { email?: string; name?: string } }
     expect(body.user?.email).toBe('bob-new@acme.com')
   })
