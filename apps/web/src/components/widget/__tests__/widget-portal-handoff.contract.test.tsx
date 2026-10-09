@@ -131,6 +131,8 @@ vi.mock('@/lib/server/functions/user', () => ({
 // calls is reduced to nothing.
 vi.mock('../use-widget-image-upload', () => ({
   useWidgetImageUpload: () => ({ upload: vi.fn() }),
+  // The post detail uploads through the media hook since batch H (#46).
+  useWidgetMediaUpload: () => ({ upload: vi.fn() }),
 }))
 vi.mock('../widget-vote-button', () => ({ WidgetVoteButton: () => null }))
 vi.mock('../widget-comment-list', () => ({ WidgetCommentList: () => null }))
