@@ -533,6 +533,45 @@ no-op would quietly restore the number. CI cannot catch that rot on its own —
 the `check` job builds before it typechecks, and the build writes the same file
 — which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
 
+## 4x — A picked upstream suite is written against module names from commits we skipped
+
+Three suites in upstream batch F failed for reasons that had nothing to do with
+the fix they came with. `widget-home-compose-board.test.tsx` (#577) mocked
+`useWidgetMediaUpload` and `widget/posts`' `widgetCreatePublicPostFn`, names
+upstream introduced later with #566 and the widget-posts move; here they are
+`useWidgetImageUpload` and `public-posts`' `createPublicPostFn`, so the mock
+answered nothing and the submit never reached it. `rich-text-editor-enter.test.tsx`
+(#567) rendered without an `IntlProvider`, which the fork's editor needs. And
+the typecheck, not any test, found three fork-only fixtures that build an
+`IdentityProvider` without the field #609 added. Each looked like a broken fix
+until the mock or fixture was read. After a pick, run its own suites first and
+read a failure's first line before the fix's code: `No "X" export is defined on
+the mock` and `Could not find required intl object` are the tells.
+
+Hit again in batch K: `@/test/server-fns-in-process`, `use-widget-file-upload`
+and `finishIdentityOnboarding` came with #688, #644 and #656 from commits we
+had not picked. Typecheck finds them at once (`Cannot find module`); grep the
+picked test files for imports before running anything.
+
+The reverse hit in batch J: upstream #555 renamed the widget's server
+functions (`widget/posts`, `widget/changelog`, `widget/help`, a visitor RPC
+module) and moved handler bodies into `createServerOnlyFn`. Thirteen _fork_
+suites mocked the old names and went red at once, with no typecheck error
+to point at them, because a `vi.mock` of a module nobody imports any more
+is legal. The tells were the same two first lines, plus
+`No "createServerOnlyFn" export is defined on the "@tanstack/react-start"
+mock`. After a pick that renames modules, grep the fork's suites for the
+old module paths before running the batch.
+
+Fourth hit in batch M, and this time production code too: #679's Roles
+card imports `inline-link` (#618), #676's dialogs use `useOpenedOnce`
+(#589), its DB suite passes a `logger` the fork's fixture did not take
+(#589), and a conflict resolved to upstream's side quietly carried a #618
+avatar test with it. Typecheck found the first three; the fourth only
+showed as a red test. When resolving a test-file hunk to "theirs", check
+`git log -S'<test name>' upstream/main` for which commit the case belongs
+to before keeping it.
+
 ## 4x — vitest 4: dropped flags, swallowed logs, and per-file import resolution
 
 Three wasted turns diagnosing an env-leakage question, all of them spent on the
@@ -863,36 +902,6 @@ Third hit: the same flaky `settings.test.ts` timeout, the same
 diff gate. Leaving the known flaky files out of the measuring run and running
 them alone as a control is still the only reliable sequence.
 
-## 3x — A picked upstream suite is written against module names from commits we skipped
-
-Three suites in upstream batch F failed for reasons that had nothing to do with
-the fix they came with. `widget-home-compose-board.test.tsx` (#577) mocked
-`useWidgetMediaUpload` and `widget/posts`' `widgetCreatePublicPostFn`, names
-upstream introduced later with #566 and the widget-posts move; here they are
-`useWidgetImageUpload` and `public-posts`' `createPublicPostFn`, so the mock
-answered nothing and the submit never reached it. `rich-text-editor-enter.test.tsx`
-(#567) rendered without an `IntlProvider`, which the fork's editor needs. And
-the typecheck, not any test, found three fork-only fixtures that build an
-`IdentityProvider` without the field #609 added. Each looked like a broken fix
-until the mock or fixture was read. After a pick, run its own suites first and
-read a failure's first line before the fix's code: `No "X" export is defined on
-the mock` and `Could not find required intl object` are the tells.
-
-Hit again in batch K: `@/test/server-fns-in-process`, `use-widget-file-upload`
-and `finishIdentityOnboarding` came with #688, #644 and #656 from commits we
-had not picked. Typecheck finds them at once (`Cannot find module`); grep the
-picked test files for imports before running anything.
-
-The reverse hit in batch J: upstream #555 renamed the widget's server
-functions (`widget/posts`, `widget/changelog`, `widget/help`, a visitor RPC
-module) and moved handler bodies into `createServerOnlyFn`. Thirteen _fork_
-suites mocked the old names and went red at once, with no typecheck error
-to point at them, because a `vi.mock` of a module nobody imports any more
-is legal. The tells were the same two first lines, plus
-`No "createServerOnlyFn" export is defined on the "@tanstack/react-start"
-mock`. After a pick that renames modules, grep the fork's suites for the
-old module paths before running the batch.
-
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
 `scripts/mutation-manifest.json` and the `toEqual` in
@@ -1053,6 +1062,23 @@ sibling sweep above would not have found it either. The survivor looked like
 an equivalent until it was probed against the real database; recorded as one,
 it would have been a false excuse. Before writing an equivalence reason about
 what a library does, measure the library, not the stub in front of it.
+
+## 1x — The native TypeScript 7 binary can hang the whole typecheck, unkillably
+
+In batch M every exec of `@typescript/typescript-linux-x64@7.0.2/lib/tsc`
+(`bun run typecheck`, `bunx tsc`, even `tsc --version`) went into
+uninterruptible disk sleep (`ps` state `D`, wchan `flush_work`) and never
+returned; `timeout` cannot kill a process in that state, so each attempt
+cost a 10-minute tool timeout before it was clear nothing was running. The
+binary is hard-linked into every worktree, so switching worktrees does not
+help. Kernel workers on the host were stuck in the same state for hours,
+so this is the machine, not the code. What worked: the JS compiler that is
+also installed, `node node_modules/.bun/typescript@6.0.3/node_modules/typescript/bin/tsc
+--noEmit -p apps/web/tsconfig.json` (under 3 minutes). It reports three
+errors in `components/ui/rich-text-editor.tsx` that TS 7 does not, so
+compare against a TS 6 run of `origin/main` rather than against zero. Check
+`ps -eo pid,stat,wchan:20,args | grep '[t]sc'` before waiting on a
+typecheck.
 
 ## 1x — Upstream fixtures without a session audience read as dashboard upstream and as portal here
 
