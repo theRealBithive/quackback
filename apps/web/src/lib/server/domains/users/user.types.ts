@@ -192,6 +192,12 @@ export interface PortalUserDetail extends PortalUserListItem {
   teamRole: PersonTeamRole | null
   /** Has signed in (provider account or non-widget session): may be added to the team directly. */
   hasSignedIn: boolean
+  /**
+   * The address is proven (verified, or the person signs in through the
+   * provider owning its verified domain). Joining the team directly needs it
+   * as well as a sign-in; everyone else is invited by email.
+   */
+  addressVerified: boolean
   /** All posts this user has engaged with (authored, commented, or voted on) */
   engagedPosts: EngagedPost[]
 }

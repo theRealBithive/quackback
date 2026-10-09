@@ -35,7 +35,7 @@ import { realEmail } from '@/lib/shared/anonymous-email'
 import { truncate } from '@/lib/shared/utils/string'
 import { logger } from '@/lib/server/logger'
 import { resolveUserAvatarUrl } from '@/lib/server/domains/principals/principal-display'
-import { hasSignedInSql } from '@/lib/server/domains/principals/team-promotion'
+import { hasSignedInSql, loadTeamCandidates } from '@/lib/server/domains/principals/team-promotion'
 import { presetForLegacyRole } from '@/lib/shared/permissions'
 
 const log = logger.child({ component: 'user-detail' })
@@ -391,9 +391,16 @@ export async function getPortalUserDetail(
       segments: userSegmentList,
       teamRole,
       hasSignedIn: Boolean(principalData.hasSignedIn),
+      addressVerified: await isAddressVerified(principalData.principalId),
     }
   } catch (error) {
     log.error({ err: error }, 'failed to get portal user detail')
     throw new InternalError('DATABASE_ERROR', 'Failed to get portal user detail', error)
   }
+}
+
+/** Whether the person's address is proven, by the rule the team add path enforces. */
+async function isAddressVerified(principalId: PrincipalId): Promise<boolean> {
+  const [candidate] = await loadTeamCandidates([principalId])
+  return candidate?.verified === true
 }

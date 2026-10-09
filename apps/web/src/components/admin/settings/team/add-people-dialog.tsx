@@ -75,7 +75,14 @@ interface PendingInvite {
 /** One row of the results list. */
 type ResultOption =
   | { kind: 'person'; id: string; person: FoundPerson; disabled: boolean }
-  | { kind: 'invite'; id: string; address: string; disabled: false }
+  | {
+      kind: 'invite'
+      id: string
+      address: string
+      /** A portal user holds the address, but it is not verified. */
+      unverifiedPortalUser: boolean
+      disabled: false
+    }
   | { kind: 'teammate-email'; id: string; address: string; disabled: true }
 
 export interface AddPeopleDialogProps {
@@ -481,15 +488,22 @@ function PeopleField({
           kind: 'person',
           id: `person-${person.principalId}`,
           person,
-          disabled: person.status !== 'portal_user',
+          disabled: !canAddDirectly(person),
         })
       }
     }
     const email = result.email
     if (email && settled && isFullEmail(trimmed)) {
       const address = email.address.toLowerCase()
-      if (email.status === 'new' && !chosen.has(`e:${address}`)) {
-        opts.push({ kind: 'invite', id: `invite-${address}`, address, disabled: false })
+      const invitable = email.status === 'new' || email.status === 'unverified_portal_user'
+      if (invitable && !chosen.has(`e:${address}`)) {
+        opts.push({
+          kind: 'invite',
+          id: `invite-${address}`,
+          address,
+          unverifiedPortalUser: email.status === 'unverified_portal_user',
+          disabled: false,
+        })
       } else if (email.status === 'member') {
         opts.push({ kind: 'teammate-email', id: `mate-${address}`, address, disabled: true })
       } else if (
@@ -507,6 +521,7 @@ function PeopleField({
             avatarUrl: null,
             detail: email.address,
             status: 'portal_user',
+            verified: true,
           },
           disabled: false,
         })
@@ -668,6 +683,19 @@ function PeopleField({
   )
 }
 
+/** Only a portal user whose address is verified joins directly; the rest are invited. */
+function canAddDirectly(person: FoundPerson): boolean {
+  return person.status === 'portal_user' && person.verified
+}
+
+/** What a person's row says about them on the right. */
+function personTrailingLabel(person: FoundPerson): string {
+  if (person.status === 'admin') return 'Already an Admin'
+  if (person.status === 'member') return 'Already a Member'
+  if (person.verified) return 'Portal user, email verified'
+  return 'Email not verified, invite by email'
+}
+
 function ResultRow({
   option,
   active,
@@ -694,20 +722,17 @@ function ResultRow({
     )
     title = p.name
     detail = p.detail || null
-    trailing =
-      p.status === 'admin'
-        ? 'Already an Admin'
-        : p.status === 'member'
-          ? 'Already a Member'
-          : 'Portal user'
+    trailing = personTrailingLabel(p)
+  } else if (option.kind === 'invite') {
+    icon = <EnvelopeAvatar />
+    title = `Invite ${option.address}`
+    detail = option.unverifiedPortalUser
+      ? `This email belongs to a portal user whose address isn't verified. They get an email invitation for ${TEAM_INVITATION_VALID_DAYS} days.`
+      : `Nobody with this email has signed in. They get an email invitation for ${TEAM_INVITATION_VALID_DAYS} days.`
   } else {
     icon = <EnvelopeAvatar />
-    title = option.kind === 'invite' ? `Invite ${option.address}` : option.address
-    detail =
-      option.kind === 'invite'
-        ? `Nobody with this email has signed in. They get an email invitation for ${TEAM_INVITATION_VALID_DAYS} days.`
-        : null
-    trailing = option.kind === 'teammate-email' ? 'Already on the team' : null
+    title = option.address
+    trailing = 'Already on the team'
   }
   return (
     <div

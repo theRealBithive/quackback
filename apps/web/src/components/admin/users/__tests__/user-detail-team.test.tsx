@@ -133,6 +133,7 @@ const BASE_USER: PortalUserDetail = {
   country: 'DE',
   teamRole: null,
   hasSignedIn: true,
+  addressVerified: true,
   engagedPosts: [],
 }
 
@@ -239,6 +240,13 @@ describe('UserDetail team actions', () => {
 
   it('does not offer someone who has never signed in', async () => {
     renderDetail(detail({ ...BASE_USER, hasSignedIn: false }))
+    await openMenu()
+    expect(screen.queryByRole('menuitem', { name: 'Make teammate…' })).toBeNull()
+  })
+
+  // Batch M, decision D4: joining directly needs a verified address too.
+  it('does not offer someone whose address is not verified (M21)', async () => {
+    renderDetail(detail({ ...BASE_USER, addressVerified: false }))
     await openMenu()
     expect(screen.queryByRole('menuitem', { name: 'Make teammate…' })).toBeNull()
   })

@@ -76,7 +76,12 @@ async function seedPerson(opts: {
   const userId = createId('user') as UserId
   const principalId = createId('principal') as PrincipalId
   const email = `p-${suffix()}@example.com`
-  await testDb.insert(user).values({ id: userId, name: `P ${suffix()}`, email })
+  // Seeded with a verified address unless a case says otherwise. Since batch M
+  // (decision D4, M21) only a verified address joins the team directly; the
+  // cases about unverified addresses are in team-verified-add.db.test.ts.
+  await testDb
+    .insert(user)
+    .values({ id: userId, name: `P ${suffix()}`, email, emailVerified: true })
   await testDb.insert(principal).values({
     id: principalId,
     userId,

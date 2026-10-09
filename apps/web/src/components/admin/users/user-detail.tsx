@@ -603,9 +603,9 @@ export function UserDetail({
   // menu follow the server's answer.
   const teamRole = teamRoleChoice(user.teamRole)
   const personName = user.name || displayEmail || 'this person'
-  // Only someone who has signed in can join the team from here; others are
-  // invited by email from Members & Teams.
-  const canJoinTeam = !teamRole && !user.isLead && user.hasSignedIn
+  // Only someone who has signed in with a verified address can join the team
+  // from here; others are invited by email from Members & Teams.
+  const canJoinTeam = !teamRole && !user.isLead && user.hasSignedIn && user.addressVerified
   // The server refuses a change to your own role, and blocking or removing
   // applies to portal users only, never to a teammate.
   const isSelf = sessionUserId != null && sessionUserId === user.userId

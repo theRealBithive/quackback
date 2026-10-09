@@ -53,12 +53,16 @@ vi.mock('@/components/ui/select', () => import('./select-double'))
 
 import { AddPeopleDialog, type AddPeopleDialogProps } from '../add-people-dialog'
 
+// Verified: since batch M (decision D4, M21) only a portal user whose address
+// is verified is offered for direct adding; the unverified rows are pinned in
+// the "verified addresses" cases at the end of this file.
 const MAYA = {
   principalId: 'principal_maya',
   name: 'Maya Chen',
   avatarUrl: null,
   detail: 'maya@northwind.example',
   status: 'portal_user' as const,
+  verified: true,
 }
 const OMAR = {
   principalId: 'principal_omar',
@@ -66,6 +70,7 @@ const OMAR = {
   avatarUrl: null,
   detail: 'omar@northwind.example',
   status: 'portal_user' as const,
+  verified: true,
 }
 const TEAMMATE = {
   principalId: 'principal_tess',
@@ -73,6 +78,7 @@ const TEAMMATE = {
   avatarUrl: null,
   detail: 'tess@acme.example',
   status: 'member' as const,
+  verified: true,
 }
 const BOSS = {
   principalId: 'principal_bo',
@@ -80,14 +86,20 @@ const BOSS = {
   avatarUrl: null,
   detail: 'bo@acme.example',
   status: 'admin' as const,
+  verified: true,
 }
 
 type SearchAnswer = {
   canSearchPeople: boolean
-  people: Array<typeof MAYA | typeof TEAMMATE | typeof BOSS>
+  people: Array<
+    Omit<typeof MAYA, 'status' | 'verified'> & {
+      status: 'portal_user' | 'member' | 'admin'
+      verified: boolean
+    }
+  >
   email?: {
     address: string
-    status: 'new' | 'pending_invite' | 'member' | 'portal_user'
+    status: 'new' | 'pending_invite' | 'member' | 'portal_user' | 'unverified_portal_user'
     invitationId?: string
     invitedAt?: string
     principalId?: string
@@ -563,5 +575,54 @@ describe('AddPeopleDialog', () => {
     await type('new@acme.example')
     await pick(/^Invite new@acme\.example/)
     expect(screen.getByRole('button', { name: 'Remove new@acme.example' })).toBeInTheDocument()
+  })
+})
+
+/** Batch M, decision D4: only a verified address joins directly (M21). */
+describe('AddPeopleDialog verified addresses (M21)', () => {
+  const UNVERIFIED = {
+    principalId: 'principal_una',
+    name: 'Una Verified',
+    avatarUrl: null,
+    detail: 'una@gmail.example',
+    status: 'portal_user' as const,
+    verified: false,
+  }
+
+  it('shows whether each portal user is verified, and offers only the verified one (M21)', async () => {
+    answers[''] = { canSearchPeople: true, people: [MAYA, UNVERIFIED] }
+    renderDialog()
+    fireEvent.focus(field())
+    const list = await screen.findByRole('listbox', { name: 'Recently active' })
+    const maya = await within(list).findByRole('option', { name: /Maya Chen/ })
+    expect(maya).toHaveTextContent('Portal user, email verified')
+    expect(maya).not.toHaveAttribute('aria-disabled')
+    const una = within(list).getByRole('option', { name: /Una Verified/ })
+    expect(una).toHaveTextContent('Email not verified, invite by email')
+    expect(una).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(una)
+    expect(screen.queryByRole('button', { name: 'Remove Una Verified' })).toBeNull()
+  })
+
+  it('offers an email invitation for a typed address whose portal user is unverified (M21)', async () => {
+    answers['una@gmail.example'] = {
+      canSearchPeople: true,
+      people: [],
+      email: {
+        address: 'una@gmail.example',
+        status: 'unverified_portal_user',
+        principalId: 'principal_una',
+      },
+    }
+    renderDialog()
+    await type('una@gmail.example')
+    const option = await screen.findByRole('option', { name: /^Invite una@gmail\.example/ })
+    expect(option).toHaveTextContent(
+      "This email belongs to a portal user whose address isn't verified. They get an email invitation"
+    )
+    expect(option).not.toHaveTextContent('Nobody with this email has signed in')
+    fireEvent.click(option)
+    expect(screen.getByRole('button', { name: 'Remove una@gmail.example' })).toBeInTheDocument()
+    expect(primary()).toHaveTextContent('Invite 1 person')
   })
 })

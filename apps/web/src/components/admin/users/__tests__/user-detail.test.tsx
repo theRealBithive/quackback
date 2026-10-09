@@ -120,6 +120,7 @@ const BASE_USER: PortalUserDetail = {
   country: 'DE',
   teamRole: null,
   hasSignedIn: true,
+  addressVerified: true,
   engagedPosts: [],
 }
 

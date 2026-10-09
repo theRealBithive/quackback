@@ -3,9 +3,10 @@
  * them. Shared by updateMemberRole (single row, REST PATCH) and the batch
  * add-people path so the two can never disagree about eligibility.
  *
- * Eligible means a real person who has signed in: an identified human
- * principal (type 'user' with a user row) on the portal tier whose user has
- * signed in (see hasSignedInSql). Anonymous visitors,
+ * Eligible means a real person who has signed in with a proven address: an
+ * identified human principal (type 'user' with a user row) on the portal tier
+ * whose user has signed in (see hasSignedInSql) and whose address is verified
+ * (see team-candidate.ts, where the rule itself lives). Anonymous visitors,
  * leads, contacts created by an admin or import that never signed in,
  * widget-only identities, service and support principals are never promoted
  * this way; a person with a real email can still be invited by email.
@@ -16,19 +17,26 @@ import {
   auditLog,
   db,
   eq,
+  identityProvider,
   inArray,
   invitation,
+  isNotNull,
   principal,
   session,
   sql,
+  ssoVerifiedDomain,
   user,
   type Database,
   type Transaction,
 } from '@/lib/server/db'
 import type { PrincipalId, RoleId, UserId } from '@quackback/ids'
 import { ConflictError } from '@/lib/shared/errors'
-import { isTeamMember } from '@/lib/shared/roles'
 import { setPrincipalRole } from './principal.factory'
+import {
+  isVerifiedForDirectAdd,
+  type ProviderVerifiedDomains,
+  type TeamCandidate,
+} from './team-candidate'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'team-promotion' })
@@ -61,17 +69,7 @@ export function hasSignedInSql() {
   )`
 }
 
-export interface TeamCandidate {
-  id: PrincipalId
-  userId: UserId | null
-  role: string
-  type: string
-  name: string
-  email: string | null
-  signedIn: boolean
-}
-
-/** Load principals with what eligibility needs, in one query. */
+/** Load principals with what eligibility needs. */
 export async function loadTeamCandidates(
   ids: readonly PrincipalId[],
   executor: Database | Transaction = db
@@ -86,30 +84,56 @@ export async function loadTeamCandidates(
       name: user.name,
       displayName: principal.displayName,
       email: user.email,
+      emailVerified: user.emailVerified,
+      accountProviderIds: sql<string[] | null>`(
+        SELECT array_agg(${account.providerId}) FROM ${account}
+        WHERE ${account.userId} = ${principal.userId}
+      )`,
       signedIn: hasSignedInSql(),
     })
     .from(principal)
     .leftJoin(user, eq(user.id, principal.userId))
     .where(inArray(principal.id, [...ids]))
-  return rows.map((r) => ({
-    id: r.id as PrincipalId,
-    userId: (r.userId as UserId | null) ?? null,
-    role: r.role,
-    type: r.type,
-    name: r.name ?? r.displayName ?? '',
-    email: r.email,
-    signedIn: Boolean(r.signedIn),
-  }))
+  const providers = await loadProviderVerifiedDomains(executor)
+  return rows.map((r) => {
+    const addressFacts = {
+      email: r.email,
+      emailVerified: r.emailVerified === true,
+      accountProviderIds: r.accountProviderIds ?? [],
+    }
+    return {
+      id: r.id as PrincipalId,
+      userId: (r.userId as UserId | null) ?? null,
+      role: r.role,
+      type: r.type,
+      name: r.name ?? r.displayName ?? '',
+      email: r.email,
+      signedIn: Boolean(r.signedIn),
+      verified: isVerifiedForDirectAdd(addressFacts, providers),
+    }
+  })
 }
 
-export type CandidateVerdict = 'teammate' | 'eligible' | 'not_signed_in' | 'not_a_person'
-
-/** Where a principal stands for joining the team. */
-export function classifyTeamCandidate(candidate: TeamCandidate): CandidateVerdict {
-  if (candidate.type !== 'user' || !candidate.userId) return 'not_a_person'
-  if (isTeamMember(candidate.role)) return 'teammate'
-  if (candidate.role !== 'user') return 'not_a_person'
-  return candidate.signedIn ? 'eligible' : 'not_signed_in'
+/** Each identity provider with its verified domains, for the verified-address rule. */
+async function loadProviderVerifiedDomains(
+  executor: Database | Transaction
+): Promise<ProviderVerifiedDomains[]> {
+  const rows = await executor
+    .select({ registrationId: identityProvider.registrationId, domain: ssoVerifiedDomain.name })
+    .from(ssoVerifiedDomain)
+    .innerJoin(identityProvider, eq(identityProvider.id, ssoVerifiedDomain.providerId))
+    .where(isNotNull(ssoVerifiedDomain.verifiedAt))
+  const byProvider = new Map<string, string[]>()
+  for (const row of rows) {
+    const domains = byProvider.get(row.registrationId) ?? []
+    domains.push(row.domain)
+    byProvider.set(row.registrationId, domains)
+  }
+  const providers: ProviderVerifiedDomains[] = []
+  for (const [registrationId, verifiedDomains] of byProvider) {
+    providers.push({ registrationId, verifiedDomains })
+  }
+  return providers
 }
 
 /**

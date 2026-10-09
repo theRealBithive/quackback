@@ -16,13 +16,12 @@ import { logger } from '@/lib/server/logger'
 import { assertSeatsAvailable, lockSeatLedger } from './seat-limit'
 import { mapWithConcurrency } from '@/lib/server/utils/concurrency'
 import {
-  classifyTeamCandidate,
   loadTeamCandidates,
   promotePortalUsers,
   retirePendingInvitesFor,
   revokeRetiredInviteTokens,
-  type TeamCandidate,
 } from './team-promotion'
+import { classifyTeamCandidate, notEligibleMessage, type TeamCandidate } from './team-candidate'
 import {
   assertInviteGrant,
   classifyInviteEmails,
@@ -118,12 +117,11 @@ function assertPromotable(
       throw about(new ValidationError('NOT_ELIGIBLE', `${who} can't be added to the team`), item)
     case 'not_signed_in':
       throw about(
-        new ValidationError(
-          'NOT_ELIGIBLE',
-          `${who} hasn't signed in yet. Invite them by email instead.`
-        ),
+        new ValidationError('NOT_ELIGIBLE', notEligibleMessage(who, 'not_signed_in')),
         item
       )
+    case 'unverified':
+      throw about(new ValidationError('NOT_ELIGIBLE', notEligibleMessage(who, 'unverified')), item)
     case 'eligible':
       return candidate
   }

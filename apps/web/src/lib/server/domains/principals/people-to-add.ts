@@ -25,7 +25,8 @@ import { z } from 'zod'
 import { ANON_EMAIL_DOMAIN, realEmail } from '@/lib/shared/anonymous-email'
 import { getAuthProviderByProviderId } from '@/lib/server/auth/auth-providers'
 import { resolveUserAvatarUrl } from './principal-display'
-import { classifyTeamCandidate, hasSignedInSql, loadTeamCandidates } from './team-promotion'
+import { hasSignedInSql, loadTeamCandidates } from './team-promotion'
+import { classifyTeamCandidate } from './team-candidate'
 import { classifyInviteEmail } from './team-invitation'
 
 const RECENT_LIMIT = 5
@@ -40,11 +41,21 @@ export interface PersonToAdd {
   /** Real email, else how the person signs in; never a placeholder address. */
   detail: string
   status: PersonToAddStatus
+  /**
+   * The person's address is proven (verified, or they sign in through the
+   * provider owning its verified domain). Only a verified portal user can be
+   * added directly; the others are invited by email.
+   */
+  verified: boolean
 }
 
 export interface EmailToAdd {
   address: string
-  status: 'new' | 'pending_invite' | 'member' | 'portal_user'
+  /**
+   * `unverified_portal_user`: a portal user holds the address but it is not
+   * verified, so they can only be invited by email, like a new address.
+   */
+  status: 'new' | 'pending_invite' | 'member' | 'portal_user' | 'unverified_portal_user'
   invitationId?: InviteId
   invitedAt?: string
   /** The pending invite's role: Admin, Member, or the custom role's name. */
@@ -233,6 +244,7 @@ async function toPeopleToAdd(rows: PersonRow[], query: string): Promise<PersonTo
     : []
   const labels = await providerLabels([...new Set(accounts.map((a) => a.providerId))])
   const needle = query.toLowerCase()
+  const verifiedIds = await verifiedPrincipalIds(rows.map((r) => r.principalId))
 
   return rows.map((r) => {
     const email = realEmail(r.email)
@@ -252,8 +264,19 @@ async function toPeopleToAdd(rows: PersonRow[], query: string): Promise<PersonTo
       avatarUrl: resolveUserAvatarUrl({ userImage: r.image, userImageKey: r.imageKey }),
       detail,
       status: r.role === 'admin' ? 'admin' : r.role === 'member' ? 'member' : 'portal_user',
+      verified: verifiedIds.has(r.principalId),
     }
   })
+}
+
+/** The principals among `ids` whose address is proven, by the rule the add path enforces. */
+async function verifiedPrincipalIds(ids: PrincipalId[]): Promise<Set<PrincipalId>> {
+  const candidates = await loadTeamCandidates(ids)
+  const verified = new Set<PrincipalId>()
+  for (const candidate of candidates) {
+    if (candidate.verified) verified.add(candidate.id)
+  }
+  return verified
 }
 
 const fullEmail = z.string().email()
@@ -295,8 +318,12 @@ async function lookupEmailToAdd(
   }
   if (canSearchPeople && standing.principalId) {
     const [candidate] = await loadTeamCandidates([standing.principalId])
-    if (candidate && classifyTeamCandidate(candidate) === 'eligible') {
+    const verdict = candidate ? classifyTeamCandidate(candidate) : null
+    if (candidate && verdict === 'eligible') {
       return { address, status: 'portal_user', principalId: candidate.id }
+    }
+    if (candidate && verdict === 'unverified') {
+      return { address, status: 'unverified_portal_user', principalId: candidate.id }
     }
   }
   return { address, status: 'new' }

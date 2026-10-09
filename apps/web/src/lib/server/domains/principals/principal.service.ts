@@ -33,8 +33,8 @@ import type { TeamMember } from './principal.types'
 import { resolveUserAvatarUrl } from './principal-display'
 import { logger } from '@/lib/server/logger'
 import { setPrincipalRole } from './principal.factory'
+import { classifyTeamCandidate, notEligibleMessage } from './team-candidate'
 import {
-  classifyTeamCandidate,
   loadTeamCandidates,
   promotePortalUsers,
   retirePendingInvitesFor,
@@ -267,12 +267,14 @@ export async function countMembers(): Promise<number> {
  * only an admin may grant (`opts.granterRole`, fail closed).
  *
  * Adding a portal user takes a seat, checked on the write transaction.
- * Eligibility (a real person who has signed in) lives in team-promotion.ts.
+ * Eligibility (a real person who has signed in with a verified address) lives
+ * in team-candidate.ts.
  *
  * @throws ForbiddenError if trying to modify own role
  * @throws ForbiddenError GRANT_CEILING if a non-admin grants Admin, or a role above the granter
  * @throws ForbiddenError if this would leave no admins
- * @throws ValidationError NOT_ELIGIBLE if the portal user has never signed in
+ * @throws ValidationError NOT_ELIGIBLE if the portal user has never signed in or
+ *   their address is not verified
  * @throws TierLimitError SEAT_LIMIT if adding a portal user needs a seat that is not free
  * @throws NotFoundError if the principal is not a teammate or a portal user
  */
@@ -336,11 +338,11 @@ export async function updateMemberRole(
     assertCanChangeTeamRole(targetMember.role, opts?.granterRole)
     if (isPortalUser) {
       const [candidate] = await loadTeamCandidates([principalId])
-      if (!candidate || classifyTeamCandidate(candidate) !== 'eligible') {
-        throw new ValidationError(
-          'NOT_ELIGIBLE',
-          `${candidate?.name || 'This person'} hasn't signed in yet. Invite them by email instead.`
-        )
+      const verdict = candidate ? classifyTeamCandidate(candidate) : 'not_signed_in'
+      if (verdict !== 'eligible') {
+        const reason = verdict === 'unverified' ? 'unverified' : 'not_signed_in'
+        const who = candidate?.name || 'This person'
+        throw new ValidationError('NOT_ELIGIBLE', notEligibleMessage(who, reason))
       }
     }
 
