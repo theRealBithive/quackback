@@ -626,3 +626,208 @@ describe('AddPeopleDialog verified addresses (M21)', () => {
     expect(primary()).toHaveTextContent('Invite 1 person')
   })
 })
+
+/**
+ * Batch M, M21 from the picker's side: the server answers `portal_user` for a
+ * typed address only when that person may join directly (an unverified one is
+ * answered as `unverified_portal_user`, pinned above). Such a person who is
+ * not among the listed results is still offered for direct adding.
+ */
+describe('AddPeopleDialog typed address of an eligible portal user (M21)', () => {
+  it('offers a portal user found only by their typed address for direct adding (M21)', async () => {
+    answers['ivy@northwind.example'] = {
+      canSearchPeople: true,
+      people: [],
+      email: {
+        address: 'ivy@northwind.example',
+        status: 'portal_user',
+        principalId: 'principal_ivy',
+      },
+    }
+    renderDialog()
+    await type('ivy@northwind.example')
+    const option = await screen.findByRole('option', { name: /ivy@northwind\.example/ })
+    expect(option).not.toHaveAttribute('aria-disabled')
+    expect(screen.queryByRole('option', { name: /^Invite ivy/ })).toBeNull()
+    fireEvent.click(option)
+
+    expect(screen.getByRole('button', { name: 'Remove ivy@northwind.example' })).toBeInTheDocument()
+    expect(primary()).toHaveTextContent('Add 1 person')
+  })
+})
+
+/**
+ * Upstream #676 interaction details with no batch-M contract item behind
+ * them. They are asserted on what a person sees so the diff-coverage gate's
+ * lines are executed by a test that can fail, not merely run.
+ */
+describe('AddPeopleDialog interaction details (upstream #676, no batch-M item)', () => {
+  it('starts from an empty form each time the dialog is opened again', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = (open: boolean) => (
+      <QueryClientProvider client={queryClient}>
+        <AddPeopleDialog open={open} onOpenChange={vi.fn()} canGrantAdmin />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view(true))
+    paste('a@acme.example b@acme.example')
+    expect(screen.getByRole('button', { name: 'Remove a@acme.example' })).toBeInTheDocument()
+
+    rerender(view(false))
+    rerender(view(true))
+    expect(await screen.findByRole('combobox', { name: 'People' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Remove a@acme.example' })).toBeNull()
+  })
+
+  it('says so when Undo fails, and does not report the addition as undone', async () => {
+    fns.removeTeamMemberFn.mockRejectedValue(new Error('Maya is the last admin.'))
+    const onUndone = vi.fn()
+    renderDialog({
+      initialPerson: {
+        principalId: 'principal_maya',
+        name: 'Maya Chen',
+        avatarUrl: null,
+        detail: 'maya@northwind.example',
+      },
+      onUndone,
+    })
+    fireEvent.click(primary())
+    await waitFor(() => expect(fns.toastSuccess).toHaveBeenCalledTimes(1))
+    const options = fns.toastSuccess.mock.calls[0][1]
+
+    await act(async () => options.action.onClick())
+    expect(fns.toastError).toHaveBeenCalledWith('Maya is the last admin.')
+    expect(onUndone).not.toHaveBeenCalled()
+  })
+
+  it('falls back to a generic message when Undo fails without one', async () => {
+    fns.cancelInvitationFn.mockRejectedValue('network down')
+    fns.addTeamMembersFn.mockResolvedValue({
+      ok: true,
+      added: [],
+      invited: [{ email: 'new@acme.example', invitationId: 'invite_9', emailSent: true }],
+    })
+    renderDialog()
+    paste('new@acme.example other@acme.example')
+    fireEvent.click(primary())
+    await waitFor(() => expect(fns.toastSuccess).toHaveBeenCalledTimes(1))
+    const options = fns.toastSuccess.mock.calls[0][1]
+
+    await act(async () => options.action.onClick())
+    expect(fns.cancelInvitationFn).toHaveBeenCalledWith({ data: { invitationId: 'invite_9' } })
+    expect(fns.toastError).toHaveBeenCalledWith("Couldn't undo. Try again.")
+  })
+
+  it('moves the highlight up with ArrowUp and with the mouse', async () => {
+    renderDialog()
+    fireEvent.focus(field())
+    await screen.findByRole('option', { name: /Maya Chen/ })
+    const highlighted = () =>
+      document.getElementById(field().getAttribute('aria-activedescendant')!)
+
+    fireEvent.keyDown(field(), { key: 'ArrowDown' })
+    expect(highlighted()).toHaveTextContent('Omar Haddad')
+    fireEvent.keyDown(field(), { key: 'ArrowUp' })
+    expect(highlighted()).toHaveTextContent('Maya Chen')
+
+    fireEvent.mouseMove(screen.getByRole('option', { name: /Omar Haddad/ }))
+    expect(highlighted()).toHaveTextContent('Omar Haddad')
+    // A teammate cannot be highlighted.
+    fireEvent.mouseMove(screen.getByRole('option', { name: /Tess Mate/ }))
+    expect(highlighted()).toHaveTextContent('Omar Haddad')
+  })
+
+  it('clears the search with the first Escape and leaves the dialog open', async () => {
+    const { onOpenChange } = renderDialog()
+    await type('somebody')
+    expect(field()).toHaveValue('somebody')
+
+    fireEvent.keyDown(field(), { key: 'Escape' })
+    expect(field()).toHaveValue('')
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it('keeps a pressed result from taking the focus away from the field', async () => {
+    renderDialog()
+    fireEvent.focus(field())
+    const maya = await screen.findByRole('option', { name: /Maya Chen/ })
+    const pressed = fireEvent.mouseDown(maya)
+    expect(pressed).toBe(false)
+  })
+
+  it('closes the results when the focus leaves the field, not when it moves into them', async () => {
+    renderDialog()
+    fireEvent.focus(field())
+    const list = await screen.findByRole('listbox', { name: 'Recently active' })
+    expect(field()).toHaveAttribute('aria-expanded', 'true')
+
+    fireEvent.blur(field(), { relatedTarget: within(list).getAllByRole('option')[0] })
+    expect(field()).toHaveAttribute('aria-expanded', 'true')
+
+    fireEvent.blur(field(), { relatedTarget: document.body })
+    expect(field()).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('focuses the field when the chip area around it is clicked', async () => {
+    renderDialog()
+    paste('a@acme.example b@acme.example')
+    const chipArea = screen
+      .getByRole('button', { name: 'Remove a@acme.example' })
+      .closest('div.flex-wrap')!
+    field().blur()
+    fireEvent.click(chipArea)
+    expect(document.activeElement).toBe(field())
+  })
+
+  it('offers the invite link when a resent invite could not be emailed', async () => {
+    const writeText = vi.fn()
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    fns.resendInvitationFn.mockResolvedValue({
+      emailSent: false,
+      inviteLink: 'https://acme.example/accept/abc',
+    })
+    answers['wait@acme.example'] = {
+      canSearchPeople: true,
+      people: [],
+      email: {
+        address: 'wait@acme.example',
+        status: 'pending_invite',
+        invitationId: 'invite_1',
+        invitedAt: new Date().toISOString(),
+      },
+    }
+    renderDialog()
+    await type('wait@acme.example')
+    fireEvent.click(await screen.findByRole('button', { name: 'Resend invite' }))
+
+    await waitFor(() => expect(fns.toast).toHaveBeenCalledTimes(1))
+    const [message, options] = fns.toast.mock.calls[0]
+    expect(message).toBe('Email is not set up, so no email went out.')
+    expect(options.action.label).toBe('Copy link')
+    options.action.onClick()
+    expect(writeText).toHaveBeenCalledWith('https://acme.example/accept/abc')
+  })
+
+  it('lets Resend be tried again after it fails, and says why', async () => {
+    fns.resendInvitationFn.mockRejectedValueOnce(new Error('Invite expired.'))
+    fns.resendInvitationFn.mockRejectedValueOnce('boom')
+    answers['wait@acme.example'] = {
+      canSearchPeople: true,
+      people: [],
+      email: {
+        address: 'wait@acme.example',
+        status: 'pending_invite',
+        invitationId: 'invite_1',
+        invitedAt: new Date().toISOString(),
+      },
+    }
+    renderDialog()
+    await type('wait@acme.example')
+    fireEvent.click(await screen.findByRole('button', { name: 'Resend invite' }))
+    await waitFor(() => expect(fns.toastError).toHaveBeenCalledWith('Invite expired.'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resend invite' }))
+    await waitFor(() => expect(fns.toastError).toHaveBeenCalledWith("Couldn't resend. Try again."))
+    expect(screen.queryByText('Sent')).toBeNull()
+  })
+})

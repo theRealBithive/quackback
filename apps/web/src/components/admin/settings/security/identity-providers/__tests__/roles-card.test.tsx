@@ -1060,3 +1060,99 @@ describe('<RolesCard> role list', () => {
     expect(saveButton()).toBeDisabled()
   })
 })
+
+/**
+ * M33: rules are checked from the top and the first match decides, so the
+ * order the admin arranges and the claim every rule reads are what is saved.
+ */
+describe('<RolesCard> claim and order (M33)', () => {
+  it('saves a changed claim as the claim every rule reads (M33)', async () => {
+    renderCard(makeProvider({ claimMapping: TWO_RULES }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Claim to check' }))
+    fireEvent.change(screen.getByPlaceholderText('Search or type…'), {
+      target: { value: 'roles' },
+    })
+    fireEvent.click(screen.getByText(/Use ["“]roles["”]/))
+    expect(ruleRows()[0]).toHaveTextContent(/If\s*roles\s*contains\s*admins/)
+
+    save()
+    await waitFor(() => expect(mappingSpy).toHaveBeenCalled())
+    expect(lastMapping().operations).toEqual([{ op: 'setRolePath', claimPath: 'roles' }])
+    expect(lastSaved()?.role?.rules).toEqual(TWO_RULES.role.rules)
+  })
+
+  it('moves a rule down and saves the new order (M33)', async () => {
+    renderCard(makeProvider({ claimMapping: TWO_RULES }))
+    fireEvent.click(screen.getByRole('button', { name: 'Move rule 1 down' }))
+    expect(ruleRows()[0]).toHaveTextContent('support')
+
+    save()
+    await waitFor(() => expect(mappingSpy).toHaveBeenCalled())
+    expect(lastSaved()?.role?.rules).toEqual([
+      { whenContains: 'support', role: 'member' },
+      { whenContains: 'admins', role: 'admin' },
+    ])
+  })
+})
+
+/**
+ * M39 for the default role: the server refuses a default-role change that
+ * would take SSO management away under "Every sign-in", and the card shows
+ * that refusal where the lockout guard speaks, not as a generic error.
+ */
+describe('<RolesCard> default role refused by the lockout check (M39)', () => {
+  const SYNCED_ADMIN_DEFAULT = {
+    domains: [acmeDomain],
+    autoProvisionRole: 'admin' as const,
+    claimMapping: { role: { ...TWO_RULES.role, syncOnEverySignIn: true } },
+  }
+  const lockout = () => Object.assign(new Error('Refused'), { code: 'SYNC_LOCKOUT' })
+  const chooseDefault = async (option: string) => {
+    await userEvent.click(
+      screen.getByRole('combobox', { name: 'Role for people at a verified domain' })
+    )
+    await userEvent.click(screen.getByRole('option', { name: option }))
+  }
+
+  it('shows the refusal inline and keeps the default-role edit unsaved (M39)', async () => {
+    upsertSpy.mockRejectedValueOnce(lockout())
+    renderCard(makeProvider(SYNCED_ADMIN_DEFAULT))
+    await chooseDefault('Member')
+    save()
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Saving this would remove admin access from people who sign in with Acme ID.'
+    )
+    expect(toastSpy.error).not.toHaveBeenCalled()
+    expect(toastSpy.success).not.toHaveBeenCalled()
+    expect(saveButton()).toBeInTheDocument()
+    expect(mappingSpy).not.toHaveBeenCalled()
+  })
+
+  it('keeps the rules it saved when the default role in the same Save is refused (M39)', async () => {
+    upsertSpy.mockRejectedValueOnce(lockout())
+    renderCard(makeProvider(SYNCED_ADMIN_DEFAULT))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove rule 2' }))
+    await chooseDefault('Member')
+    save()
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Saving this would remove admin access from people who sign in with Acme ID.'
+    )
+    expect(mappingSpy).toHaveBeenCalledTimes(1)
+
+    // Saving again sends only the default role: the rules already read as saved.
+    save()
+    await waitFor(() => expect(upsertSpy).toHaveBeenCalledTimes(2))
+    expect(mappingSpy).toHaveBeenCalledTimes(1)
+    expect(upsertSpy.mock.calls.at(-1)![0].data).toMatchObject({ autoProvisionRole: 'member' })
+  })
+
+  it('leaves any other refusal of the default role to the general error message (M39)', async () => {
+    upsertSpy.mockRejectedValueOnce(new Error('Database unavailable.'))
+    renderCard(makeProvider(SYNCED_ADMIN_DEFAULT))
+    await chooseDefault('Member')
+    save()
+    await waitFor(() => expect(toastSpy.error).toHaveBeenCalled())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(saveButton()).toBeInTheDocument()
+  })
+})

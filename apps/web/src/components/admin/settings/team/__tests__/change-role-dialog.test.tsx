@@ -173,3 +173,33 @@ describe('ChangeRoleDialog', () => {
     expect(screen.queryByText(/unhandled/)).toBeNull()
   })
 })
+
+/** Upstream #676 behaviour with no batch-M contract item behind it. */
+describe('ChangeRoleDialog reopening (upstream #676, no batch-M item)', () => {
+  it('opens on the role the person holds again, not the choice left from last time', async () => {
+    const queryClient = new QueryClient()
+    const view = (open: boolean) => (
+      <QueryClientProvider client={queryClient}>
+        <ChangeRoleDialog
+          open={open}
+          onOpenChange={vi.fn()}
+          principalId="principal_1"
+          personName="Maya Chen"
+          current={{ role: 'member', label: 'Member' }}
+          canGrantAdmin
+        />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view(true))
+    await screen.findByRole('option', { name: 'Editor' })
+    const startingValue = roleField().value
+    fireEvent.change(roleField(), { target: { value: 'role_editor' } })
+    expect(save()).toBeEnabled()
+
+    rerender(view(false))
+    rerender(view(true))
+    await screen.findByRole('option', { name: 'Editor' })
+    expect(roleField().value).toBe(startingValue)
+    expect(save()).toBeDisabled()
+  })
+})

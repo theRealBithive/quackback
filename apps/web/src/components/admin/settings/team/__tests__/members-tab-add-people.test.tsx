@@ -20,7 +20,7 @@ const teamData = {
   ],
   avatarMap: {},
   formattedInvitations: [],
-  seatUsage: { used: 1, limit: 5 },
+  seatUsage: { used: 1, limit: 5 } as { used: number; limit: number; addSeatAvailable?: boolean },
 }
 
 vi.mock('@tanstack/react-query', () => ({
@@ -47,14 +47,18 @@ vi.mock('@/components/admin/settings/team/cloud-ownership-actions', () => ({
   CloudOwnershipActions: () => null,
 }))
 vi.mock('@/components/admin/settings/team/member-actions', () => ({ MemberActions: () => null }))
-// The fork keeps its Add seat dialog beside Add people; it is not under test here.
+// The fork keeps its Add seat dialog beside Add people; only whether it opens is under test.
 vi.mock('@/components/admin/settings/billing/add-seats-dialog', () => ({
-  AddSeatsDialog: () => null,
+  AddSeatsDialog: (props: { open: boolean }) =>
+    props.open ? <div role="dialog" aria-label="Add seats" /> : null,
 }))
 
 import { MembersTab } from '../members-tab'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  teamData.seatUsage = { used: 1, limit: 5 }
+})
 
 describe('MembersTab add people', () => {
   it.each([
@@ -91,5 +95,41 @@ describe('MembersTab add people', () => {
       />
     )
     expect(screen.queryByRole('button', { name: 'Add people' })).toBeNull()
+  })
+})
+
+/**
+ * Fork divergence from the #676 port (no batch-M item): the old invite dialog
+ * was the only way to the fork's Add seat dialog, so a full team that can buy
+ * a seat gets an "Add seat" button beside "Add people".
+ */
+describe('MembersTab add seat (fork)', () => {
+  const renderTab = () =>
+    render(
+      <MembersTab
+        workspaceName="Acme"
+        currentMember={{
+          id: 'principal_admin' as never,
+          role: 'admin',
+          userId: 'user_admin' as never,
+        }}
+        canManageMembers
+      />
+    )
+
+  it('offers Add seat when every seat is taken and one can be bought, and opens the dialog', () => {
+    teamData.seatUsage = { used: 5, limit: 5, addSeatAvailable: true }
+    renderTab()
+    fireEvent.click(screen.getByRole('button', { name: 'Add seat' }))
+    expect(screen.getByRole('dialog', { name: 'Add seats' })).toBeInTheDocument()
+  })
+
+  it('offers no Add seat while seats are free, or when none can be bought', () => {
+    renderTab()
+    expect(screen.queryByRole('button', { name: 'Add seat' })).toBeNull()
+    cleanup()
+    teamData.seatUsage = { used: 5, limit: 5, addSeatAvailable: false }
+    renderTab()
+    expect(screen.queryByRole('button', { name: 'Add seat' })).toBeNull()
   })
 })

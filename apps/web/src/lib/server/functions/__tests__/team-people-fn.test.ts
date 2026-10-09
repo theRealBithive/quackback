@@ -17,6 +17,9 @@ const hoisted = vi.hoisted(() => ({
   requireAuth: vi.fn(),
   addTeamMembers: vi.fn(),
   updateMemberRole: vi.fn(),
+  findPeopleToAdd: vi.fn(),
+  getTierLimits: vi.fn(),
+  countSeatUsage: vi.fn(),
 }))
 
 vi.mock('@tanstack/react-start', () => ({
@@ -40,7 +43,18 @@ vi.mock('@/lib/server/domains/principals/principal.service', () => ({
   updateMemberRole: (...args: unknown[]) => hoisted.updateMemberRole(...args),
 }))
 
-const { addTeamMembersFn, changeTeamRoleFn } = await import('../team-people')
+vi.mock('@/lib/server/domains/principals/people-to-add', () => ({
+  findPeopleToAdd: (...args: unknown[]) => hoisted.findPeopleToAdd(...args),
+}))
+vi.mock('@/lib/server/domains/settings/tier-limits.service', () => ({
+  getTierLimits: () => hoisted.getTierLimits(),
+}))
+vi.mock('@/lib/server/domains/principals/seat-usage', () => ({
+  countSeatUsage: () => hoisted.countSeatUsage(),
+}))
+
+const { addTeamMembersFn, changeTeamRoleFn, searchPeopleToAddFn, getTeamSeatsFn } =
+  await import('../team-people')
 const { SeatLimitError } = await import('@/lib/server/domains/principals/seat-limit')
 
 const input = { principalIds: ['principal_a'], emails: ['x@example.com'], role: 'member' as const }
@@ -189,5 +203,55 @@ describe('shared team-people constants', () => {
   it('derives the invitation lifetime from one number of days', () => {
     expect(TEAM_INVITATION_VALID_DAYS).toBe(30)
     expect(INVITATION_EXPIRY_MS).toBe(TEAM_INVITATION_VALID_DAYS * 24 * 60 * 60 * 1000)
+  })
+})
+
+/**
+ * Batch M (#676). M18: only member managers search for people to add. M28:
+ * the search lists people only for a caller who may also view people.
+ */
+describe('searchPeopleToAddFn (M18, M28)', () => {
+  it('requires member management, and lists people only with people.view (M18, M28)', async () => {
+    hoisted.findPeopleToAdd.mockResolvedValue({ canSearchPeople: false, people: [] })
+    await searchPeopleToAddFn({ data: { query: 'ada' } })
+    expect(hoisted.requireAuth).toHaveBeenCalledWith({ permission: 'member.manage' })
+    expect(hoisted.findPeopleToAdd).toHaveBeenLastCalledWith({
+      query: 'ada',
+      callerPrincipalId: 'principal_me',
+      canSearchPeople: false,
+    })
+
+    hoisted.requireAuth.mockResolvedValue({
+      principal: { id: 'principal_me', role: 'admin', type: 'user' },
+      permissions: ['member.manage', 'people.view'],
+    })
+    await searchPeopleToAddFn({ data: { query: 'ada' } })
+    expect(hoisted.findPeopleToAdd).toHaveBeenLastCalledWith({
+      query: 'ada',
+      callerPrincipalId: 'principal_me',
+      canSearchPeople: true,
+    })
+  })
+
+  it('searches nothing for a caller the permission check refuses (M18)', async () => {
+    hoisted.requireAuth.mockRejectedValue(new ForbiddenError('FORBIDDEN', 'No.'))
+    await expect(searchPeopleToAddFn({ data: { query: 'ada' } })).rejects.toThrow('No.')
+    expect(hoisted.findPeopleToAdd).not.toHaveBeenCalled()
+  })
+})
+
+/** Batch M (#676), M22: the seat meter shows seats in use against the plan's cap. */
+describe('getTeamSeatsFn (M22)', () => {
+  it("reports the seats in use and the plan's cap to a member viewer (M22)", async () => {
+    hoisted.getTierLimits.mockResolvedValue({ maxTeamSeats: 10 })
+    hoisted.countSeatUsage.mockResolvedValue({ used: 7 })
+    expect(await getTeamSeatsFn()).toEqual({ used: 7, limit: 10 })
+    expect(hoisted.requireAuth).toHaveBeenCalledWith({ permission: 'member.view' })
+  })
+
+  it('reports no cap as null, meaning unlimited (M22)', async () => {
+    hoisted.getTierLimits.mockResolvedValue({ maxTeamSeats: null })
+    hoisted.countSeatUsage.mockResolvedValue({ used: 3 })
+    expect(await getTeamSeatsFn()).toEqual({ used: 3, limit: null })
   })
 })

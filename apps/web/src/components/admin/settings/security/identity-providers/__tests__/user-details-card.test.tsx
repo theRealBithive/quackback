@@ -931,3 +931,32 @@ describe('UserDetailsCard review fixes', () => {
     )
   })
 })
+
+/**
+ * M30 from the Save side: an edit that lands on a mapping equivalent to the
+ * stored one writes nothing. The stored sources carry an entry the parser
+ * drops (`legacyHeader`), so they mean the standard ID token then userinfo;
+ * switching Userinfo off and on again moves it behind that entry, which the
+ * draft sees as an edit while the mapping it would save is the stored one.
+ */
+describe('UserDetailsCard equivalent edits (M30)', () => {
+  it('saving an edit that is equivalent to the stored mapping writes nothing and closes the footer (M30)', async () => {
+    renderCard(
+      makeProvider({
+        claimMapping: {
+          profile: { sources: ['idToken', 'userinfo', 'legacyHeader'] },
+        } as unknown as IdentityProvider['claimMapping'],
+      })
+    )
+    // Stored sources that are not the plain default open Compatibility by themselves.
+    await userEvent.click(screen.getByLabelText('Userinfo'))
+    await userEvent.click(screen.getByLabelText('Userinfo'))
+    expect(saveButton()).toBeInTheDocument()
+
+    save()
+    await waitFor(() => expect(saveButton()).not.toBeInTheDocument())
+    expect(cancelButton()).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(mappingSpy).not.toHaveBeenCalled()
+  })
+})
