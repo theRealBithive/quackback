@@ -1038,6 +1038,27 @@ Second occurrence: upstream's `active-filters-bar-date.test.tsx` (#627) went
 red in CI on 2026-10-08, the day its fixture `2026-10-01` became "Last 7
 days". A fixture can be correct for weeks and then fail on one calendar day.
 
+## 2x — An upstream suite named `*-integration.test.ts` never runs here, and passes by absence
+
+The root vitest config excludes `**/*-integration.test.ts`, for the API suite
+that needs a live server. Upstream does not have that exclusion, so when a
+back-merge brought `hooks-after-integration.test.ts` -- six tests on the
+ordering of the sign-in after-hooks, running entirely on mocks -- vitest
+collected nothing, said nothing, and the diff-coverage gate reported forty
+lines of `hooksAfter` as never executed. Running the file by name printed
+`No test files found` with the exclude list, which is the only place the cause
+is visible.
+
+Renaming the file (`-composition`) was the whole fix, with a header line
+saying why. Every back-merge should grep the incoming test files against the
+root `exclude` list before reading a coverage hole as a missing test.
+
+Second time (batch I, upstream #599): the pick edited
+`events/__tests__/process-integration.test.ts`, a pre-existing suite with the
+same suffix, so upstream's change to it is never executed here. A run that
+names it explicitly still reports one file fewer than it was given, and that
+count is the only hint.
+
 ## 1x — `afterAll(fixture.close)` inside a `describe` shuts the connection for every later `describe` in the file
 
 The DB fixture's three hooks read as a set, and every suite in the repository
@@ -1165,21 +1186,6 @@ Caught before it ever ran once, by naming the new file
 general fix is to always single-quote a path containing `$` (`'…$providerId…'`),
 but renaming is one character simpler and does not depend on remembering to
 quote correctly every time the file is touched again.
-
-## 1x — An upstream suite named `*-integration.test.ts` never runs here, and passes by absence
-
-The root vitest config excludes `**/*-integration.test.ts`, for the API suite
-that needs a live server. Upstream does not have that exclusion, so when a
-back-merge brought `hooks-after-integration.test.ts` -- six tests on the
-ordering of the sign-in after-hooks, running entirely on mocks -- vitest
-collected nothing, said nothing, and the diff-coverage gate reported forty
-lines of `hooksAfter` as never executed. Running the file by name printed
-`No test files found` with the exclude list, which is the only place the cause
-is visible.
-
-Renaming the file (`-composition`) was the whole fix, with a header line
-saying why. Every back-merge should grep the incoming test files against the
-root `exclude` list before reading a coverage hole as a missing test.
 
 ## 1x — Upstream and fork migrations collide on `idx` and on `when`, and the migrator hides it
 
@@ -2424,6 +2430,41 @@ like a bug in the code under test. Pass `Slice.empty` from `@tiptap/pm/model`
 and give the fake clipboard a `getData: () => ''`. The mounted editor is on
 the ProseMirror DOM node as `.editor`, which is how a test gets at it
 without an `editorRef` seam.
+
+## 1x — Raw SQL in a test compares a TypeID string against a uuid column
+
+A test that narrows a statement read from documentation (the JOBS.md rollback
+runbook) by appending `AND id = ${id}` passes the branded TypeID
+(`conversation_01…`) as the parameter, and Postgres refuses it with `invalid
+input syntax for type uuid`. Drizzle only converts a TypeID when the column is
+on the comparison, so append `${eq(table.id, id)}` instead of a bare `id =`.
+Not every id column is a uuid: `events.event_id` is text and stores `evt_…`
+(not `event_…`) verbatim, which is also why a mutant of the prefix in
+`createId('event')` survives any test that only round-trips the id.
+
+## 1x — A coverage run without its own `reportsDirectory` deletes every report under `coverage/`
+
+`--coverage.enabled --coverage.reporter=text` for a quick look at one file
+writes to the default directory, `coverage/`, and cleans it first. That
+removed `coverage/local` from an 18-minute full run, so the next
+`diff-coverage-check.ts` judged only the quick run's suites and reported
+dozens of "never executed" lines that the full run had covered. Give every
+run its own `--coverage.reportsDirectory=coverage/<name>`; the gate merges all
+of them.
+
+## 1x — A `vi.waitFor` budget silently includes cold call-time `import()`s
+
+The event dispatch bridge (`dispatch.ts` → `process.ts` → `outbox-dispatch.ts`)
+loads its module graph with call-time `import()`, and cold under vitest that
+takes seconds (measured 3.8 s locally for one `ticket.status_changed`). Batch
+I's `requester.service` reopen test polled `vi.waitFor(…, { timeout: 5000 })`
+around a callback that both looked for the reaction job and ran it, which
+cold-loaded the SLA modules too; the budget ran out mid-callback and vitest
+reported the last failed poll, `expected 0 to be 1`, which reads as "the job
+was never queued". It failed on every run, locally and in CI, and the batch
+agent's coverage run had filed it under load timeouts. Load the lazily
+imported modules in a `beforeAll`, and keep a `waitFor` callback to the one
+cheap observation it waits for.
 
 ## Resolved
 

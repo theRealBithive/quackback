@@ -20,6 +20,22 @@ vi.mock('@/lib/server/db', async (importOriginal) => {
   }
 })
 
+/**
+ * The real logger, with every child it hands out kept by its component name,
+ * so a test can see whether a module wrote a log line at all.
+ */
+const loggers = vi.hoisted(() => new Map<string, Record<string, unknown>>())
+vi.mock('@/lib/server/logger', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/server/logger')>()
+  const realChild = actual.logger.child.bind(actual.logger)
+  const child = (bindings: Record<string, unknown>, ...rest: unknown[]) => {
+    const made = (realChild as (...args: unknown[]) => Record<string, unknown>)(bindings, ...rest)
+    if (typeof bindings.component === 'string') loggers.set(bindings.component, made)
+    return made
+  }
+  return { ...actual, logger: Object.assign(Object.create(actual.logger), { child }) }
+})
+
 vi.mock('@/lib/server/workspaces/workspace-context', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/workspaces/workspace-context')>()),
   getCurrentWorkspace: () => ({ workspaceKey: 'ws_emit' }),
@@ -28,7 +44,7 @@ vi.mock('@/lib/server/workspaces/workspace-context', async (importOriginal) => (
 import { db, events, auditLog, eq, and, sql } from '@/lib/server/db'
 import { getExecuteRows } from '@/lib/server/utils/execute-rows'
 import { createId } from '@quackback/ids'
-import { emit, inherit } from '../emit'
+import { emit, emitBestEffort, inherit } from '../emit'
 import type { EventDefinition } from '../catalogue/define'
 import type { DomainEvent } from '../envelope'
 
@@ -92,14 +108,17 @@ describe('emit()', () => {
 
   it('inserts exactly one events row with the envelope fields', async () => {
     const entityId = createId('post')
+    const actorId = createId('principal')
     const eventId = await db.transaction((tx) =>
       emit(tx, plainDef, {
         payload: { postId: entityId },
-        actor: { type: 'user', id: createId('principal') },
+        actor: { type: 'user', id: actorId },
         entityId,
         context: { source: 'api', correlationId: 'corr-1' },
+        dedupeKey: `dedupe-${entityId}`,
       })
     )
+    expect(eventId).toMatch(/^evt_/)
 
     const rows = await db.select().from(events).where(eq(events.eventId, eventId))
     expect(rows).toHaveLength(1)
@@ -108,6 +127,8 @@ describe('emit()', () => {
     expect(row.entityType).toBe('post')
     expect(row.entityId).toBe(entityId)
     expect(row.actorType).toBe('user')
+    expect(row.actorId).toBe(actorId)
+    expect(row.dedupeKey).toBe(`dedupe-${entityId}`)
     expect(row.schemaVersion).toBe(2)
     expect(row.payload).toEqual({ postId: entityId })
     expect((row.context as { depth: number; source: string }).depth).toBe(0)
@@ -154,6 +175,7 @@ describe('emit()', () => {
         payload: { postId: entityId, note: 'atomic' },
         actor: { type: 'user', id: createId('principal') },
         entityId,
+        context: { source: 'api', correlationId: 'corr-2' },
       })
     )
     const eventRows = await db.select().from(events).where(eq(events.eventId, eventId))
@@ -168,7 +190,102 @@ describe('emit()', () => {
     expect(eventRows).toHaveLength(1)
     expect(eventRows[0].dispatchOwner).toBe('job')
     expect(auditRows).toHaveLength(1)
+    expect(auditRows[0]).toMatchObject({
+      eventOutcome: 'success',
+      requestId: 'corr-2',
+      metadata: { eventId, source: 'api' },
+    })
     expect(getExecuteRows(jobs).length).toBeGreaterThan(0)
+  })
+
+  it('emitBestEffort() commits the event on its own transaction and swallows a failed write', async () => {
+    const entityId = createId('post')
+    await emitBestEffort(plainDef, {
+      payload: { postId: entityId },
+      actor: { type: 'service' },
+      entityId,
+    })
+    const written = await db.select().from(events).where(eq(events.entityId, entityId))
+    expect(written).toHaveLength(1)
+
+    const failedEntity = createId('post')
+    const warn = vi.spyOn(loggers.get('emit') as { warn: () => void }, 'warn')
+    await expect(
+      emitBestEffort(plainDef, {
+        // @ts-expect-error: deliberately wrong payload shape, so the write fails
+        payload: { wrong: 1 },
+        actor: { type: 'service' },
+        entityId: failedEntity,
+      })
+    ).resolves.toBeUndefined()
+    const notWritten = await db.select().from(events).where(eq(events.entityId, failedEntity))
+    expect(notWritten).toHaveLength(0)
+    // Swallowed, but not silently: a lost event leaves a trace for an operator.
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  it('queues a job per reaction queue in the same tx, only for a type that has reactions', async () => {
+    const reactedDef: EventDefinition<{ ticketId: string }> = {
+      ...plainDef,
+      type: 'ticket.status_changed',
+      entity: 'ticket',
+      payload: z.object({ ticketId: z.string() }),
+    }
+    const reactionJobsFor = async (eventId: string) =>
+      getExecuteRows<{ queue: string; dedupe_key: string }>(
+        await db.execute(sql`
+          SELECT queue, dedupe_key FROM job_queue
+          WHERE queue IN ('event-reactions', 'event-summaries')
+            AND payload->>'eventId' = ${eventId}
+          ORDER BY queue
+        `)
+      )
+
+    const reactedEntity = createId('ticket')
+    const reactedId = await db.transaction((tx) =>
+      emit(tx, reactedDef, {
+        payload: { ticketId: reactedEntity },
+        actor: { type: 'service' },
+        entityId: reactedEntity,
+      })
+    )
+    // The ordered reactions and the close summary each get their own job.
+    expect(await reactionJobsFor(reactedId)).toEqual([
+      { queue: 'event-reactions', dedupe_key: `event-reactions:${reactedId}` },
+      { queue: 'event-summaries', dedupe_key: `event-summaries:${reactedId}` },
+    ])
+
+    const plainEntity = createId('post')
+    const plainId = await db.transaction((tx) =>
+      emit(tx, plainDef, {
+        payload: { postId: plainEntity },
+        actor: { type: 'service' },
+        entityId: plainEntity,
+      })
+    )
+    expect(await reactionJobsFor(plainId)).toEqual([])
+
+    let rolledBackId = ''
+    await expect(
+      db.transaction(async (tx) => {
+        rolledBackId = await emit(tx, reactedDef, {
+          payload: { ticketId: createId('ticket') },
+          actor: { type: 'service' },
+          entityId: reactedEntity,
+        })
+        throw new Error('abort the tx')
+      })
+    ).rejects.toThrow('abort the tx')
+    expect(await reactionJobsFor(rolledBackId)).toEqual([])
+
+    // Committed to the shared database: leave no reaction job for another
+    // suite's drain to claim.
+    await db.execute(sql`
+      DELETE FROM job_queue
+      WHERE queue IN ('event-reactions', 'event-summaries')
+        AND payload->>'eventId' IN (${reactedId}, ${plainId})
+    `)
   })
 
   it('rejects a payload that fails the catalogue zod schema', async () => {

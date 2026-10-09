@@ -1898,7 +1898,7 @@ export async function recordCsat(
   // Mirror the CSAT rating onto Quinn's involvement when it was the last handler
   // (best-effort — never fails the rating; the assistant domain owns it). The
   // resolved_confirmed trigger rides the csat_submitted event instead: the
-  // assistant subscriber in events/process.ts confirms the involvement off the
+  // assistant reaction in events/event-reactions.ts confirms the involvement off the
   // first submission, keeping cross-domain outcome logic on the bus.
   void import('@/lib/server/domains/assistant/assistant.orchestrator')
     .then((m) => m.attributeCsatIfLastHandler(conversationId, updated.csatRating ?? rating))
