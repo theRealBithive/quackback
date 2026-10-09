@@ -370,10 +370,10 @@ export function buildClaimsTableModel({
 }: {
   mapping: IdentityProviderClaimMapping | null | undefined
   definitions: PeopleDefinition[]
-}): { profile: ClaimsProfileRow[]; additional: ClaimsTableRow[] } {
+}): { profile: ClaimsProfileRow[]; additional: Array<ClaimsPeopleRow | ClaimsUnsupportedRow> } {
   const profile = buildProfileRows(mapping)
   // Role rules are the Roles card's; this table lists what is read about a person.
-  const additional: ClaimsTableRow[] = []
+  const additional: Array<ClaimsPeopleRow | ClaimsUnsupportedRow> = []
   const defByKey = new Map(definitions.map((d) => [d.key, d]))
   const map = mapping?.attributes?.map ?? []
   const keyCounts = new Map<string, number>()

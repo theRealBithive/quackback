@@ -39,7 +39,7 @@ export function ClaimsTable({
   testValues,
 }: {
   profileRows: ClaimsProfileRow[]
-  additionalRows: ClaimsTableRow[]
+  additionalRows: Array<ClaimsPeopleRow | ClaimsUnsupportedRow>
   peopleFlags: { overrideExisting: boolean; syncOnSignIn: boolean }
   onPeopleFlagsChange: (next: { overrideExisting: boolean; syncOnSignIn: boolean }) => void
   onEdit: (row: ClaimsTableRow) => void
@@ -100,10 +100,7 @@ export function ClaimsTable({
                   />
                 )
               }
-              if (row.kind === 'unsupported') {
-                return <UnsupportedRowView key={row.id} row={row} showTest={showTest} />
-              }
-              return null
+              return <UnsupportedRowView key={row.id} row={row} showTest={showTest} />
             })}
           </tbody>
         </table>
