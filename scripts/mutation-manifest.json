@@ -473,6 +473,36 @@
         "apps/web/src/lib/server/events/__tests__/event-reactions.test.ts",
         "apps/web/src/lib/server/events/__tests__/event-reactions-contract.test.ts"
       ]
+    },
+    {
+      "file": "apps/web/src/lib/server/functions/widget-portal-gate.ts",
+      "suites": [
+        "apps/web/src/lib/server/functions/__tests__/widget-portal-gate.test.ts",
+        "apps/web/src/lib/server/functions/__tests__/widget-portal-gate.db.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/src/lib/server/e2e-widget-harness.ts",
+      "suites": [
+        "apps/web/src/lib/server/__tests__/e2e-widget-harness-gate.test.ts",
+        "apps/web/src/lib/server/__tests__/e2e-widget-harness.test.ts",
+        "apps/web/src/lib/server/__tests__/e2e-widget-harness-route.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/src/routes/auth.widget-handoff.tsx",
+      "suites": [
+        "apps/web/src/routes/__tests__/auth.widget-handoff.test.ts",
+        "apps/web/src/routes/__tests__/auth.widget-handoff-promotion.test.ts",
+        "apps/web/src/routes/__tests__/auth.widget-handoff-page.test.tsx"
+      ]
+    },
+    {
+      "file": "apps/web/src/lib/server/auth/mcp-dcr-scopes.ts",
+      "suites": [
+        "apps/web/src/lib/server/auth/__tests__/mcp-dcr-scopes.test.ts",
+        "apps/web/src/routes/api/auth/__tests__/dcr-redirect-restore.test.ts"
+      ]
     }
   ],
   "equivalents": [
@@ -1413,6 +1443,41 @@
       "line": "if (event.type !== 'ticket.status_changed' || event.data.newStatus !== 'closed') {",
       "replacement": "false",
       "why": "The type half narrows the event for TypeScript. runReactionJob calls this reaction only for the types EVENT_REACTIONS lists for it, which is ticket.status_changed alone, so that half is false for every event that reaches it; the close half, which does decide, is killed by the non-close status test."
+    },
+    {
+      "file": "apps/web/src/lib/server/auth/mcp-dcr-scopes.ts",
+      "mutator": "Regex",
+      "line": "return host !== 'localhost' && host !== '[::1]' && !/^127\\.\\d+\\.\\d+\\.\\d+$/.test(host)",
+      "replacement": "/127\\.\\d+\\.\\d+\\.\\d+$/",
+      "why": "`host` comes from `new URL(...).hostname`, and the WHATWG host parser accepts a host whose last label is numeric only when the whole host parses as IPv4, which it then serialises in canonical dotted-decimal form. Measured: `x127.0.0.1`, `a.127.0.0.1`, `1.127.0.0.1` and `foo-127.0.0.1` all throw in `new URL`, while `0x7f.0.0.1` and `127.1` come back as `127.0.0.1`. So every hostname that ends in `127.d.d.d` starts with it too, and the start anchor decides nothing."
+    },
+    {
+      "file": "apps/web/src/lib/server/e2e-widget-harness.ts",
+      "mutator": "ConditionalExpression",
+      "line": "if (raw === 'customer' || raw === 'teammate' || raw === 'anon') return raw",
+      "replacement": "false",
+      "why": "The third operand returns 'anon' for 'anon'; without it 'anon' falls through to the line below, which returns 'anon'. The two answers are the same string for every input."
+    },
+    {
+      "file": "apps/web/src/routes/auth.widget-handoff.tsx",
+      "mutator": "StringLiteral",
+      "line": "if (!existing?.user) return 'none'",
+      "replacement": "\"\"",
+      "why": "readExistingBrowserSession's answer is only ever compared with 'dashboard' and 'unknown' (the refusal reason compares it with 'dashboard' too). 'none', 'other' and '' all fail both comparisons, so the handoff takes the same branch, records the same reason and installs the same cookie for each."
+    },
+    {
+      "file": "apps/web/src/routes/auth.widget-handoff.tsx",
+      "mutator": "StringLiteral",
+      "line": "return 'other'",
+      "replacement": "\"\"",
+      "why": "Same function, same reason as the 'none' record: the value is only compared with 'dashboard' and 'unknown', and '' fails both exactly as 'other' does."
+    },
+    {
+      "file": "apps/web/src/routes/auth.widget-handoff.tsx",
+      "mutator": "StringLiteral",
+      "line": "export const Route = createFileRoute('/auth/widget-handoff')({",
+      "replacement": "\"\"",
+      "why": "At runtime TanStack Router's createFileRoute ignores its argument (react-router dist/esm/fileRoute.js: `createFileRoute(path) { return (options) => createRoute(options) ... }`). The path is read by the route-tree generator, which rewrites it, and by the type checker, which rejects a path that is not a key of FileRoutesByPath. No test can observe it; the type checker catches the mutant (measured: blanking the literal makes tsc report TS2345, an empty string is not assignable to keyof FileRoutesByPath)."
     }
   ]
 }

@@ -91,7 +91,7 @@ describe('mcpDcrRegistrationBody', () => {
     expect(body.application_type).toBeUndefined()
   })
 
-  it('leaves an explicit HTTPS web client as web', () => {
+  it('leaves an explicit HTTPS web client as web (J25)', () => {
     const body = mcpDcrRegistrationBody({
       application_type: 'web',
       redirect_uris: ['https://example.com/oauth/callback'],
@@ -100,7 +100,7 @@ describe('mcpDcrRegistrationBody', () => {
     expect(body.redirect_uris).toEqual(['https://example.com/oauth/callback'])
   })
 
-  it('coerces omitted application_type and Cursor custom-scheme redirects for Better Auth 1.7', () => {
+  it('coerces omitted application_type and Cursor custom-scheme redirects for Better Auth 1.7 (J25)', () => {
     const original = {
       client_name: 'Cursor',
       redirect_uris: [CURSOR_REDIRECT],
@@ -130,6 +130,41 @@ describe('mcpDcrRegistrationBody', () => {
     const body = mcpDcrRegistrationBody(original)
     expect(body.redirect_uris).toEqual(original.redirect_uris)
     expect(mcpDcrRedirectUrisToRestore(original)).toBeNull()
+  })
+
+  it.each([
+    ['http://localhost:8765/callback'],
+    ['http://127.0.0.1:8765/callback'],
+    ['http://[::1]:8765/callback'],
+    ['com.example.app:/oauth/callback'],
+  ])('defaults an omitted application_type to native for %s', (uri) => {
+    const body = mcpDcrRegistrationBody({ redirect_uris: [uri] })
+    expect(body.application_type).toBe('native')
+    expect(body.redirect_uris).toEqual([uri])
+  })
+
+  it('leaves an omitted application_type alone when every redirect is web-valid (J25)', () => {
+    const body = mcpDcrRegistrationBody({ redirect_uris: ['https://example.com/oauth/callback'] })
+    expect(body.application_type).toBeUndefined()
+  })
+
+  it('does not count an unreadable redirect as web-valid, and passes it on untouched (J25, J26)', () => {
+    // An untyped client is web only when every redirect is HTTPS on a public
+    // host; a value that is no URI at all is not, so the client is not left as
+    // web. The value itself goes on unchanged for Better Auth to refuse (J26).
+    const body = mcpDcrRegistrationBody({
+      redirect_uris: ['https://example.com/oauth/callback', 'not a uri'],
+    })
+    expect(body.application_type).toBe('native')
+    expect(body.redirect_uris).toEqual(['https://example.com/oauth/callback', 'not a uri'])
+  })
+
+  it('does not override an explicit web client that registered a loopback redirect (J25)', () => {
+    const body = mcpDcrRegistrationBody({
+      application_type: 'web',
+      redirect_uris: ['http://localhost:8765/callback'],
+    })
+    expect(body.application_type).toBe('web')
   })
 
   it('rewrites only the host-bearing custom scheme in a mixed Cursor set', () => {
@@ -205,6 +240,42 @@ describe('mcpDcrRegistrationBody', () => {
     })
     expect(body.application_type).toBeUndefined()
   })
+
+  it('declares an explicit web client native when only one of its callbacks was swapped (M4)', () => {
+    // The explicit type rules out the default rule, so only the swap can
+    // make this registration native.
+    const body = mcpDcrRegistrationBody({
+      application_type: 'web',
+      redirect_uris: ['https://www.cursor.com/agents/mcp/oauth/callback', CURSOR_REDIRECT],
+    })
+    expect(body.application_type).toBe('native')
+  })
+
+  it.each([
+    'https://localhost/cb',
+    'https://LOCALHOST:8443/cb',
+    'https://[::1]/cb',
+    'https://127.0.0.1/cb',
+    'https://127.10.200.3/cb',
+    'https://127.0.10.1/cb',
+    'https://127.0.0.10/cb',
+  ])('registers an untyped client with the loopback redirect %s as native (J25)', (redirect) => {
+    // RFC 8252 loopback is a native app's redirect, HTTPS or not; Better
+    // Auth would refuse it from a web client.
+    const body = mcpDcrRegistrationBody({ redirect_uris: [redirect] })
+    expect(body.application_type).toBe('native')
+    expect(body.redirect_uris).toEqual([redirect])
+  })
+
+  it.each(['https://app.example.com/cb', 'https://127.0.0.1.example.com/cb'])(
+    'leaves an untyped client with the non-loopback HTTPS redirect %s to the default (J25)',
+    (redirect) => {
+      // A host that merely starts like a loopback address is an ordinary
+      // web host.
+      const body = mcpDcrRegistrationBody({ redirect_uris: [redirect] })
+      expect(body.application_type).toBeUndefined()
+    }
+  )
 })
 
 describe('needsBetterAuth17RedirectRewrite', () => {
@@ -212,7 +283,7 @@ describe('needsBetterAuth17RedirectRewrite', () => {
     expect(needsBetterAuth17RedirectRewrite(CURSOR_REDIRECT)).toBe(true)
   })
 
-  it('does not rewrite reserved schemes so Better Auth still rejects them', () => {
+  it('does not rewrite reserved schemes so Better Auth still rejects them (J26)', () => {
     expect(needsBetterAuth17RedirectRewrite('file:///tmp/callback')).toBe(false)
     expect(needsBetterAuth17RedirectRewrite('javascript:alert(1)')).toBe(false)
   })

@@ -78,6 +78,7 @@ vi.mock('@/lib/server/widget/identity-token', () => ({
 vi.mock('@/lib/server/domains/users/user.attributes', () => ({
   validateAndCoerceAttributes: vi.fn(async () => ({ valid: {}, removals: [], errors: [] })),
   mergeMetadata: vi.fn(() => null),
+  EXTERNAL_ID_KEY: '_externalUserId',
 }))
 
 vi.mock('@/lib/server/domains/segments/segment-membership.service', () => ({
@@ -120,7 +121,11 @@ beforeEach(() => {
 })
 
 describe('POST /api/widget/identify — external_id resolution (verified path)', () => {
-  it('creates a new user stamped with the verified sub as external_id', async () => {
+  // J23 was revised on 2026-10-08 by the user's decision: a signed identify no
+  // longer marks the address verified. The two tests below asserted the
+  // opposite under the old wording; they now state the revised contract, which
+  // is a contract change, not a softened test.
+  it('creates a new user stamped with the verified sub, its address left unverified (J23)', async () => {
     mockVerifyJWT.mockReturnValue({ sub: 'sub_alice', email: 'alice@acme.com', name: 'Alice' })
     mockUserFindFirst.mockResolvedValue(null) // no external_id match, no email match
     mockPrincipalFindFirst.mockResolvedValue(null)
@@ -129,15 +134,17 @@ describe('POST /api/widget/identify — external_id resolution (verified path)',
 
     expect(res.status).toBe(200)
     expect(userInsertValues()?.externalId).toBe('sub_alice')
+    expect(userInsertValues()?.emailVerified).toBe(false)
   })
 
-  it('resolves a returning sub to the same user and adopts the new email', async () => {
+  it('resolves a returning sub to the same user and adopts the new email (J19, J23)', async () => {
     mockVerifyJWT.mockReturnValue({ sub: 'sub_bob', email: 'bob-new@acme.com', name: 'Bob' })
     mockUserFindFirst
       // external_id lookup hits the existing user (email has since changed)…
       .mockResolvedValueOnce({
         id: 'user_bob',
         email: 'bob-old@acme.com',
+        emailVerified: false,
         externalId: 'sub_bob',
         name: 'Bob',
         image: null,
@@ -154,6 +161,99 @@ describe('POST /api/widget/identify — external_id resolution (verified path)',
     expect(userInsertValues()).toBeUndefined()
     // sub is authoritative: the changed email is adopted onto the same account.
     expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ email: 'bob-new@acme.com' }))
+    // J23: adopting the address does not vouch for owning it.
+    expect(updateSet.mock.calls[0]?.[0]).not.toHaveProperty('emailVerified')
+    const body = (await res.json()) as { user?: { email?: string; name?: string } }
+    expect(body.user?.email).toBe('bob-new@acme.com')
+  })
+
+  it('adopts a changed avatar and returns it in the same response (J19)', async () => {
+    mockVerifyJWT.mockReturnValue({
+      sub: 'sub_bob',
+      email: 'bob@acme.com',
+      name: 'Bob',
+      avatarURL: 'https://cdn.acme.com/bob-new.png',
+    })
+    mockUserFindFirst.mockResolvedValueOnce({
+      id: 'user_bob',
+      email: 'bob@acme.com',
+      emailVerified: true,
+      externalId: 'sub_bob',
+      name: 'Bob',
+      image: 'https://cdn.acme.com/bob-old.png',
+      imageKey: null,
+      metadata: null,
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_bob', role: 'user' })
+
+    const res = await postIdentify({ ssoToken: 'jwt' })
+
+    expect(res.status).toBe(200)
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ image: 'https://cdn.acme.com/bob-new.png' })
+    )
+    const body = (await res.json()) as { user?: { avatarUrl?: string } }
+    expect(body.user?.avatarUrl).toBe('https://cdn.acme.com/bob-new.png')
+  })
+
+  it('rejects a verified email claim that belongs to another account (J18)', async () => {
+    mockVerifyJWT.mockReturnValue({
+      sub: 'sub_bob',
+      email: 'taken@acme.com',
+      name: 'Bob',
+    })
+    mockUserFindFirst
+      .mockResolvedValueOnce({
+        id: 'user_bob',
+        email: 'bob-old@acme.com',
+        externalId: 'sub_bob',
+        name: 'Bob',
+        image: null,
+        metadata: null,
+      })
+      .mockResolvedValueOnce({ id: 'user_other' })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_bob', role: 'user' })
+
+    const res = await postIdentify({ ssoToken: 'jwt' })
+
+    expect(res.status).toBe(409)
+    const body = (await res.json()) as { error?: { code?: string } }
+    expect(body.error?.code).toBe('EMAIL_IN_USE')
+    expect(updateSet).not.toHaveBeenCalled()
+    expect(userInsertValues()).toBeUndefined()
+  })
+
+  it('releases an external_id bound to a user with no principal and creates a clean record (J17)', async () => {
+    mockVerifyJWT.mockReturnValue({
+      sub: 'staff-admin',
+      email: 'new@acme.com',
+      name: 'Si Cruse',
+    })
+    mockUserFindFirst
+      // external_id still points at the Remove-from-portal husk…
+      .mockResolvedValueOnce({
+        id: 'user_husk',
+        email: 'kira-probe@example.com',
+        externalId: 'staff-admin',
+        name: 'Old Name',
+        image: null,
+        metadata: '{"_externalUserId":"staff-admin"}',
+      })
+      // …after release, email lookup misses so we insert a new user.
+      .mockResolvedValueOnce(null)
+    mockPrincipalFindFirst.mockResolvedValue(null)
+
+    const res = await postIdentify({ ssoToken: 'jwt' })
+
+    expect(res.status).toBe(200)
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ externalId: null, metadata: expect.anything() })
+    )
+    expect(userInsertValues()).toMatchObject({
+      email: 'new@acme.com',
+      name: 'Si Cruse',
+      externalId: 'staff-admin',
+    })
   })
 
   it('backfills external_id when the user is first matched by email', async () => {

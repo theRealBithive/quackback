@@ -25,6 +25,9 @@ vi.mock('../widget-auth-provider', () => ({
   useWidgetAuth: () => ({
     sessionVersion: auth.sessionVersion,
     isIdentified: auth.isIdentified,
+    // #555: false only for a teammate signed into the widget, who must not be
+    // handed a portal session. Every visitor in this suite is a customer.
+    canPortalHandoff: true,
     hmacRequired: false,
     user: null,
     emitEvent: vi.fn(),
@@ -45,9 +48,11 @@ vi.mock('@/lib/client/widget-bridge', () => ({ sendToHost: (msg: unknown) => sen
 const listPublicChangelogsFn = vi.fn()
 const getPublicChangelogFn = vi.fn()
 const listChangelogCategoriesFn = vi.fn()
+vi.mock('@/lib/server/functions/widget/changelog', () => ({
+  widgetListPublicChangelogsFn: (...args: unknown[]) => listPublicChangelogsFn(...(args as [])),
+  widgetGetPublicChangelogFn: (...args: unknown[]) => getPublicChangelogFn(...(args as [])),
+}))
 vi.mock('@/lib/server/functions/changelog', () => ({
-  listPublicChangelogsFn: (...args: unknown[]) => listPublicChangelogsFn(...(args as [])),
-  getPublicChangelogFn: (...args: unknown[]) => getPublicChangelogFn(...(args as [])),
   listChangelogsFn: vi.fn(),
   getChangelogFn: vi.fn(),
   topViewedChangelogsFn: vi.fn(),
@@ -198,8 +203,12 @@ describe('WidgetChangelogDetail', () => {
 
     await waitFor(() => expect(sendToHost).toHaveBeenCalled())
     const { url } = sendToHost.mock.calls[0][0] as { url: string }
-    expect(url).toContain('/changelog/chg_1')
-    expect(new URL(url).searchParams.get('ott')).toBe('ott-456')
+    // Since #555 an identified visitor reaches the portal through the
+    // handoff route, which carries the destination as `returnTo`.
+    const handoff = new URL(url)
+    expect(handoff.pathname).toBe('/auth/widget-handoff')
+    expect(handoff.searchParams.get('returnTo')).toContain('/changelog/chg_1')
+    expect(handoff.searchParams.get('ott')).toBe('ott-456')
   })
 
   it('carries no token to the portal for an anonymous visitor (W8)', async () => {

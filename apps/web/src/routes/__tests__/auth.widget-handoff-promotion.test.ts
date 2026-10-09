@@ -64,6 +64,9 @@ vi.mock('@tanstack/react-start/server', () => ({
   getRequestHeaders: () => new Headers(),
 }))
 
+// #555 also reads the browser's existing session; none here, so no dashboard login to protect.
+vi.mock('@/lib/server/auth/session', () => ({ getSession: async () => null }))
+
 vi.mock('@/lib/server/config', () => ({ config: { baseUrl: 'http://localhost:3000' } }))
 
 vi.mock('@/lib/server/audit/log', () => ({ recordAuditEvent: hoisted.recordAuditEvent }))
@@ -78,6 +81,9 @@ vi.mock('@/lib/server/db', () => ({
   db: {
     query: {
       widgetIdentifiedSession: { findFirst: (...args: unknown[]) => hoisted.findFirst(...args) },
+      // #555 asks whether the token's user is a teammate before any write; every
+      // visitor in this suite is a customer.
+      principal: { findFirst: async () => ({ role: 'user' }) },
     },
     update: () => ({
       set: (values: unknown) => {
@@ -98,6 +104,7 @@ vi.mock('@/lib/server/db', () => ({
     }),
   },
   session: { id: 'session.id' },
+  principal: { userId: 'principal.user_id' },
   widgetIdentifiedSession: { sessionId: 'widget_identified_session.session_id' },
   widgetOriginSession: { sessionId: 'widget_origin_session.session_id' },
   eq: (column: unknown, value: unknown) => ({ kind: 'eq', column, value }),

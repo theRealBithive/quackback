@@ -29,21 +29,21 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('isWidgetSessionHmacVerified', () => {
+describe('hasSignedWidgetIdentity, the provenance check the handoff uses', () => {
   it('returns true when the session has hmac_verified=true', async () => {
-    const { isWidgetSessionHmacVerified } = await import('../auth.widget-handoff')
+    const { hasSignedWidgetIdentity } = await import('@/lib/server/functions/widget-portal-gate')
     mockFindFirst.mockResolvedValueOnce({ hmacVerified: true })
 
-    const result = await isWidgetSessionHmacVerified('sess_verified')
+    const result = await hasSignedWidgetIdentity('sess_verified')
 
     expect(result).toBe(true)
   })
 
   it('returns false when the session has hmac_verified=false (email-capture identify)', async () => {
-    const { isWidgetSessionHmacVerified } = await import('../auth.widget-handoff')
+    const { hasSignedWidgetIdentity } = await import('@/lib/server/functions/widget-portal-gate')
     mockFindFirst.mockResolvedValueOnce({ hmacVerified: false })
 
-    const result = await isWidgetSessionHmacVerified('sess_unverified')
+    const result = await hasSignedWidgetIdentity('sess_unverified')
 
     expect(result).toBe(false)
   })
@@ -52,10 +52,10 @@ describe('isWidgetSessionHmacVerified', () => {
     // The fail-safe path: a session minted outside /api/widget/identify
     // (e.g. portal email signup that minted a generic BA OTT) has no
     // row in widget_identified_session. Must NOT earn the marker.
-    const { isWidgetSessionHmacVerified } = await import('../auth.widget-handoff')
+    const { hasSignedWidgetIdentity } = await import('@/lib/server/functions/widget-portal-gate')
     mockFindFirst.mockResolvedValueOnce(undefined)
 
-    const result = await isWidgetSessionHmacVerified('sess_no_row')
+    const result = await hasSignedWidgetIdentity('sess_no_row')
 
     expect(result).toBe(false)
   })
@@ -63,10 +63,10 @@ describe('isWidgetSessionHmacVerified', () => {
   it('returns false when the DB lookup throws (defensive)', async () => {
     // A query error must not be interpreted as success — defaulting
     // to false keeps the gate closed even under DB hiccups.
-    const { isWidgetSessionHmacVerified } = await import('../auth.widget-handoff')
+    const { hasSignedWidgetIdentity } = await import('@/lib/server/functions/widget-portal-gate')
     mockFindFirst.mockRejectedValueOnce(new Error('connection refused'))
 
-    const result = await isWidgetSessionHmacVerified('sess_db_error')
+    const result = await hasSignedWidgetIdentity('sess_db_error')
 
     expect(result).toBe(false)
   })

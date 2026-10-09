@@ -53,6 +53,7 @@ const handlersByExport = new WeakMap<object, AnyHandler>()
 let _currentModule = ''
 
 vi.mock('@tanstack/react-start', () => ({
+  createServerOnlyFn: <T>(fn: T) => fn,
   createServerFn: () => {
     const chain = {
       validator() {
@@ -296,7 +297,7 @@ const LIST_PUBLIC_CHANGELOGS = 6
 // ---------------------------------------------------------------------------
 
 describe('portal.ts fetchPortalData — portal-visibility gate', () => {
-  it('returns empty structure when private portal blocks the caller', async () => {
+  it('returns empty structure when private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthenticated' })
     const h = await loadModule(PORTAL)
     const result = (await h[FETCH_PORTAL_DATA]({ data: { sort: 'top' } })) as Record<
@@ -369,7 +370,7 @@ describe('portal.ts fetchBoardCapabilitiesFn — per-board capability map', () =
   }
   const authAccess = { ...anonAccess, vote: 'authenticated', submit: 'authenticated' }
 
-  it('returns an empty map when the private portal blocks the caller', async () => {
+  it('returns an empty map when the private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
     const handler = await loadExportedHandler(PORTAL, 'fetchBoardCapabilitiesFn')
     const result = await handler({ data: {} })
@@ -406,7 +407,7 @@ describe('portal.ts fetchBoardCapabilitiesFn — per-board capability map', () =
 // ---------------------------------------------------------------------------
 
 describe('portal.ts fetchPublicBoards — portal-visibility gate', () => {
-  it('returns empty array when private portal blocks the caller', async () => {
+  it('returns empty array when private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
     const h = await loadModule(PORTAL)
     const result = await h[FETCH_PUBLIC_BOARDS]({ data: {} })
@@ -442,7 +443,7 @@ describe('portal.ts fetchPublicBoards — portal-visibility gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('portal.ts fetchPublicBoardBySlug — portal-visibility gate', () => {
-  it('returns null when private portal blocks the caller', async () => {
+  it('returns null when private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthenticated' })
     const h = await loadModule(PORTAL)
     const result = await h[FETCH_PUBLIC_BOARD_BY_SLUG]({ data: { slug: 'ideas' } })
@@ -466,7 +467,7 @@ describe('portal.ts fetchPublicBoardBySlug — portal-visibility gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('portal.ts fetchPublicPostDetail — portal-visibility gate', () => {
-  it('returns null when private portal blocks the caller', async () => {
+  it('returns null when private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
     const h = await loadModule(PORTAL)
     const result = await h[FETCH_PUBLIC_POST_DETAIL]({ data: { postId: 'post_1' } })
@@ -516,12 +517,61 @@ describe('portal.ts fetchPublicPostDetail — portal-visibility gate', () => {
   })
 })
 
+describe('portal.ts fetchPublicPostDetail — the thread it serves (J21)', () => {
+  it('serializes every comment date to an ISO string, replies included (J21)', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    mockGetPublicPostDetail.mockResolvedValue({
+      id: 'post_1',
+      title: 'Hello',
+      content: 'body',
+      contentJson: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      comments: [
+        {
+          id: 'comment_root',
+          createdAt: new Date('2026-01-02T00:00:00.000Z'),
+          replies: [
+            // The raw-SQL path can hand dates back as strings already.
+            { id: 'comment_reply', createdAt: '2026-01-03T00:00:00.000Z', replies: [] },
+          ],
+        },
+      ],
+      statusId: null,
+      voteCount: 0,
+      boardId: 'board_1',
+      boardAccess: {
+        view: 'anonymous',
+        vote: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segments: { view: [], vote: [], comment: [], submit: [] },
+        moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+      },
+    })
+    mockGetPostMergeInfo.mockResolvedValue(null)
+    mockGetMergedPosts.mockResolvedValue([])
+    const h = await loadModule(PORTAL)
+
+    const result = (await h[FETCH_PUBLIC_POST_DETAIL]({ data: { postId: 'post_1' } })) as {
+      comments: unknown[]
+    }
+
+    expect(result.comments).toEqual([
+      {
+        id: 'comment_root',
+        createdAt: '2026-01-02T00:00:00.000Z',
+        replies: [{ id: 'comment_reply', createdAt: '2026-01-03T00:00:00.000Z', replies: [] }],
+      },
+    ])
+  })
+})
+
 // ---------------------------------------------------------------------------
 // portal.ts — fetchPublicPosts
 // ---------------------------------------------------------------------------
 
 describe('portal.ts fetchPublicPosts — portal-visibility gate', () => {
-  it('returns empty result when private portal blocks the caller', async () => {
+  it('returns empty result when private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthenticated' })
     const h = await loadModule(PORTAL)
     const result = (await h[FETCH_PUBLIC_POSTS]({ data: { sort: 'top' } })) as {
@@ -566,7 +616,7 @@ describe('portal.ts fetchPublicPosts — portal-visibility gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('portal.ts fetchPublicStatuses — portal-visibility gate', () => {
-  it('returns empty array when private portal blocks the caller', async () => {
+  it('returns empty array when private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
     const h = await loadModule(PORTAL)
     const result = await h[FETCH_PUBLIC_STATUSES]({ data: {} })
@@ -588,7 +638,7 @@ describe('portal.ts fetchPublicStatuses — portal-visibility gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('portal.ts fetchPublicTags — portal-visibility gate', () => {
-  it('returns empty array when private portal blocks the caller', async () => {
+  it('returns empty array when private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
     const h = await loadModule(PORTAL)
     const result = await h[FETCH_PUBLIC_TAGS]({ data: {} })
@@ -622,7 +672,7 @@ describe('portal.ts fetchPublicTags — portal-visibility gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('portal.ts fetchPublicRoadmaps — portal-visibility gate', () => {
-  it('returns empty array when private portal blocks the caller', async () => {
+  it('returns empty array when private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthenticated' })
     const h = await loadModule(PORTAL)
     const result = await h[FETCH_PUBLIC_ROADMAPS]({ data: {} })
@@ -689,7 +739,7 @@ describe('portal.ts fetchPublicRoadmaps — portal-visibility gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('portal.ts fetchPublicRoadmapPosts — portal-visibility gate', () => {
-  it('returns empty result when private portal blocks the caller', async () => {
+  it('returns empty result when private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
     const h = await loadModule(PORTAL)
     const result = (await h[FETCH_PUBLIC_ROADMAP_POSTS]({
@@ -731,7 +781,7 @@ describe('portal.ts fetchPublicRoadmapPosts — portal-visibility gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('changelog.ts getPublicChangelogFn — portal-visibility gate', () => {
-  it('throws NotFoundError when private portal blocks the caller', async () => {
+  it('throws NotFoundError when private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
     const h = await loadModule(CHANGELOG)
 
@@ -773,7 +823,7 @@ describe('changelog.ts getPublicChangelogFn — portal-visibility gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('changelog.ts listPublicChangelogsFn — portal-visibility gate', () => {
-  it('returns empty changelog list when private portal blocks the caller', async () => {
+  it('returns empty changelog list when private portal blocks the caller (J21)', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthenticated' })
     const h = await loadModule(CHANGELOG)
     const result = (await h[LIST_PUBLIC_CHANGELOGS]({ data: { limit: 10 } })) as {
@@ -829,5 +879,42 @@ describe('changelog.ts listPublicChangelogsFn — portal-visibility gate', () =>
     }
     expect(result.items).toHaveLength(1)
     expect(result.items[0].id).toBe('cl_2')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// changelog.ts — the changelog audience setting, behind the portal gate
+// ---------------------------------------------------------------------------
+
+describe('changelog.ts — a changelog restricted to signed-in users (J21)', () => {
+  /** The workspace restricts its changelog to signed-in users, for the next read. */
+  async function changelogForSignedInUsersOnly() {
+    const { db } = await import('@/lib/server/db')
+    vi.mocked(db.query.settings.findFirst).mockResolvedValueOnce({
+      id: 'workspace_1',
+      metadata: JSON.stringify({ changelogSettings: { audience: 'authenticated' } }),
+    } as never)
+  }
+
+  it('answers an entry as not found to an anonymous visitor the portal admits (J21)', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    await changelogForSignedInUsersOnly()
+    const h = await loadModule(CHANGELOG)
+
+    await expect(h[GET_PUBLIC_CHANGELOG]({ data: { id: 'cl_1' } })).rejects.toMatchObject({
+      code: 'CHANGELOG_NOT_FOUND',
+    })
+    expect(mockGetPublicChangelogById).not.toHaveBeenCalled()
+  })
+
+  it('lists nothing to an anonymous visitor the portal admits (J21)', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    await changelogForSignedInUsersOnly()
+    const h = await loadModule(CHANGELOG)
+
+    const result = await h[LIST_PUBLIC_CHANGELOGS]({ data: { limit: 10 } })
+
+    expect(result).toEqual({ items: [], nextCursor: null, hasMore: false })
+    expect(mockListPublicChangelogs).not.toHaveBeenCalled()
   })
 })

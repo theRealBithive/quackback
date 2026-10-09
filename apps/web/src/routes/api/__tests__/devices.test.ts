@@ -48,22 +48,29 @@ describe('POST /api/devices', () => {
   })
 
   it('400s on an unknown platform', async () => {
-    getSession.mockResolvedValue({ user: { id: 'user_1' } })
+    getSession.mockResolvedValue({ user: { id: 'user_1' }, session: { scope: 'dashboard' } })
     const res = await handleRegisterDevice(post({ token: 't', platform: 'windows' }))
     expect(res.status).toBe(400)
     expect(registerDevice).not.toHaveBeenCalled()
   })
 
   it('403s when the user has no principal', async () => {
-    getSession.mockResolvedValue({ user: { id: 'user_1' } })
+    getSession.mockResolvedValue({ user: { id: 'user_1' }, session: { scope: 'dashboard' } })
     findFirst.mockResolvedValue(undefined)
     const res = await handleRegisterDevice(post({ token: 't', platform: 'ios' }))
     expect(res.status).toBe(403)
     expect(registerDevice).not.toHaveBeenCalled()
   })
 
+  it('403s a widget-scoped session (J7)', async () => {
+    getSession.mockResolvedValue({ user: { id: 'user_1' }, session: { scope: 'widget' } })
+    const res = await handleRegisterDevice(post({ token: 't', platform: 'ios' }))
+    expect(res.status).toBe(403)
+    expect(registerDevice).not.toHaveBeenCalled()
+  })
+
   it('registers the device for the resolved principal', async () => {
-    getSession.mockResolvedValue({ user: { id: 'user_1' } })
+    getSession.mockResolvedValue({ user: { id: 'user_1' }, session: { scope: 'dashboard' } })
     findFirst.mockResolvedValue({ id: 'principal_1' })
     const res = await handleRegisterDevice(post({ token: '  tok-1  ', platform: 'android' }))
     expect(res.status).toBe(204)
@@ -84,15 +91,22 @@ describe('DELETE /api/devices', () => {
   })
 
   it('403s when the user has no principal', async () => {
-    getSession.mockResolvedValue({ user: { id: 'user_1' } })
+    getSession.mockResolvedValue({ user: { id: 'user_1' }, session: { scope: 'dashboard' } })
     findFirst.mockResolvedValue(undefined)
     const res = await handleUnregisterDevice(del({ token: 'tok-1' }))
     expect(res.status).toBe(403)
     expect(unregisterDevice).not.toHaveBeenCalled()
   })
 
+  it('403s a widget-scoped session', async () => {
+    getSession.mockResolvedValue({ user: { id: 'user_1' }, session: { scope: 'widget' } })
+    const res = await handleUnregisterDevice(del({ token: 'tok-1' }))
+    expect(res.status).toBe(403)
+    expect(unregisterDevice).not.toHaveBeenCalled()
+  })
+
   it('unregisters the token scoped to the resolved principal', async () => {
-    getSession.mockResolvedValue({ user: { id: 'user_1' } })
+    getSession.mockResolvedValue({ user: { id: 'user_1' }, session: { scope: 'dashboard' } })
     findFirst.mockResolvedValue({ id: 'principal_1' })
     const res = await handleUnregisterDevice(del({ token: 'tok-1' }))
     expect(res.status).toBe(204)

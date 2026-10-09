@@ -71,7 +71,8 @@ describe('the MCP protected-resource well-known documents', () => {
     expect(response.headers.get('vary')).toBe('Host')
     expect(await response.json()).toEqual({
       resource: 'https://feedback.example.com/api/mcp',
-      authorization_servers: ['https://feedback.example.com'],
+      // The issuer, not the bare origin: RFC 8414 clients compare the two (#583).
+      authorization_servers: ['https://feedback.example.com/api/auth'],
       bearer_methods_supported: ['header'],
       scopes_supported: [...MCP_FIRST_CONNECT_SCOPES],
     })

@@ -51,7 +51,7 @@ describe('the namespaces the i18n gate is declared to have translated (I12)', ()
 })
 
 describe('the files the i18n gate is declared to hold no text of their own (I16)', () => {
-  it('claims the editor and the five primitives beside it, and nothing else yet', () => {
+  it('claims the editor, the five primitives beside it and the widget handoff page, and nothing else yet', () => {
     // The three shadcn-generated primitives -- dialog, sheet, select -- are
     // deliberately absent. Their words are `sr-only` and reach a reader
     // through the caller, so they are claimed with the admin shell, where
@@ -63,6 +63,7 @@ describe('the files the i18n gate is declared to hold no text of their own (I16)
       'apps/web/src/components/ui/quackback-embed-extension.tsx',
       'apps/web/src/components/ui/datetime-picker.tsx',
       'apps/web/src/components/ui/breadcrumbs.tsx',
+      'apps/web/src/routes/auth.widget-handoff.tsx',
     ])
   })
 

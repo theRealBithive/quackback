@@ -101,7 +101,9 @@ export default defineConfig({
     // Bind every interface and wait on the health probe. Vite's default
     // localhost can be IPv6-only, and the first homepage request can 503
     // while Nitro is still coming up (`Vite environment "nitro" is unavailable`).
-    command: 'bun --env-file=../../.env vite dev --host 0.0.0.0 --port 3000',
+    // E2E_HARNESS=1 turns on the /e2e/widget host page the widget specs drive
+    // (J31); without it the page does not exist.
+    command: 'E2E_HARNESS=1 bun --env-file=../../.env vite dev --host 0.0.0.0 --port 3000',
     url: `${baseURL}/api/health/ready`,
     reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === '1' || !process.env.CI,
     timeout: 180 * 1000,

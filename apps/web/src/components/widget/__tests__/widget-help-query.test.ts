@@ -19,9 +19,9 @@ import { INITIAL_SESSION_VERSION } from '@/lib/client/hooks/use-widget-vote'
 
 const listPublicCategoriesFn = vi.fn(async () => [{ id: 'cat_public' }])
 const listPublicArticlesForCategoryFn = vi.fn(async () => [{ slug: 'pricing' }])
-vi.mock('@/lib/server/functions/help-center', () => ({
-  listPublicCategoriesFn: (...args: unknown[]) => listPublicCategoriesFn(...(args as [])),
-  listPublicArticlesForCategoryFn: (...args: unknown[]) =>
+vi.mock('@/lib/server/functions/widget/help', () => ({
+  widgetListPublicCategoriesFn: (...args: unknown[]) => listPublicCategoriesFn(...(args as [])),
+  widgetListPublicArticlesForCategoryFn: (...args: unknown[]) =>
     listPublicArticlesForCategoryFn(...(args as [])),
 }))
 

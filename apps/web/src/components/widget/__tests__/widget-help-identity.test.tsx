@@ -25,6 +25,9 @@ vi.mock('../widget-auth-provider', () => ({
   useWidgetAuth: () => ({
     sessionVersion: auth.sessionVersion,
     isIdentified: auth.isIdentified,
+    // #555: false only for a teammate signed into the widget, who must not be
+    // handed a portal session. Every visitor in this suite is a customer.
+    canPortalHandoff: true,
     hmacRequired: false,
     user: null,
     emitEvent: vi.fn(),
@@ -45,11 +48,12 @@ vi.mock('@/lib/client/widget-bridge', () => ({ sendToHost: (msg: unknown) => sen
 const listPublicCategoriesFn = vi.fn()
 const listPublicArticlesForCategoryFn = vi.fn()
 const resolvePublicArticleRefFn = vi.fn()
-vi.mock('@/lib/server/functions/help-center', () => ({
-  listPublicCategoriesFn: (...args: unknown[]) => listPublicCategoriesFn(...(args as [])),
-  listPublicArticlesForCategoryFn: (...args: unknown[]) =>
+vi.mock('@/lib/server/functions/widget/help', () => ({
+  widgetListPublicCategoriesFn: (...args: unknown[]) => listPublicCategoriesFn(...(args as [])),
+  widgetListPublicArticlesForCategoryFn: (...args: unknown[]) =>
     listPublicArticlesForCategoryFn(...(args as [])),
-  resolvePublicArticleRefFn: (...args: unknown[]) => resolvePublicArticleRefFn(...(args as [])),
+  widgetResolvePublicArticleRefFn: (...args: unknown[]) =>
+    resolvePublicArticleRefFn(...(args as [])),
 }))
 
 // Ask AI and KB search are their own modules with their own suites; here only
@@ -279,8 +283,12 @@ describe('WidgetHelpDetail', () => {
     await waitFor(() => expect(sendToHost).toHaveBeenCalled())
     const { url } = sendToHost.mock.calls[0][0] as { url: string }
     // The locale the article resolved in, not the one that was asked for.
-    expect(url).toContain('/hc/de/articles/42-how-refunds-work')
-    expect(new URL(url).searchParams.get('ott')).toBe('ott-123')
+    // Since #555 an identified visitor reaches the portal through the
+    // handoff route, which carries the destination as `returnTo`.
+    const handoff = new URL(url)
+    expect(handoff.pathname).toBe('/auth/widget-handoff')
+    expect(handoff.searchParams.get('returnTo')).toContain('/hc/de/articles/42-how-refunds-work')
+    expect(handoff.searchParams.get('ott')).toBe('ott-123')
   })
 
   it('carries no token to the portal for an anonymous visitor (W8)', async () => {

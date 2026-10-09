@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 17x — Test suites are flaky under parallel load
+## 18x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -165,7 +165,18 @@ other run was changing underneath them. Two checkouts must not share the
 test database while either runs a full set; give the second one its own
 `DATABASE_URL` (the web config already reads it from the environment).
 
-## 7x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+Eighteenth, upstream batch J, at a load average of 40-49 with two other
+batches running: one full coverage run lost 12 suites to timeouts that all
+passed alone, and two of this batch's own tests needed an explicit timeout.
+New detail worth knowing: a fast-check property that times out **keeps
+running** into the next test of the same file, and its calls land on the
+shared hoisted mocks, so the next test fails an assertion it never caused
+(`widget-portal-gate.test.ts`: the property timed out, the following
+"keeps a private workspace closed" test then saw a call it had not made).
+Read a red test right after a timed-out property as the timeout, not as a
+second finding, and give a heavy property its own timeout.
+
+## 8x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
 `lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
 `error:03000098:digital envelope routines::invalid digest`. It is not the repo:
@@ -230,6 +241,13 @@ a forbidden request header; not verified. It cost a checkout of `main` and a
 second run to rule the batch out. Until it is fixed, treat these two failures
 as known on this machine and keep them out of any run whose coverage report
 matters.
+
+Sixth case, upstream batch J: the flag was passed, and the report was still
+lost. `--coverage.reportOnFailure` **without `=true`** does not turn the option
+on — the 861-file run ended `12 failed | 846 passed` after eighteen minutes and
+left `coverage/local/.tmp` behind with no `coverage-final.json`. Only the
+spelled-out `--coverage.reportOnFailure=true`, as in the block above, works.
+Both fixes above would have made the spelling irrelevant.
 
 ## 6x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -845,6 +863,36 @@ Third hit: the same flaky `settings.test.ts` timeout, the same
 diff gate. Leaving the known flaky files out of the measuring run and running
 them alone as a control is still the only reliable sequence.
 
+## 3x — A picked upstream suite is written against module names from commits we skipped
+
+Three suites in upstream batch F failed for reasons that had nothing to do with
+the fix they came with. `widget-home-compose-board.test.tsx` (#577) mocked
+`useWidgetMediaUpload` and `widget/posts`' `widgetCreatePublicPostFn`, names
+upstream introduced later with #566 and the widget-posts move; here they are
+`useWidgetImageUpload` and `public-posts`' `createPublicPostFn`, so the mock
+answered nothing and the submit never reached it. `rich-text-editor-enter.test.tsx`
+(#567) rendered without an `IntlProvider`, which the fork's editor needs. And
+the typecheck, not any test, found three fork-only fixtures that build an
+`IdentityProvider` without the field #609 added. Each looked like a broken fix
+until the mock or fixture was read. After a pick, run its own suites first and
+read a failure's first line before the fix's code: `No "X" export is defined on
+the mock` and `Could not find required intl object` are the tells.
+
+Hit again in batch K: `@/test/server-fns-in-process`, `use-widget-file-upload`
+and `finishIdentityOnboarding` came with #688, #644 and #656 from commits we
+had not picked. Typecheck finds them at once (`Cannot find module`); grep the
+picked test files for imports before running anything.
+
+The reverse hit in batch J: upstream #555 renamed the widget's server
+functions (`widget/posts`, `widget/changelog`, `widget/help`, a visitor RPC
+module) and moved handler bodies into `createServerOnlyFn`. Thirteen _fork_
+suites mocked the old names and went red at once, with no typecheck error
+to point at them, because a `vi.mock` of a module nobody imports any more
+is legal. The tells were the same two first lines, plus
+`No "createServerOnlyFn" export is defined on the "@tanstack/react-start"
+mock`. After a pick that renames modules, grep the fork's suites for the
+old module paths before running the batch.
+
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
 `scripts/mutation-manifest.json` and the `toEqual` in
@@ -1006,25 +1054,15 @@ an equivalent until it was probed against the real database; recorded as one,
 it would have been a false excuse. Before writing an equivalence reason about
 what a library does, measure the library, not the stub in front of it.
 
-## 2x — A picked upstream suite is written against module names from commits we skipped
+## 1x — Upstream fixtures without a session audience read as dashboard upstream and as portal here
 
-Three suites in upstream batch F failed for reasons that had nothing to do with
-the fix they came with. `widget-home-compose-board.test.tsx` (#577) mocked
-`useWidgetMediaUpload` and `widget/posts`' `widgetCreatePublicPostFn`, names
-upstream introduced later with #566 and the widget-posts move; here they are
-`useWidgetImageUpload` and `public-posts`' `createPublicPostFn`, so the mock
-answered nothing and the submit never reached it. `rich-text-editor-enter.test.tsx`
-(#567) rendered without an `IntlProvider`, which the fork's editor needs. And
-the typecheck, not any test, found three fork-only fixtures that build an
-`IdentityProvider` without the field #609 added. Each looked like a broken fix
-until the mock or fixture was read. After a pick, run its own suites first and
-read a failure's first line before the fix's code: `No "X" export is defined on
-the mock` and `Could not find required intl object` are the tells.
-
-Hit again in batch K: `@/test/server-fns-in-process`, `use-widget-file-upload`
-and `finishIdentityOnboarding` came with #688, #644 and #656 from commits we
-had not picked. Typecheck finds them at once (`Cannot find module`); grep the
-picked test files for imports before running anything.
+The fork reads a session with no `scope` as `portal` (R12); upstream reads it
+as `dashboard`. Upstream suites build sessions as `{ user: { id } }` and
+expect them to pass a dashboard-only gate, so every new dashboard-only check
+an upstream pick adds turns its own fixtures red here (batch J:
+`/api/devices`, three tests answering 403). The fix is to give the fixture
+`session: { scope: 'dashboard' }`, never to relax the gate. Expect it on
+every pick that adds a scope check.
 
 ## 2x — A date fixture that happens to fall on the real "today" collides with the preset labels
 
@@ -1210,6 +1248,32 @@ the SQL file to the new number, extend the `migrator-gate` span, regenerate
 `packages/db/drizzle/meta/_journal.json` **before** the pick rather than after
 the drift check, which passes either way because it too starts from an empty
 database. Every future back-merge that carries a migration will hit this.
+
+## 1x — Under `vite dev`, a `<script src>` pointing at a server route answers `Cannot GET`
+
+Nitro's dev pre-middleware treats a request with `sec-fetch-dest: script` and
+a `.js` extension as a static asset, and Vite then answers 404 before the
+router sees it. `curl` without that header gets 200, so the route looks fine
+from a shell. Upstream batch J's e2e harness loads the widget through
+`<script src="/api/widget/sdk.js">`, and CI's e2e-smoke job runs `vite dev`,
+so the identified widget specs could never see a widget: 0/6 locally until
+the dev-only plugin in `vite.config.ts` (the one already letting
+`/api/storage/` through) let that path through too. It cost three e2e runs
+and a look at the screenshots to find. Reproduce with
+`curl -H 'Sec-Fetch-Dest: script' -H 'Accept: */*' <url>`, not a bare curl.
+Any new asset-shaped server route needs adding to the same list.
+
+## 1x — vitest 4.1.11 hands a mocked module only to the first of several concurrent dynamic imports
+
+Measured by a probe in batch J: three parallel `await import()`s of a module
+mocked with `vi.mock` returned the mock for the first and the real module for
+the other two, even after the module had been imported once before.
+Sequential imports all get the mock. The widget index loader imports
+`widget/conversation` three times in `Promise.all`, so a test of it ran the
+real team-avatars function, which failed, and the loader's `.catch` hid the
+failure. A mocked suite can therefore run real code without a red line.
+Where code under test fans out dynamic imports, mock the layer underneath as
+well, or assert something only the mock can produce.
 
 ## 1x — A Stryker survivor list is stale the moment you write a test against it
 

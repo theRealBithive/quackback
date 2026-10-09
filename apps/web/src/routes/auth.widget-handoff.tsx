@@ -35,52 +35,77 @@
  *     through this route cannot gain the widget grant.
  *   - identifyVerificationEnabled is also checked by the evaluator: email-capture
  *     widget sessions (HMAC not required) never reach the portal via this path.
+ *   - Teammate identities never receive a portal cookie. An existing dashboard
+ *     session is redirected to returnTo; otherwise handoff lands on portal
+ *     sign-in unsigned so a dashboard login is not replaced.
  */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { getRequestHeaders, setResponseHeader } from '@tanstack/react-start/server'
 import { z } from 'zod'
+import { FormattedMessage } from 'react-intl'
+import { PortalIntlProvider } from '@/components/portal-intl-provider'
+import { loadPortalIntl } from '@/lib/server/functions/locale'
+import { DEFAULT_LOCALE, type SupportedLocale } from '@/lib/shared/i18n'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
+import { buildSigninRedirect } from '@/lib/shared/auth-prompt'
 import type { UserId } from '@quackback/ids'
 
-/**
- * Look up the widget identification provenance for a session.
- *
- * Returns true only when the session has a `widget_identified_session`
- * row with `hmac_verified=true` — i.e. the session was created by
- * `/api/widget/identify` on the HMAC-verified path. Returns false when
- * the row is missing (session minted elsewhere — e.g. a portal email
- * signup that produced a generic BA OTT) OR when the row says the
- * identify happened on the email-capture path.
- *
- * The handoff route uses this to gate insertion of the
- * `widget_origin_session` marker — without it, any BA OTT could earn
- * the marker, breaking the chain of trust the portal-access widget
- * branch depends on.
- *
- * Exported for unit-test reach. Fails closed on DB errors — a query
- * hiccup must never be interpreted as "verified". Imports db lazily
- * so this file stays client-bundle-safe (the route file ends up in
- * the client bundle via routeTree.gen.ts).
- */
-export const isWidgetSessionHmacVerified = createServerOnlyFn(
-  async (sessionId: string): Promise<boolean> => {
+/** Skip the portal cookie for teammates so a dashboard login is not replaced. */
+export const isHandoffPrincipalTeammate = createServerOnlyFn(
+  async (userId: string): Promise<boolean> => {
     try {
       // oxlint-disable-next-line no-restricted-imports -- createServerOnlyFn body; stripped from the client graph
-      const { db, widgetIdentifiedSession, eq } = await import('@/lib/server/db')
-      const row = await db.query.widgetIdentifiedSession.findFirst({
-        where: eq(widgetIdentifiedSession.sessionId, sessionId),
-        columns: { hmacVerified: true },
+      const { db, principal, eq } = await import('@/lib/server/db')
+      // oxlint-disable-next-line no-restricted-imports -- createServerOnlyFn body; stripped from the client graph
+      const { isTeamMember } = await import('@/lib/shared/roles')
+      const row = await db.query.principal.findFirst({
+        where: eq(principal.userId, userId as UserId),
+        columns: { role: true },
       })
-      return row?.hmacVerified === true
+      return isTeamMember(row?.role)
     } catch (err) {
       // oxlint-disable-next-line no-restricted-imports -- createServerOnlyFn body; stripped from the client graph
       const { logger } = await import('@/lib/server/logger')
-      logger.child({ component: 'widget-handoff' }).error({ err }, 'provenance lookup failed')
-      return false
+      logger
+        .child({ component: 'widget-handoff' })
+        .error({ err }, 'teammate lookup failed; skipping portal cookie')
+      return true
     }
   }
 )
+
+/** What the browser already holds, as far as the handoff needs to know. */
+type ExistingBrowserSession = 'dashboard' | 'other' | 'none' | 'unknown'
+
+/**
+ * The audience of the session the browser arrived with. A read that fails is
+ * `unknown`, never `none`: the caller treats it like a dashboard login.
+ */
+const readExistingBrowserSession = createServerOnlyFn(async (): Promise<ExistingBrowserSession> => {
+  // oxlint-disable-next-line no-restricted-imports -- createServerOnlyFn body; stripped from the client graph
+  const { getSession } = await import('@/lib/server/auth/session')
+  // oxlint-disable-next-line no-restricted-imports -- createServerOnlyFn body; stripped from the client graph
+  const { toSessionScope } = await import('@/lib/shared/roles')
+  try {
+    const existing = await getSession()
+    if (!existing?.user) return 'none'
+    if (toSessionScope(existing.session.scope) === 'dashboard') return 'dashboard'
+    return 'other'
+  } catch {
+    return 'unknown'
+  }
+})
+
+/** The audit reason for a handoff that installs no portal session. */
+function handoffRefusalReason(input: {
+  isTeammate: boolean
+  existingSession: ExistingBrowserSession
+}): string {
+  if (input.isTeammate) return 'teammate_identity'
+  if (input.existingSession === 'dashboard') return 'dashboard_session_present'
+  return 'existing_session_unknown'
+}
 
 // ---------------------------------------------------------------------------
 // Search schema
@@ -95,14 +120,19 @@ const searchSchema = z.object({
 // Loader data type
 // ---------------------------------------------------------------------------
 
-type LoaderData = { status: 'invalid' | 'expired' | 'error' }
+type LoaderData = {
+  status: 'invalid' | 'expired' | 'error'
+  locale: SupportedLocale
+  messages: Record<string, string>
+}
 
 // ---------------------------------------------------------------------------
 // Server fn: server-side OTT consumption
 // ---------------------------------------------------------------------------
 
 type HandoffResult =
-  { kind: 'redirect'; to: string } | { kind: 'error'; status: 'invalid' | 'expired' | 'error' }
+  | { kind: 'redirect'; to: string; search?: Record<string, string> }
+  | { kind: 'error'; status: 'invalid' | 'expired' | 'error' }
 
 /**
  * Verify the OTT against BA, forward Set-Cookie to the browser, insert the
@@ -229,7 +259,10 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
       return { kind: 'error', status: 'invalid' }
     }
 
-    const provenanceOk = await isWidgetSessionHmacVerified(sessionId)
+    // The same check the widget endpoints use to lift the portal gate (J22):
+    // only a session minted by a signed identify passes.
+    const { hasSignedWidgetIdentity } = await import('@/lib/server/functions/widget-portal-gate')
+    const provenanceOk = await hasSignedWidgetIdentity(sessionId)
     if (!provenanceOk) {
       // The OTT was valid, but the session was not produced by an
       // HMAC-verified widget identify. Refuse the upgrade and audit.
@@ -245,6 +278,33 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
         metadata: { reason: 'unverified_provenance' },
       })
       return { kind: 'error', status: 'invalid' }
+    }
+
+    // Never install a portal cookie over a dashboard login. Teammate OTTs
+    // (and a customer OTT while a dashboard cookie is present) skip the
+    // cookie. An already-authenticated dashboard session goes straight to
+    // returnTo so "View on board" lands on the post/article; unauthenticated
+    // teammate OTTs still hit the sign-in landing.
+    //
+    // A browser session that cannot be read counts as one that might be a
+    // dashboard login (J13): the handoff installs nothing over it.
+    const existingSession = await readExistingBrowserSession()
+    const existingIsDashboard = existingSession === 'dashboard'
+    const existingIsUnknown = existingSession === 'unknown'
+    const isTeammate = await isHandoffPrincipalTeammate(userId)
+    if (isTeammate || existingIsDashboard || existingIsUnknown) {
+      await recordAuditEvent({
+        event: 'portal.widget_handshake.invalid',
+        outcome: 'failure',
+        actor: { userId: userId as UserId },
+        target: { type: 'session', id: sessionId },
+        metadata: { reason: handoffRefusalReason({ isTeammate, existingSession }) },
+      })
+      if (existingIsDashboard || existingIsUnknown) {
+        return { kind: 'redirect', to: returnTo }
+      }
+      const landing = buildSigninRedirect(returnTo)
+      return { kind: 'redirect', to: landing.to, search: landing.search }
     }
 
     // Promote to portal audience so the cookie can never satisfy team gates.
@@ -293,7 +353,7 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
 
 export const Route = createFileRoute('/auth/widget-handoff')({
   validateSearch: searchSchema.parse,
-  loader: async ({ location }): Promise<LoaderData> => {
+  loader: async ({ location, context }): Promise<LoaderData> => {
     // The search schema is shared between validateSearch and the server fn's
     // validator, so location.search is shape-compatible with the fn's
     // expected input.
@@ -302,9 +362,12 @@ export const Route = createFileRoute('/auth/widget-handoff')({
       data: { ott: search.ott, returnTo: search.returnTo },
     })
     if (result.kind === 'redirect') {
-      throw redirect({ to: result.to })
+      throw redirect({ to: result.to, search: result.search })
     }
-    return { status: result.status }
+    // The error page is a route of its own, outside every layout that mounts
+    // a provider, so it loads its own slice the way `/auth/auth-complete` does.
+    const intl = await loadPortalIntl(context.resolvedLocale ?? DEFAULT_LOCALE)
+    return { status: result.status, locale: intl.locale, messages: intl.messages }
   },
   component: WidgetHandoffErrorPage,
 })
@@ -314,19 +377,41 @@ export const Route = createFileRoute('/auth/widget-handoff')({
 // ---------------------------------------------------------------------------
 
 function WidgetHandoffErrorPage() {
-  const data = Route.useLoaderData()
+  const { status, locale, messages } = Route.useLoaderData()
 
   return (
-    <PageShell>
-      <Card>
-        <h1 className="text-xl font-semibold tracking-tight">Sign-in link expired</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {data.status === 'error'
-            ? 'Something went wrong while processing your sign-in link. Please reopen the widget and try again.'
-            : 'This sign-in link has expired or has already been used. Please reopen the widget to get a new link.'}
-        </p>
-      </Card>
-    </PageShell>
+    <PortalIntlProvider locale={locale} messages={messages}>
+      <PageShell>
+        <Card>
+          <h1 className="text-xl font-semibold tracking-tight">
+            <FormattedMessage
+              id="portal.auth.widgetHandoff.title"
+              defaultMessage="Sign-in link expired"
+            />
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            <WidgetHandoffErrorBody status={status} />
+          </p>
+        </Card>
+      </PageShell>
+    </PortalIntlProvider>
+  )
+}
+
+function WidgetHandoffErrorBody({ status }: { status: LoaderData['status'] }) {
+  if (status === 'error') {
+    return (
+      <FormattedMessage
+        id="portal.auth.widgetHandoff.errorBody"
+        defaultMessage="Something went wrong while processing your sign-in link. Please reopen the widget and try again."
+      />
+    )
+  }
+  return (
+    <FormattedMessage
+      id="portal.auth.widgetHandoff.expiredBody"
+      defaultMessage="This sign-in link has expired or has already been used. Please reopen the widget to get a new link."
+    />
   )
 }
 
@@ -349,6 +434,7 @@ function PageShell({ children }: { children: React.ReactNode }) {
       <div className="relative w-full max-w-md py-12">
         <div className="mb-8 flex items-center justify-center gap-2">
           <img src="/logo.png" alt="" className="h-6 w-6 rounded" />
+          {/* i18n-allow: the product name, the same in every language */}
           <span className="text-sm font-medium text-muted-foreground">Quackback</span>
         </div>
         {children}

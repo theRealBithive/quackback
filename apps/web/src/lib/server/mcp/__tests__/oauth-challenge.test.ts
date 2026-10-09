@@ -47,6 +47,7 @@ describe('MCP protected resource metadata', () => {
   it('advertises only the three first-connect read scopes', () => {
     const doc = mcpProtectedResourceMetadata('https://feedback.example.com')
     expect(doc.resource).toBe('https://feedback.example.com/api/mcp')
+    expect(doc.authorization_servers).toEqual(['https://feedback.example.com/api/auth'])
     expect(doc.scopes_supported).toEqual([...MCP_FIRST_CONNECT_SCOPES])
     expect(doc.scopes_supported).toEqual(['read:feedback', 'read:article', 'read:chat'])
     expect(doc.scopes_supported).not.toContain('offline_access')
@@ -59,8 +60,12 @@ describe('MCP protected resource metadata', () => {
     // register and authorize. An empty list leaves it with nowhere to go, and
     // a `bearer_methods_supported` that does not say `header` invites the
     // client to put the access token in a query string.
+    // The entry is the issuer identifier, which Better Auth serves as
+    // `{origin}/api/auth`: RFC 8414 clients reject metadata whose `issuer`
+    // differs from the advertised one, so the bare origin broke discovery
+    // (upstream #583).
     const doc = mcpProtectedResourceMetadata('https://feedback.example.com')
-    expect(doc.authorization_servers).toEqual(['https://feedback.example.com'])
+    expect(doc.authorization_servers).toEqual(['https://feedback.example.com/api/auth'])
     expect(doc.bearer_methods_supported).toEqual(['header'])
   })
 

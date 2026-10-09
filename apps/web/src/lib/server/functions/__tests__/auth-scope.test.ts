@@ -23,10 +23,12 @@
  *       although nothing identified them.
  *   R6  The one-time-token handoff promotes the session to the portal audience
  *       before the cookie is set, not after.
- *   R7  Read through a bare authentication helper, a widget or portal session
- *       presents its principal as an ordinary user with no permissions, so a
- *       policy actor or a team-membership check built from it cannot reach
- *       team data.
+ *   R7  Read through a bare authentication helper, a portal session presents
+ *       its principal as an ordinary user with no permissions, so a policy
+ *       actor or a team-membership check built from it cannot reach team data.
+ *       (Until 2026-10-08 R7 also spoke for the widget audience. J9 below
+ *       replaced it there, by the user's decision on that date: a widget
+ *       session is no longer presented at all on the site's helpers.)
  *   R8  A realtime stream token carries the audience of the session that
  *       minted it, and a token naming no audience is refused.
  *   R9  A widget or portal session is refused by the import and export API and
@@ -80,8 +82,18 @@
  *   S7 If the retag cannot be written, the session stays as it was and the
  *      request goes on.
  *
- * In this fork `requireAuth` does not refuse a widget session outright (that
- * is upstream #555, not picked), so S4 is pinned as authority, not refusal.
+ * Batch J (upstream #555) picks the widget refusal. The full J list is in the
+ * batch J modules (e.g. functions/__tests__/widget-portal-gate.test.ts); the
+ * clause pinned here, verbatim from the confirmed list, is:
+ *
+ *   J9  On the site's endpoints a widget session is refused outright; where
+ *       reading the session is optional, it counts as signed out. (This
+ *       replaces R7 for the widget audience; R7 keeps speaking for the portal
+ *       audience only.)
+ *
+ * With J9 in place S4 is pinned as both: a widget anonymous session is
+ * refused, and a portal anonymous session carries no team authority. S7 is
+ * read through J9 as well — see the docstring on its test.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
@@ -140,6 +152,7 @@ vi.mock('@/lib/server/domains/segments/segment-membership.service', () => ({
 }))
 
 import {
+  assertDashboardScope,
   assertPermission,
   getOptionalAuth,
   policyActorFromAuth,
@@ -153,6 +166,7 @@ import {
   toSessionScope,
 } from '@/lib/shared/roles'
 import { assignSessionScope } from '@/lib/server/auth/session-audience'
+import { ANONYMOUS_ACTOR } from '@/lib/server/policy/types'
 
 /** The three audiences a session may legitimately carry. */
 const KNOWN_SCOPES = ['dashboard', 'widget', 'portal'] as const
@@ -200,7 +214,7 @@ describe('requireAuth at a permission gate (R2, R3)', () => {
     mockGetSession.mockResolvedValue(sessionWithScope('widget'))
 
     await expect(requireAuth({ permission: PERMISSIONS.SETTINGS_MANAGE })).rejects.toThrow(
-      /dashboard session/
+      /Widget sessions cannot access this resource/
     )
   })
 
@@ -227,9 +241,16 @@ describe('requireAuth at a permission gate (R2, R3)', () => {
         fc.oneof(fc.constantFrom('widget', 'portal'), unknownScope),
         async (scope) => {
           mockGetSession.mockResolvedValue(sessionWithScope(scope))
+          // Since #555 a widget session is refused before the permission is
+          // looked at, with its own message; every other audience reaches the
+          // dashboard-only permission gate.
+          const readsAsWidget = toSessionScope(scope) === 'widget'
+          const expectedRefusal = readsAsWidget
+            ? /Widget sessions cannot access this resource/
+            : /dashboard session/
 
           await expect(requireAuth({ permission: PERMISSIONS.SETTINGS_MANAGE })).rejects.toThrow(
-            /dashboard session/
+            expectedRefusal
           )
         }
       ),
@@ -239,12 +260,21 @@ describe('requireAuth at a permission gate (R2, R3)', () => {
 })
 
 describe('requireAuth without a permission (R2, R7)', () => {
-  it('stays cross-plane but strips team authority from a widget session (R2)', async () => {
+  it('refuses a widget session outright, whatever role its principal holds (J9)', async () => {
+    // Was R2's "stays cross-plane but strips team authority": J9 replaced the
+    // widget half of R7 on 2026-10-08, so a widget session is not presented
+    // with reduced authority any more — it is not presented at all.
     mockGetSession.mockResolvedValue(sessionWithScope('widget'))
+
+    await expect(requireAuth()).rejects.toThrow(/Widget sessions cannot access this resource/)
+  })
+
+  it('strips team authority from a portal session but lets it through (R2, R7)', async () => {
+    mockGetSession.mockResolvedValue(sessionWithScope('portal'))
 
     const auth = await requireAuth()
 
-    expect(auth.scope).toBe('widget')
+    expect(auth.scope).toBe('portal')
     expect(auth.principal.role).toBe('user')
     expect(auth.permissions).toEqual([])
   })
@@ -258,19 +288,30 @@ describe('requireAuth without a permission (R2, R7)', () => {
     expect(auth.permissions).toContain(PERMISSIONS.SETTINGS_MANAGE)
   })
 
-  it('never reports a team member on a non-dashboard audience (R7, R12)', async () => {
+  it('never reports a team member on a non-dashboard audience (R7, R12, J9)', async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.oneof(fc.constantFrom('widget', 'portal'), unknownScope),
         async (scope) => {
           mockGetSession.mockResolvedValue(sessionWithScope(scope))
 
-          const auth = await requireAuth()
+          // The conservation law across every non-dashboard audience: the
+          // caller either is refused as a widget session (J9) or comes back
+          // with no team role and no permissions (R7, R12). Nothing else —
+          // no other error, and never a team member.
+          const outcome = await requireAuth().then(
+            (auth) => ({ auth, error: null }),
+            (error: Error) => ({ auth: null, error })
+          )
 
-          // The conservation law across every audience: authority is carried by
-          // the scope, never by the role the principal row happens to hold.
-          expect(isTeamMember(auth.principal.role)).toBe(false)
-          expect(auth.permissions).toEqual([])
+          if (outcome.auth === null) {
+            expect(outcome.error?.message).toMatch(/Widget sessions cannot access this resource/)
+            expect(toSessionScope(scope)).toBe('widget')
+            return
+          }
+          expect(toSessionScope(scope)).not.toBe('widget')
+          expect(isTeamMember(outcome.auth.principal.role)).toBe(false)
+          expect(outcome.auth.permissions).toEqual([])
         }
       ),
       { numRuns: 200 }
@@ -345,13 +386,26 @@ describe('anonymous sessions carry no team authority, whichever surface minted t
             type: 'anonymous',
           })
 
-          const auth = await requireAuth()
+          const mintedScope = toSessionScope(minted?.data.scope)
+          expect(['portal', 'widget']).toContain(mintedScope)
 
-          expect(['portal', 'widget']).toContain(auth.scope)
-          expect(isTeamMember(auth.principal.role)).toBe(false)
-          expect(auth.permissions).toEqual([])
+          // Unguarded across both surfaces: whatever the marker, the caller
+          // either is refused as a widget session (J9) or carries no team
+          // role and no permissions (S4). A permission gate refuses both.
+          const outcome = await requireAuth().then(
+            (auth) => ({ auth, error: null }),
+            (error: Error) => ({ auth: null, error })
+          )
+          if (outcome.auth === null) {
+            expect(mintedScope).toBe('widget')
+            expect(outcome.error?.message).toMatch(/Widget sessions cannot access this resource/)
+          } else {
+            expect(mintedScope).toBe('portal')
+            expect(isTeamMember(outcome.auth.principal.role)).toBe(false)
+            expect(outcome.auth.permissions).toEqual([])
+          }
           await expect(requireAuth({ permission: PERMISSIONS.SETTINGS_MANAGE })).rejects.toThrow(
-            /dashboard session/
+            /Access denied/
           )
         }
       ),
@@ -402,9 +456,9 @@ describe('a portal visitor stranded on a widget-tagged anonymous session (S5, S6
     })
     mockGetSession.mockResolvedValue(anonymousSession('widget', true))
 
-    const auth = await requireAuth()
-
-    expect(auth.scope).toBe('widget')
+    // A retagged session would read as portal and pass; refused as a widget
+    // session is how an untouched tag shows through the gate since #555.
+    await expect(requireAuth()).rejects.toThrow(/Widget sessions cannot access this resource/)
     expect(mockDbUpdate).not.toHaveBeenCalled()
   })
 
@@ -412,21 +466,41 @@ describe('a portal visitor stranded on a widget-tagged anonymous session (S5, S6
     request.headers = new Headers({ cookie: 'better-auth.session_token=tok.sig' })
     mockGetSession.mockResolvedValue(anonymousSession('widget', false))
 
-    const auth = await requireAuth()
-
-    expect(auth.scope).toBe('widget')
+    // A retagged session would read as portal and pass; refused as a widget
+    // session is how an untouched tag shows through the gate since #555.
+    await expect(requireAuth()).rejects.toThrow(/Widget sessions cannot access this resource/)
     expect(mockDbUpdate).not.toHaveBeenCalled()
   })
 
-  it('goes on as a widget session when the retag cannot be written (S7)', async () => {
+  /**
+   * S7, read through J9. S7 says the session stays as it was and the request
+   * goes on; the session as it was is a widget session, and J9 says a widget
+   * session is refused outright on the site's endpoints. So the contract
+   * implies refusal here, not service: the request goes on (no crash, no
+   * escaped database error) and meets the widget refusal like any other
+   * widget session.
+   *
+   * Pinned through `requireAuth` on purpose, by its message. Through
+   * `getOptionalAuth` a refused widget session, a crash inside the session
+   * read and an escaped write error all look the same (null); the widget
+   * refusal message is the only outcome that says the retag failed quietly
+   * and the session went on unchanged.
+   */
+  it('goes on as the widget session it was when the retag cannot be written, and is refused (S7, J9)', async () => {
     request.headers = new Headers({ cookie: 'better-auth.session_token=tok.sig' })
     mockGetSession.mockResolvedValue(anonymousSession('widget', true))
     mockRetagWhere.mockRejectedValue(new Error('connection terminated'))
 
-    const auth = await requireAuth()
+    await expect(requireAuth()).rejects.toThrow(/Widget sessions cannot access this resource/)
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1)
+  })
 
-    expect(auth.scope).toBe('widget')
-    expect(auth.principal.id).toBe('principal_anon')
+  it('counts as signed out on an optional read when the retag cannot be written (S7, J9)', async () => {
+    request.headers = new Headers({ cookie: 'better-auth.session_token=tok.sig' })
+    mockGetSession.mockResolvedValue(anonymousSession('widget', true))
+    mockRetagWhere.mockRejectedValue(new Error('connection terminated'))
+
+    await expect(getOptionalAuth()).resolves.toBeNull()
   })
 
   it('answers as signed out, without a retag, when there is no session at all', async () => {
@@ -438,13 +512,23 @@ describe('a portal visitor stranded on a widget-tagged anonymous session (S5, S6
   })
 })
 
-describe('getOptionalAuth (R2, R7)', () => {
-  it('downgrades a promoted widget principal to the portal tier (R3)', async () => {
+describe('getOptionalAuth (R2, R7, J9)', () => {
+  it('counts a widget session as signed out, even after its principal was promoted (R3, J9)', async () => {
+    // Was "downgrades a promoted widget principal to the portal tier": with J9
+    // the promoted principal gains nothing on that session because the
+    // session is not read at all.
     mockGetSession.mockResolvedValue(sessionWithScope('widget'))
 
-    const auth = await getOptionalAuth()
+    expect(await getOptionalAuth()).toBeNull()
+    expect(mockPrincipalFindFirst).not.toHaveBeenCalled()
+    expect(ensurePrincipalForUser).not.toHaveBeenCalled()
+  })
 
-    expect(auth?.scope).toBe('widget')
+  it('downgrades a promoted portal principal to the portal tier (R3, R7)', async () => {
+    mockGetSession.mockResolvedValue(sessionWithScope('portal'))
+
+    const auth = await getOptionalAuth()
+    expect(auth?.scope).toBe('portal')
     expect(auth?.principal.role).toBe('user')
     expect(auth?.permissions).toEqual([])
   })
@@ -487,13 +571,21 @@ describe('assertPermission (R2)', () => {
   })
 })
 
-describe('the policy actor built from a scoped session (R7)', () => {
-  it('reaches the policy engine as an ordinary user on a widget session', async () => {
-    mockGetSession.mockResolvedValue(sessionWithScope('widget'))
+describe('the policy actor built from a scoped session (R7, J9)', () => {
+  it('reaches the policy engine as an ordinary user on a portal session (R7)', async () => {
+    mockGetSession.mockResolvedValue(sessionWithScope('portal'))
 
     const actor = await policyActorFromAuth(await requireAuth())
 
     expect(actor.role).toBe('user')
+  })
+
+  it('reaches it as an anonymous actor from a widget session read optionally (J9)', async () => {
+    mockGetSession.mockResolvedValue(sessionWithScope('widget'))
+
+    const actor = await policyActorFromAuth(await getOptionalAuth())
+
+    expect(actor).toBe(ANONYMOUS_ACTOR)
   })
 
   it('reaches it as an admin on a dashboard session', async () => {
@@ -538,6 +630,17 @@ describe('toSessionScope (R12)', () => {
       ),
       { numRuns: 500 }
     )
+  })
+})
+
+describe('assertDashboardScope', () => {
+  it('rejects widget and portal', () => {
+    expect(() => assertDashboardScope({ scope: 'widget' })).toThrow(/dashboard session/)
+    expect(() => assertDashboardScope({ scope: 'portal' })).toThrow(/dashboard session/)
+  })
+
+  it('allows dashboard', () => {
+    expect(() => assertDashboardScope({ scope: 'dashboard' })).not.toThrow()
   })
 })
 

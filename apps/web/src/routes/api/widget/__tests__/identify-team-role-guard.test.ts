@@ -1,16 +1,14 @@
 /**
- * Staff/admin identity guard on POST /api/widget/identify (GH audit A7#3).
+ * POST /api/widget/identify — verified identify for any matching account,
+ * including teammates, plus the GH #300 / A6 pins.
  *
- * Background: the route mints a normal Better Auth session token and returns
- * it as a Bearer. The `bearer()` plugin is registered globally, so that token
- * satisfies `auth.api.getSession()` everywhere — including the admin-only
- * `requireAuth({ roles: ['admin'] })` path. A signed ssoToken vouches for
- * email/sub matching, but never for role: if a customer's signed identity
- * collides with an existing teammate account, identify must refuse rather
- * than hand an embedding origin a session that can authorize dashboard/admin
- * APIs. Also covers: an id+email body must never mint a session regardless
- * of whose email it names (GH issue #300), and the atomic (SQL, not
- * JS-merge) metadata write.
+ * Widget sessions are audience-scoped (`scope=widget`) and cannot satisfy
+ * team/permission gates, so a signed ssoToken that resolves to an admin or
+ * member mints a customer widget session instead of 403ing. The stored
+ * teammate role is left alone; dashboard profile fields are not overwritten
+ * from the host-app JWT. Also covers: an id+email body must never mint a
+ * session regardless of whose email it names (GH issue #300), and the
+ * atomic (SQL, not JS-merge) metadata write.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -18,6 +16,7 @@ const mockUserFindFirst = vi.fn()
 const mockPrincipalFindFirst = vi.fn()
 const mockSessionFindFirst = vi.fn()
 const mockInsert = vi.fn()
+const mockInsertValues = vi.fn()
 const mockUpdate = vi.fn()
 const mockUpdateSet = vi.fn()
 const mockVerifyJWT = vi.fn()
@@ -39,7 +38,8 @@ vi.mock('@/lib/server/db', async (importOriginal) => ({
     insert: (...args: unknown[]) => {
       mockInsert(...args)
       return {
-        values: () => {
+        values: (v: unknown) => {
+          mockInsertValues(v)
           const chain = {
             returning: async () => [{ id: 'newly_inserted' }],
             onConflictDoUpdate: async () => undefined,
@@ -87,8 +87,13 @@ vi.mock('@/lib/server/widget/identity-token', () => ({
   verifyHS256JWT: (...args: unknown[]) => mockVerifyJWT(...args),
 }))
 
+vi.mock('@/lib/server/auth/country-capture', () => ({
+  captureCountryFromHeaders: () => 'US',
+}))
+
 vi.mock('@/lib/server/domains/users/user.attributes', () => ({
   validateAndCoerceAttributes: vi.fn(async () => ({ valid: {}, removals: [], errors: [] })),
+  EXTERNAL_ID_KEY: '_externalUserId',
 }))
 
 vi.mock('@/lib/server/domains/segments/segment-membership.service', () => ({
@@ -127,13 +132,14 @@ beforeEach(() => {
   mockPrincipalFindFirst.mockReset()
   mockSessionFindFirst.mockResolvedValue(null)
   mockInsert.mockReset()
+  mockInsertValues.mockReset()
   mockUpdate.mockReset()
   mockUpdateSet.mockReset()
   mockVerifyJWT.mockReturnValue({ sub: 'sso-user', email: 'sso@acme.com', name: 'SSO User' })
 })
 
 describe('POST /api/widget/identify — rejects any body without a signed ssoToken', () => {
-  it('rejects an id+email body naming an admin email and mints nothing', async () => {
+  it('rejects an id+email body naming an admin email and mints nothing (J2)', async () => {
     mockUserFindFirst.mockResolvedValue({
       id: 'user_admin',
       email: 'admin@acme.com',
@@ -156,20 +162,20 @@ describe('POST /api/widget/identify — rejects any body without a signed ssoTok
     expect(mockUserFindFirst).not.toHaveBeenCalled()
   })
 
-  it('rejects an id+email body naming a member email', async () => {
+  it('rejects an id+email body naming a member email (J2)', async () => {
     const res = await postIdentify({ id: 'attacker-supplied', email: 'member@acme.com' })
     expect(res.status).toBe(400)
     expect(mockInsert).not.toHaveBeenCalled()
   })
 
-  it('rejects an id+email body even for a plain customer email', async () => {
+  it('rejects an id+email body even for a plain customer email (J2)', async () => {
     // Unverified identify is gone entirely — not just team-guarded.
     const res = await postIdentify({ id: 'foo', email: 'customer@acme.com' })
     expect(res.status).toBe(400)
     expect(mockInsert).not.toHaveBeenCalled()
   })
 
-  it('rejects a first-time email with no existing user', async () => {
+  it('rejects a first-time email with no existing user (J2)', async () => {
     mockUserFindFirst.mockResolvedValue(null)
     const res = await postIdentify({ id: 'new-id', email: 'first-time@acme.com' })
     expect(res.status).toBe(400)
@@ -177,48 +183,121 @@ describe('POST /api/widget/identify — rejects any body without a signed ssoTok
   })
 })
 
-describe('POST /api/widget/identify — staff/admin identity guard (A7#3)', () => {
-  it('refuses to mint a session when the ssoToken resolves to an admin principal', async () => {
+describe('POST /api/widget/identify — teammate identities mint a widget session', () => {
+  it('mints a widget session when the ssoToken resolves to an admin principal (J1, J3)', async () => {
     mockUserFindFirst.mockResolvedValue({
       id: 'user_admin_sso',
       email: 'sso@acme.com',
-      name: 'SSO Admin',
+      name: 'Dashboard Admin Name',
       image: null,
       imageKey: null,
       metadata: null,
+      externalId: 'sso-user',
     })
-    mockPrincipalFindFirst.mockResolvedValue({ role: 'admin' })
+    mockPrincipalFindFirst.mockResolvedValue({
+      id: 'principal_admin_sso',
+      role: 'admin',
+      type: 'user',
+    })
 
     const res = await postIdentify({ ssoToken: 'jwt.token.here' })
 
-    expect(res.status).toBe(403)
-    const body = (await res.json()) as { error?: { code?: string } }
-    expect(body.error?.code).toBe('IDENTITY_NOT_ALLOWED')
-    // No session row, and no mutation of the staff user's row either.
-    expect(mockInsert).not.toHaveBeenCalled()
-    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { sessionToken?: string; canPortalHandoff?: boolean }
+    expect(body.sessionToken).toBeTruthy()
+    expect(body.canPortalHandoff).toBe(false)
+    expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ scope: 'widget' }))
   })
 
-  it('refuses to mint a session when the ssoToken resolves to a member (teammate) principal', async () => {
+  it('mints a widget session when the ssoToken resolves to a member principal (J1, J3)', async () => {
     mockUserFindFirst.mockResolvedValue({
       id: 'user_member_sso',
       email: 'sso@acme.com',
-      name: 'SSO Member',
+      name: 'Dashboard Member Name',
       image: null,
       imageKey: null,
       metadata: null,
+      externalId: 'sso-user',
     })
-    mockPrincipalFindFirst.mockResolvedValue({ role: 'member' })
+    mockPrincipalFindFirst.mockResolvedValue({
+      id: 'principal_member_sso',
+      role: 'member',
+      type: 'user',
+    })
 
     const res = await postIdentify({ ssoToken: 'jwt.token.here' })
 
-    expect(res.status).toBe(403)
-    expect(mockInsert).not.toHaveBeenCalled()
+    expect(res.status).toBe(200)
+    expect(mockInsert).toHaveBeenCalled()
+  })
+
+  it('does not reuse a portal-scoped session for a teammate identify (J3)', async () => {
+    mockUserFindFirst.mockResolvedValue({
+      id: 'user_admin_sso',
+      email: 'sso@acme.com',
+      name: 'Dashboard Admin Name',
+      image: null,
+      imageKey: null,
+      metadata: null,
+      externalId: 'sso-user',
+    })
+    mockPrincipalFindFirst.mockResolvedValue({
+      id: 'principal_admin_sso',
+      role: 'admin',
+      type: 'user',
+    })
+    mockSessionFindFirst.mockResolvedValue({
+      id: 'sess_portal',
+      token: 'portal-token',
+      scope: 'portal',
+    })
+
+    const res = await postIdentify({ ssoToken: 'jwt.token.here' })
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { sessionToken?: string }
+    expect(body.sessionToken).not.toBe('portal-token')
+    expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ scope: 'widget' }))
+  })
+
+  it('does not overwrite a teammate dashboard profile from the host-app JWT (J1)', async () => {
+    mockVerifyJWT.mockReturnValue({
+      sub: 'sso-user',
+      email: 'sso@acme.com',
+      name: 'Host App Name',
+      avatarUrl: 'https://host.example/avatar.png',
+    })
+    mockUserFindFirst.mockResolvedValue({
+      id: 'user_admin_sso',
+      email: 'sso@acme.com',
+      name: 'Dashboard Admin Name',
+      image: 'https://dashboard.example/avatar.png',
+      imageKey: null,
+      metadata: '{"plan":"internal"}',
+      country: 'GB',
+      externalId: 'dashboard-subject',
+    })
+    mockPrincipalFindFirst.mockResolvedValue({
+      id: 'principal_admin_sso',
+      role: 'admin',
+      type: 'user',
+    })
+
+    const res = await postIdentify({ ssoToken: 'jwt.token.here' })
+
+    expect(res.status).toBe(200)
+    const setArgs = mockUpdateSet.mock.calls.map((c) => c[0] as Record<string, unknown>)
+    expect(setArgs.some((s) => 'name' in s)).toBe(false)
+    expect(setArgs.some((s) => 'image' in s)).toBe(false)
+    expect(setArgs.some((s) => 'metadata' in s)).toBe(false)
+    expect(setArgs.some((s) => 'email' in s)).toBe(false)
+    expect(setArgs.some((s) => 'country' in s)).toBe(false)
+    expect(setArgs.some((s) => 'externalId' in s)).toBe(false)
   })
 })
 
 describe('POST /api/widget/identify — the verified (ssoToken) path for a portal identity', () => {
-  it('succeeds and mints a session when the resolved principal is a plain portal user', async () => {
+  it('succeeds and mints a session when the resolved principal is a plain portal user (J1)', async () => {
     mockUserFindFirst.mockResolvedValue({
       id: 'user_portal_sso',
       email: 'sso@acme.com',
@@ -232,8 +311,9 @@ describe('POST /api/widget/identify — the verified (ssoToken) path for a porta
     const res = await postIdentify({ ssoToken: 'jwt.token.here' })
 
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { sessionToken?: string }
+    const body = (await res.json()) as { sessionToken?: string; canPortalHandoff?: boolean }
     expect(body.sessionToken).toBeTruthy()
+    expect(body.canPortalHandoff).toBe(true)
   })
 
   it('succeeds for a brand-new identity (no existing user, no existing principal)', async () => {

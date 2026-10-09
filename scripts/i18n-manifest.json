@@ -7,6 +7,7 @@
     "apps/web/src/components/ui/conversation-image-node.tsx",
     "apps/web/src/components/ui/quackback-embed-extension.tsx",
     "apps/web/src/components/ui/datetime-picker.tsx",
-    "apps/web/src/components/ui/breadcrumbs.tsx"
+    "apps/web/src/components/ui/breadcrumbs.tsx",
+    "apps/web/src/routes/auth.widget-handoff.tsx"
   ]
 }
