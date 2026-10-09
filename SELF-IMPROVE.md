@@ -176,7 +176,7 @@ shared hoisted mocks, so the next test fails an assertion it never caused
 Read a red test right after a timed-out property as the timeout, not as a
 second finding, and give a heavy property its own timeout.
 
-## 8x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+## 9x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
 `lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
 `error:03000098:digital envelope routines::invalid digest`. It is not the repo:
@@ -248,6 +248,14 @@ on — the 861-file run ended `12 failed | 846 passed` after eighteen minutes an
 left `coverage/local/.tmp` behind with no `coverage-final.json`. Only the
 spelled-out `--coverage.reportOnFailure=true`, as in the block above, works.
 Both fixes above would have made the spelling irrelevant.
+
+Ninth hit, batch M fork fixes: run from `apps/web`, six cases that pass on CI
+went red here and on an untouched `main` too (`client-ip.test.ts` twice,
+`open-handoff.test.ts` twice, `one-click-unsubscribe.test.ts` U4, and the J11
+"no getSetCookie" case in `auth.widget-handoff.test.ts`), plus
+`admin.no-billing-gate` reading a root-relative path. Run from the repo root
+they all pass; only `module-state.test.ts` still times out under coverage.
+Run from the root before treating any of them as a finding.
 
 ## 6x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -719,6 +727,32 @@ static imports, so a top-level `import { Route } from '../admin'` still gets the
 mocks and moves the cost into the file's import phase where there is no timeout.
 Import route modules statically, always.
 
+## 4x — A red test means no coverage report at all, which reads as a broken setup
+
+vitest's `coverage.reportOnFailure` defaults to false. So a single flaky
+`beforeEach` timeout in a 439-file run left `coverage/local/` empty, and the
+diff gate said `no coverage report was found under coverage` -- the same
+message a wrong `reportsDirectory` would produce. One full 250-second rerun
+went into finding that out. Locally, pass `--coverage.reportOnFailure=true`
+whenever the run is there to measure coverage; CI never sees this because its
+coverage job only runs after the unit shards are green.
+
+Second hit, from a subagent that had deliberately left a property red to report a
+production bug and then could not measure the rest of its suite:
+`--coverage.reportOnFailure=true` makes vitest write the report anyway. Only
+for a probe, never for the gate — the gate reading a report over a red suite is
+exactly the quiet failure the entry above describes.
+
+Third hit: the same flaky `settings.test.ts` timeout, the same
+`no coverage report was found under coverage`, on a run whose purpose was the
+diff gate. Leaving the known flaky files out of the measuring run and running
+them alone as a control is still the only reliable sequence.
+
+Fourth hit, batch M fork fixes: `no coverage report was found under coverage`
+after a run whose only reds were tests this machine cannot run (see the 8x
+entry). `--coverage.reportOnFailure=true` for the probe, then a separate check
+that the reds are the known local ones, was again the sequence that worked.
+
 ## 3x — Coverage had to be re-installed for every measurement
 
 The tooling for non-trivial logic is half-present. `fast-check` is a
@@ -881,55 +915,7 @@ the workaround tried before committing (pointing `HEAD` at a throwaway
 trick that should not be needed. Commit on the feature branch first; the gates
 are then one plain command each.
 
-## 3x — A red test means no coverage report at all, which reads as a broken setup
-
-vitest's `coverage.reportOnFailure` defaults to false. So a single flaky
-`beforeEach` timeout in a 439-file run left `coverage/local/` empty, and the
-diff gate said `no coverage report was found under coverage` -- the same
-message a wrong `reportsDirectory` would produce. One full 250-second rerun
-went into finding that out. Locally, pass `--coverage.reportOnFailure=true`
-whenever the run is there to measure coverage; CI never sees this because its
-coverage job only runs after the unit shards are green.
-
-Second hit, from a subagent that had deliberately left a property red to report a
-production bug and then could not measure the rest of its suite:
-`--coverage.reportOnFailure=true` makes vitest write the report anyway. Only
-for a probe, never for the gate — the gate reading a report over a red suite is
-exactly the quiet failure the entry above describes.
-
-Third hit: the same flaky `settings.test.ts` timeout, the same
-`no coverage report was found under coverage`, on a run whose purpose was the
-diff gate. Leaving the known flaky files out of the measuring run and running
-them alone as a control is still the only reliable sequence.
-
-## 2x — Two lists that must agree conflict on every merge in a stack
-
-`scripts/mutation-manifest.json` and the `toEqual` in
-`scripts/__tests__/mutation-scope.test.ts` are the same list written twice, by
-design — the test is the counterweight that stops the manifest shrinking
-quietly. Every branch appends to both, so **every** merge in a stack conflicts in
-both files, three times in one afternoon here.
-
-The conflicts are not hard, but they are hand-work in JSON where a wrong brace
-is a parse error, and a generic "take both sides" resolver corrupted the file
-once: the hunks are not uniform. Sometimes one side is empty and the union has to
-preserve the `},{` separators, sometimes both sides carry them already. Resolve
-these two by reading the hunk, not by a rule, and re-run
-`mutation-scope.test.ts` immediately — it fails loudly on a list that no longer
-matches, which is the fastest check that the resolution was right.
-
-Worth considering: assert the manifest as an unordered set of entries rather
-than an ordered array. Order carries no meaning, and an order-free assertion
-would let git merge appended entries without conflict.
-
-Second time, and it is not only those two files: **this one** conflicts on every
-merge in a stack for the same reason, because every branch appends an entry to
-it. Here the bad resolution was quieter than a parse error — one entry ended up
-in the file **twice, verbatim**, and a duplicated section looks exactly like a
-section. It was found by reading, not by a check. When resolving a conflict in
-an append-only document, count the headings afterwards.
-
-## 2x — The coverage config lives in the root config, so a run from apps/web measures nothing
+## 3x — The coverage config lives in the root config, so a run from apps/web measures nothing
 
 `vitest.config.ts` at the repo root carries the `coverage` block;
 `apps/web/vitest.config.ts` does not. Run the documented coverage command from
@@ -969,6 +955,38 @@ same run had just run. Re-running the identical suites from the repo root
 turned that into `12 executed, 0 never executed`. The tell held: a file the run
 definitely executed was listed under "out of scope, although they look like
 source". Read that line before reading the holes.
+
+Third hit, batch M fork fixes: a coverage run from `apps/web` against the batch
+database produced no report at all (it also had red tests, see the next entry),
+and the rerun from the root needed the database override described in "The
+root vitest config pins `DATABASE_URL`" below, which the `apps/web` run had not.
+
+## 2x — Two lists that must agree conflict on every merge in a stack
+
+`scripts/mutation-manifest.json` and the `toEqual` in
+`scripts/__tests__/mutation-scope.test.ts` are the same list written twice, by
+design — the test is the counterweight that stops the manifest shrinking
+quietly. Every branch appends to both, so **every** merge in a stack conflicts in
+both files, three times in one afternoon here.
+
+The conflicts are not hard, but they are hand-work in JSON where a wrong brace
+is a parse error, and a generic "take both sides" resolver corrupted the file
+once: the hunks are not uniform. Sometimes one side is empty and the union has to
+preserve the `},{` separators, sometimes both sides carry them already. Resolve
+these two by reading the hunk, not by a rule, and re-run
+`mutation-scope.test.ts` immediately — it fails loudly on a list that no longer
+matches, which is the fastest check that the resolution was right.
+
+Worth considering: assert the manifest as an unordered set of entries rather
+than an ordered array. Order carries no meaning, and an order-free assertion
+would let git merge appended entries without conflict.
+
+Second time, and it is not only those two files: **this one** conflicts on every
+merge in a stack for the same reason, because every branch appends an entry to
+it. Here the bad resolution was quieter than a parse error — one entry ended up
+in the file **twice, verbatim**, and a duplicated section looks exactly like a
+section. It was found by reading, not by a check. When resolving a conflict in
+an append-only document, count the headings afterwards.
 
 ## 2x — Parallel coverage runs share `coverage/.tmp` and delete each other's
 
@@ -1063,33 +1081,6 @@ an equivalent until it was probed against the real database; recorded as one,
 it would have been a false excuse. Before writing an equivalence reason about
 what a library does, measure the library, not the stub in front of it.
 
-## 1x — The native TypeScript 7 binary can hang the whole typecheck, unkillably
-
-In batch M every exec of `@typescript/typescript-linux-x64@7.0.2/lib/tsc`
-(`bun run typecheck`, `bunx tsc`, even `tsc --version`) went into
-uninterruptible disk sleep (`ps` state `D`, wchan `flush_work`) and never
-returned; `timeout` cannot kill a process in that state, so each attempt
-cost a 10-minute tool timeout before it was clear nothing was running. The
-binary is hard-linked into every worktree, so switching worktrees does not
-help. Kernel workers on the host were stuck in the same state for hours,
-so this is the machine, not the code. What worked: the JS compiler that is
-also installed, `node node_modules/.bun/typescript@6.0.3/node_modules/typescript/bin/tsc
---noEmit -p apps/web/tsconfig.json` (under 3 minutes). It reports three
-errors in `components/ui/rich-text-editor.tsx` that TS 7 does not, so
-compare against a TS 6 run of `origin/main` rather than against zero. Check
-`ps -eo pid,stat,wchan:20,args | grep '[t]sc'` before waiting on a
-typecheck.
-
-## 1x — Upstream fixtures without a session audience read as dashboard upstream and as portal here
-
-The fork reads a session with no `scope` as `portal` (R12); upstream reads it
-as `dashboard`. Upstream suites build sessions as `{ user: { id } }` and
-expect them to pass a dashboard-only gate, so every new dashboard-only check
-an upstream pick adds turns its own fixtures red here (batch J:
-`/api/devices`, three tests answering 403). The fix is to give the fixture
-`session: { scope: 'dashboard' }`, never to relax the gate. Expect it on
-every pick that adds a scope check.
-
 ## 2x — A date fixture that happens to fall on the real "today" collides with the preset labels
 
 Date pickers and filters render presets ("Today", "Yesterday") next to the
@@ -1122,6 +1113,110 @@ Second time (batch I, upstream #599): the pick edited
 same suffix, so upstream's change to it is never executed here. A run that
 names it explicitly still reports one file fewer than it was given, and that
 count is the only hint.
+
+## 2x — A column with a permissive default turns every shared test fixture into a caller of that default
+
+Migration 0280 added `session.scope` with `DEFAULT 'dashboard'`, and the
+normaliser in front of it read anything unrecognised as `dashboard` too. Every
+session fixture in the repository predates the column, so every one of them was
+silently a dashboard session, and the suites passed. Flipping the default to the
+least-privileged audience turned nine tests in
+`routes/api/upload/__tests__/image.test.ts` red at once — all of them through a
+single shared `mockSession` in `routes/api/__tests__/upload-fixtures.ts`.
+
+The red is the useful part, and it is worth reading before fixing: each fixture
+has to be asked what it _meant_, and the answer differed. The upload fixtures
+meant a dashboard session and got `scope: 'dashboard'` as a named parameter. One
+assertion in `widget-auth.test.ts` expected `role: 'member'` from a session the
+widget had minted, which the contract says is impossible — the fixture had been
+passing on the permissive default, and the expectation was wrong rather than the
+code. A fixture that omits the field is not a dashboard session; it is a session
+nobody stamped, and only a default hides the difference.
+
+Second hit, batch M decision D4: direct team adds now need a verified address,
+and `user.email_verified` defaults to false. Every seeded portal user in
+`team-additions.db.test.ts`, `update-member-role-promote.db.test.ts` and the
+picker fixtures had been "signed in, verification unknown", and 22 cases went
+red at once. Each fixture meant a verified person; they now say
+`emailVerified: true` with a note, and the unverified cases are their own suite.
+
+## 2x — Hand-rolled `db` stubs break on a query they never mentioned, and a drizzle `SQL` cannot be printed
+
+Two halves of the same problem: what a test does when it has to look at a query
+instead of at a result.
+
+Adding one `db.select()` to a shared read path — the products lookup in
+`getChangelogById` — broke three suites that had never heard of products.
+`mockReturnValueOnce` chains are positional, so a new query inserted _before_ an
+existing one silently hands every later call the wrong stub; and a stub chain
+that stops at `.where()` throws `orderBy is not a function` the moment a clause
+is added. Both failures name a method, never the call site, and neither is
+about the code under test. Two defences, both cheap and both applied here:
+make the chain awaitable at any depth (`chain.then = …` returning `[]`), so an
+added clause degrades to an empty result instead of a crash; and prefer
+splitting a query into its own service function over threading another
+`mockReturnValueOnce` through, so ordering stops being load-bearing.
+
+The other half: to assert that a predicate reached the query at all, the test
+has to read the `SQL` object the mock captured. `JSON.stringify` throws
+`Converting circular structure to JSON` — drizzle's `SQL` holds table objects
+that point back. `new PgDialect().sqlToQuery(condition)` renders it to
+`{ sql, params }`, with one catch that costs a run: rendering maps parameters
+through their column, so a readable stand-in id (`'board_alpha'`) fails inside
+typeid's parser with `Invalid length. Suffix should have 26 characters`. Test
+ids have to be real (`generateId('board')`), and they arrive in `params` as
+UUIDs, so compare against `toUuid(id)` rather than the typeid.
+
+This is worth an assertion helper next to the db fixture rather than a note:
+`renderedWhere(mock)` returning `{ sql, params }` would have saved both runs.
+It also matters beyond convenience — a suite that only checks _which filter was
+resolved_ passes when the filter is never pushed into the WHERE clause, which
+is a survivor the mutation gate pays twenty minutes to find.
+
+A third variant, for when the assertion is "no query was issued at all":
+`testDb` is a **Proxy** onto the active transaction, so `vi.spyOn(testDb,
+'select')` fails with `The property "select" is not defined on the object`, and
+so does spying on its prototype. There is no way to count queries through the
+fixture; that assertion needs its own small suite with a counting stub, which
+then has to be added to that file's `suites` list in the mutation manifest.
+
+One last thing that reads as a pass: `bun scripts/mutation-check.ts | tail -60`
+reports **tail's** exit code. The gate printed `FAIL: 5 mutant(s) ... not
+caught` and the shell said `exited with code 0`. Redirect to a file and read it
+instead of piping, or the one signal CI acts on is the one you discard.
+
+Second hit: `jit-role.test.ts` stubs `db.select().from().where().limit()` only,
+so the role-sync hook's new `innerJoin` lookup failed eleven cases with
+`innerJoin is not a function`, none of which were about role sync. Loading the
+assignment only when it can matter fixed nine; the two sync cases got an
+`innerJoin` branch on the stub that returns the held role they now depend on.
+
+## 1x — The native TypeScript 7 binary can hang the whole typecheck, unkillably
+
+In batch M every exec of `@typescript/typescript-linux-x64@7.0.2/lib/tsc`
+(`bun run typecheck`, `bunx tsc`, even `tsc --version`) went into
+uninterruptible disk sleep (`ps` state `D`, wchan `flush_work`) and never
+returned; `timeout` cannot kill a process in that state, so each attempt
+cost a 10-minute tool timeout before it was clear nothing was running. The
+binary is hard-linked into every worktree, so switching worktrees does not
+help. Kernel workers on the host were stuck in the same state for hours,
+so this is the machine, not the code. What worked: the JS compiler that is
+also installed, `node node_modules/.bun/typescript@6.0.3/node_modules/typescript/bin/tsc
+--noEmit -p apps/web/tsconfig.json` (under 3 minutes). It reports three
+errors in `components/ui/rich-text-editor.tsx` that TS 7 does not, so
+compare against a TS 6 run of `origin/main` rather than against zero. Check
+`ps -eo pid,stat,wchan:20,args | grep '[t]sc'` before waiting on a
+typecheck.
+
+## 1x — Upstream fixtures without a session audience read as dashboard upstream and as portal here
+
+The fork reads a session with no `scope` as `portal` (R12); upstream reads it
+as `dashboard`. Upstream suites build sessions as `{ user: { id } }` and
+expect them to pass a dashboard-only gate, so every new dashboard-only check
+an upstream pick adds turns its own fixtures red here (batch J:
+`/api/devices`, three tests answering 403). The fix is to give the fixture
+`session: { scope: 'dashboard' }`, never to relax the gate. Expect it on
+every pick that adds a scope check.
 
 ## 1x — `afterAll(fixture.close)` inside a `describe` shuts the connection for every later `describe` in the file
 
@@ -1166,25 +1261,6 @@ arrow body is a statement the gate counts. Only passing the function **by
 reference** puts zero statements in the config. Whether the reference is
 actually wired in is then its own claim, and it takes standing the instance up
 with `betterAuth` doubled (see `mcp-resource-bootstrap.test.ts`) to assert it.
-
-## 1x — A column with a permissive default turns every shared test fixture into a caller of that default
-
-Migration 0280 added `session.scope` with `DEFAULT 'dashboard'`, and the
-normaliser in front of it read anything unrecognised as `dashboard` too. Every
-session fixture in the repository predates the column, so every one of them was
-silently a dashboard session, and the suites passed. Flipping the default to the
-least-privileged audience turned nine tests in
-`routes/api/upload/__tests__/image.test.ts` red at once — all of them through a
-single shared `mockSession` in `routes/api/__tests__/upload-fixtures.ts`.
-
-The red is the useful part, and it is worth reading before fixing: each fixture
-has to be asked what it _meant_, and the answer differed. The upload fixtures
-meant a dashboard session and got `scope: 'dashboard'` as a named parameter. One
-assertion in `widget-auth.test.ts` expected `role: 'member'` from a session the
-widget had minted, which the contract says is impossible — the fixture had been
-passing on the permissive default, and the expectation was wrong rather than the
-code. A fixture that omits the field is not a dashboard session; it is a session
-nobody stamped, and only a default hides the difference.
 
 ## 1x — Replacing a whole `describe` block drops the tests inside it, and nothing counts
 
@@ -1452,51 +1528,6 @@ Two things worth doing: run `bun run db:check-drift` locally whenever a
 migration is added (it takes about a minute and needs only `DATABASE_URL`), and
 say so in CLAUDE.md's Migrations section next to the two tests that go red on
 purpose — the gate that fails here is silent until CI.
-
-## 1x — Hand-rolled `db` stubs break on a query they never mentioned, and a drizzle `SQL` cannot be printed
-
-Two halves of the same problem: what a test does when it has to look at a query
-instead of at a result.
-
-Adding one `db.select()` to a shared read path — the products lookup in
-`getChangelogById` — broke three suites that had never heard of products.
-`mockReturnValueOnce` chains are positional, so a new query inserted _before_ an
-existing one silently hands every later call the wrong stub; and a stub chain
-that stops at `.where()` throws `orderBy is not a function` the moment a clause
-is added. Both failures name a method, never the call site, and neither is
-about the code under test. Two defences, both cheap and both applied here:
-make the chain awaitable at any depth (`chain.then = …` returning `[]`), so an
-added clause degrades to an empty result instead of a crash; and prefer
-splitting a query into its own service function over threading another
-`mockReturnValueOnce` through, so ordering stops being load-bearing.
-
-The other half: to assert that a predicate reached the query at all, the test
-has to read the `SQL` object the mock captured. `JSON.stringify` throws
-`Converting circular structure to JSON` — drizzle's `SQL` holds table objects
-that point back. `new PgDialect().sqlToQuery(condition)` renders it to
-`{ sql, params }`, with one catch that costs a run: rendering maps parameters
-through their column, so a readable stand-in id (`'board_alpha'`) fails inside
-typeid's parser with `Invalid length. Suffix should have 26 characters`. Test
-ids have to be real (`generateId('board')`), and they arrive in `params` as
-UUIDs, so compare against `toUuid(id)` rather than the typeid.
-
-This is worth an assertion helper next to the db fixture rather than a note:
-`renderedWhere(mock)` returning `{ sql, params }` would have saved both runs.
-It also matters beyond convenience — a suite that only checks _which filter was
-resolved_ passes when the filter is never pushed into the WHERE clause, which
-is a survivor the mutation gate pays twenty minutes to find.
-
-A third variant, for when the assertion is "no query was issued at all":
-`testDb` is a **Proxy** onto the active transaction, so `vi.spyOn(testDb,
-'select')` fails with `The property "select" is not defined on the object`, and
-so does spying on its prototype. There is no way to count queries through the
-fixture; that assertion needs its own small suite with a counting stub, which
-then has to be added to that file's `suites` list in the mutation manifest.
-
-One last thing that reads as a pass: `bun scripts/mutation-check.ts | tail -60`
-reports **tail's** exit code. The gate printed `FAIL: 5 mutant(s) ... not
-caught` and the shell said `exited with code 0`. Redirect to a file and read it
-instead of piping, or the one signal CI acts on is the one you discard.
 
 ## 1x — A gate's end-to-end test cannot kill a mutant in the policy it spawns
 
@@ -2576,3 +2607,17 @@ object-literal cast onto it needs to go through `unknown`.
 
 Fixed in the batch C pull request by adding `bun run --cwd packages/ids
 typecheck` to the `check` job, next to the other package typechecks.
+
+## 1x — The root vitest config pins `DATABASE_URL`, so a shell override reaches only the global setup
+
+`vitest.config.ts` sets `test.env.DATABASE_URL` to `quackback_test`. Running
+from the repo root with `DATABASE_URL=...quackback_test_batch_m` in the shell,
+`vitest.global-setup.ts` (which reads `process.env`) checked the batch database
+and passed, while every test worker got `quackback_test` from the config: 47
+DB cases failed with `column "granted_by_sso" does not exist`, and the run had
+read from, and written rolled-back transactions to, the database other agents
+share. Nothing in the output names the database a worker used. What worked: an
+untracked root-level config, deleted afterwards, that merges the root one and
+overrides `test.env.DATABASE_URL`, passed with `--config`. A config outside the
+checkout cannot resolve `vitest/config`. Worth fixing in the config: take
+`process.env.DATABASE_URL` when set, the way the global setup already does.
