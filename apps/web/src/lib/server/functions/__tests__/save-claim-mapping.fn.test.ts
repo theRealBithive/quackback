@@ -171,6 +171,10 @@ describe('saveIdentityProviderClaimMappingFn', () => {
       ],
       acknowledgeIdentifierChange: undefined,
       acknowledgeAdminRules: undefined,
+      // Batch M: #679 hands the service the caller's grant check, so a save
+      // whose rules give a role the caller could not grant is refused (M34).
+      // What it decides is pinned with the service and the Roles card.
+      checkRoleGrants: expect.any(Function),
     })
     expect(result).toEqual(makeProvider())
 

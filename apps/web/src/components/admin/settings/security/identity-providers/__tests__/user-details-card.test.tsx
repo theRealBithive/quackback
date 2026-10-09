@@ -539,30 +539,35 @@ describe('UserDetailsCard save coordination', () => {
     ])
   })
 
-  it('removes role rules with an Undo instead of a confirmation, and Undo restores them', () => {
-    renderCard(
-      makeProvider({
-        claimMapping: {
-          role: {
-            claimPath: 'groups',
-            rules: [{ whenContains: 'engineering', role: 'member' }],
-          },
-        },
-      })
-    )
-    expect(screen.getByRole('button', { name: 'Edit role rules' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Remove role rules' }))
-    expect(screen.queryByRole('button', { name: 'Edit role rules' })).not.toBeInTheDocument()
-    expect(toastSpy).toHaveBeenCalledWith(
-      'Removed role rules.',
-      expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) })
-    )
-    const undo = toastSpy.mock.calls.at(-1)![1].action.onClick
-    act(() => undo())
-    expect(screen.getByRole('button', { name: 'Edit role rules' })).toBeInTheDocument()
+  /**
+   * Rewritten in batch M. This case used to remove role rules from the Profile
+   * table with an Undo toast. #679 moved role rules out of the Profile card
+   * into the Roles card on purpose (confirmed contract M33), where removing a
+   * rule is a draft that Cancel restores (roles-card.test.tsx, "Cancel drops
+   * the edits and hides the buttons"). What this card still owes the rules is
+   * that a Profile save never removes or changes them.
+   */
+  it('a Profile save leaves the stored role rules exactly as they were (M33)', async () => {
+    const rules = [{ whenContains: 'engineering', role: 'member' as const }]
+    renderCard(makeProvider({ claimMapping: { role: { claimPath: 'groups', rules } } }))
+    expect(screen.queryByRole('button', { name: /role rules/i })).not.toBeInTheDocument()
+    await addDepartmentMapping()
+    save()
+    await waitFor(() => expect(mappingSpy).toHaveBeenCalled())
+    const saved = lastSaved() as { role?: unknown } | null
+    expect(saved?.role).toEqual({ claimPath: 'groups', rules })
+    expect(toastSpy).not.toHaveBeenCalledWith('Removed role rules.', expect.anything())
   })
 
-  it('opens the role rules editor pre-filled with the existing rule', () => {
+  /**
+   * Rewritten in batch M. This case used to open the Profile card's role
+   * rules editor pre-filled with the stored rule. That editor is gone (#679,
+   * M33); the stored rule now shows pre-filled in the Roles card, pinned there
+   * as "shows a stored rule pre-filled with its value and role (M33)". Here:
+   * the Profile card does not show the rule at all, so it cannot be edited
+   * from two places.
+   */
+  it('does not show a stored role rule, so it is edited only in the Roles card (M33)', () => {
     renderCard(
       makeProvider({
         claimMapping: {
@@ -573,13 +578,8 @@ describe('UserDetailsCard save coordination', () => {
         },
       })
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Edit role rules' }))
-    expect(
-      screen.getByRole('combobox', { name: 'Claim value to match (rule 1)' })
-    ).toHaveTextContent('platform-admins')
-    expect(screen.getByRole('combobox', { name: 'Quackback role (rule 1)' })).toHaveTextContent(
-      'Admin'
-    )
+    expect(screen.queryByText('platform-admins')).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: /rule 1/ })).not.toBeInTheDocument()
   })
 })
 

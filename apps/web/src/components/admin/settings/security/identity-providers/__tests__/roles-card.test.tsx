@@ -338,6 +338,28 @@ describe('<RolesCard> editing rules', () => {
     expect(upsertSpy).not.toHaveBeenCalled()
   })
 
+  /**
+   * Fork case, moved here in batch M from the Profile card's test ("opens the
+   * role rules editor pre-filled with the existing rule"), whose editor #679
+   * replaced with this card (M33).
+   */
+  it('shows a stored rule pre-filled with its value and role (M33)', () => {
+    renderCard(
+      makeProvider({
+        claimMapping: {
+          role: {
+            claimPath: 'groups',
+            rules: [{ whenContains: 'platform-admins', role: 'admin' }],
+          },
+        },
+      })
+    )
+    expect(screen.getByRole('combobox', { name: 'Value for rule 1' })).toHaveTextContent(
+      'platform-admins'
+    )
+    expect(screen.getByRole('combobox', { name: 'Role for rule 1' })).toHaveTextContent('Admin')
+  })
+
   it('Cancel drops the edits and hides the buttons', () => {
     renderCard(makeProvider({ claimMapping: TWO_RULES }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove rule 1' }))

@@ -37,16 +37,23 @@ beforeEach(() => {
 })
 
 describe('readSsoClaimsWithProvenance', () => {
-  it('returns the claims the resolver validated for this sign-in, marked fresh', async () => {
+  /**
+   * Batch M: #674 adds the resolver's profile decisions to a fresh read, so the
+   * profile refresh can tell a name sign-up generated from one the person chose
+   * (M6, M9). The expected value gains `profile`; the claims and `fresh` are
+   * asserted exactly as before.
+   */
+  it('returns the claims and profile the resolver validated for this sign-in, marked fresh (M9)', async () => {
     mockAccountFindFirst.mockResolvedValue({ accountId: 'sub-1', idToken: null })
     stashResolvedClaims(PROVIDER, 'sub-1', {
       claims: { sub: 'sub-1', department: 'Engineering' },
-      profile: { generatedNames: [] },
+      profile: { generatedNames: ['sub-1'] },
     })
 
     await expect(readSsoClaimsWithProvenance(USER, PROVIDER)).resolves.toEqual({
       claims: { sub: 'sub-1', department: 'Engineering' },
       fresh: true,
+      profile: { generatedNames: ['sub-1'] },
     })
   })
 

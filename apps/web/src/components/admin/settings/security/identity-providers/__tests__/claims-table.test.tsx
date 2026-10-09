@@ -86,7 +86,14 @@ describe('ClaimsTable', () => {
     expect(screen.queryByRole('button', { name: /Remove Email/ })).not.toBeInTheDocument()
   })
 
-  it('routes Edit and Remove on the role row to the row itself, not another row', () => {
+  /**
+   * Rewritten in batch M. This case used to route Edit and Remove on the role
+   * row to that row. #679 removed the role row from this table on purpose:
+   * role rules live in the Roles card (confirmed contract M33). What stays is
+   * the property itself, on the rows the table still has: each action reaches
+   * its own row and no other, and a stored role section adds no row.
+   */
+  it('has no role row, and routes Edit and Remove on a People row to that row (M33)', () => {
     const mapping: IdentityProviderClaimMapping = {
       role: {
         claimPath: 'groups',
@@ -95,20 +102,35 @@ describe('ClaimsTable', () => {
       attributes: { map: [{ claimPath: 'org.department', attributeKey: 'department' }] },
     }
     const { onEdit, onRemove } = renderTable(mapping)
-    fireEvent.click(screen.getByRole('button', { name: 'Edit role rules' }))
-    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ kind: 'role' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Remove role rules' }))
-    expect(onRemove).toHaveBeenCalledWith(expect.objectContaining({ kind: 'role' }))
+    expect(screen.queryByRole('button', { name: /role rules/i })).not.toBeInTheDocument()
+    expect(screen.queryByText('engineering')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Department mapping' }))
+    expect(onEdit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'people', attributeKey: 'department' })
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Department mapping' }))
+    expect(onRemove).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'people', attributeKey: 'department' })
+    )
+    expect(onEdit).toHaveBeenCalledTimes(1)
+    expect(onRemove).toHaveBeenCalledTimes(1)
   })
 
-  it('renders read-only with no action column or flag checkboxes', () => {
-    renderTable(
-      { attributes: { map: [{ claimPath: 'dept', attributeKey: 'department' }] } },
-      { editable: false }
-    )
-    expect(screen.getAllByRole('columnheader')).toHaveLength(2)
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  /**
+   * Rewritten in batch M. This case used to render the table read-only (no
+   * action column, no flag checkboxes) for the Profile card's resting summary
+   * before Customize. That was a display mode, not a permission check: who may
+   * edit is decided by the SSO-management permission on the page and on the
+   * save functions, which this component never saw. #677 removed the summary
+   * and the `editable` prop on purpose (M29: always shown, no Customize step),
+   * so the table always offers its actions, and M30 (Save and Cancel only after
+   * an edit) is pinned in user-details-card.test.tsx.
+   */
+  it('always shows the action column and the People flags: no read-only summary (M29)', () => {
+    renderTable({ attributes: { map: [{ claimPath: 'dept', attributeKey: 'department' }] } })
+    expect(screen.getAllByRole('columnheader')).toHaveLength(3)
+    expect(screen.getByRole('button', { name: 'Edit Department mapping' })).toBeInTheDocument()
+    expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0)
   })
 
   it('preserves orphaned and duplicate People rows', () => {

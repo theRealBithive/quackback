@@ -652,10 +652,10 @@ describe('<ProviderDetailPage> connection', () => {
         },
       })
     )
+    // Batch M: #677 renamed the card from User details to Profile (M29), so the
+    // sentence points at Profile; the account-not-identified message is unchanged.
     expect(
-      screen.getByText(
-        /could not identify the account\. Check the profile fields under User details/i
-      )
+      screen.getByText(/could not identify the account\. Check the fields under Profile/i)
     ).toBeInTheDocument()
   })
 
@@ -950,13 +950,24 @@ describe('<ProviderDetailPage> sign-in & access', () => {
     expect(upsertSpy).not.toHaveBeenCalled()
   })
 
-  it('saves a new account role chosen from the New account role picker', async () => {
+  /**
+   * Rewritten in batch M. This case used to choose the role from a New account
+   * role picker in the sign-in card. #679 moved that setting into the Roles
+   * card on purpose (M17, M33), as the role for people at a verified domain;
+   * the property is the same: the page saves the chosen default as the
+   * provider's `autoProvisionRole`.
+   */
+  it('saves the default role chosen in the Roles card as the provider default (M17, M33)', async () => {
     renderPage(makeProvider({ autoCreateUsers: true, autoProvisionRole: 'user' }))
-    await userEvent.click(screen.getByLabelText('New account role'))
-    await userEvent.click(await screen.findByRole('option', { name: 'Admin' }))
-    saveSignIn()
+    expect(screen.queryByLabelText('New account role')).not.toBeInTheDocument()
+    await userEvent.click(
+      screen.getByRole('combobox', { name: 'Role for people at a verified domain' })
+    )
+    await userEvent.click(await screen.findByRole('option', { name: 'Member' }))
+    const rolesCard = screen.getByRole('heading', { name: 'Roles' }).closest('section')!
+    fireEvent.click(within(rolesCard).getByRole('button', { name: 'Save changes' }))
     await waitFor(() => expect(upsertSpy).toHaveBeenCalled())
-    expect(lastUpsert().autoProvisionRole).toBe('admin')
+    expect(lastUpsert().autoProvisionRole).toBe('member')
   })
 })
 
