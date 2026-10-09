@@ -75,29 +75,6 @@ export const isHandoffPrincipalTeammate = createServerOnlyFn(
   }
 )
 
-/**
- * True only when the session has a widget_identified_session row with
- * hmac_verified=true. Missing or unverified rows fail closed. Exported for tests.
- */
-export const isWidgetSessionHmacVerified = createServerOnlyFn(
-  async (sessionId: string): Promise<boolean> => {
-    try {
-      // oxlint-disable-next-line no-restricted-imports -- createServerOnlyFn body; stripped from the client graph
-      const { db, widgetIdentifiedSession, eq } = await import('@/lib/server/db')
-      const row = await db.query.widgetIdentifiedSession.findFirst({
-        where: eq(widgetIdentifiedSession.sessionId, sessionId),
-        columns: { hmacVerified: true },
-      })
-      return row?.hmacVerified === true
-    } catch (err) {
-      // oxlint-disable-next-line no-restricted-imports -- createServerOnlyFn body; stripped from the client graph
-      const { logger } = await import('@/lib/server/logger')
-      logger.child({ component: 'widget-handoff' }).error({ err }, 'provenance lookup failed')
-      return false
-    }
-  }
-)
-
 /** What the browser already holds, as far as the handoff needs to know. */
 type ExistingBrowserSession = 'dashboard' | 'other' | 'none' | 'unknown'
 
@@ -282,7 +259,10 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
       return { kind: 'error', status: 'invalid' }
     }
 
-    const provenanceOk = await isWidgetSessionHmacVerified(sessionId)
+    // The same check the widget endpoints use to lift the portal gate (J22):
+    // only a session minted by a signed identify passes.
+    const { hasSignedWidgetIdentity } = await import('@/lib/server/functions/widget-portal-gate')
+    const provenanceOk = await hasSignedWidgetIdentity(sessionId)
     if (!provenanceOk) {
       // The OTT was valid, but the session was not produced by an
       // HMAC-verified widget identify. Refuse the upgrade and audit.

@@ -183,7 +183,8 @@ vi.mock('@/lib/server/db', () => ({
   eq: (column: unknown, value: unknown) => ({ column, value }),
 }))
 
-import { isHandoffPrincipalTeammate, isWidgetSessionHmacVerified } from '../auth.widget-handoff'
+import { isHandoffPrincipalTeammate } from '../auth.widget-handoff'
+import { hasSignedWidgetIdentity } from '@/lib/server/functions/widget-portal-gate'
 
 const TOKEN_SESSION = 'sess_from_the_token'
 const TOKEN_USER = 'user_from_the_token'
@@ -633,14 +634,14 @@ describe('isHandoffPrincipalTeammate (J12, J14)', () => {
   })
 })
 
-describe('isWidgetSessionHmacVerified (J11)', () => {
+describe('hasSignedWidgetIdentity, as the handoff asks it (J11)', () => {
   it('is true only for a row that says hmac_verified (J11)', async () => {
     hoisted.provenanceRow.mockResolvedValueOnce({ hmacVerified: true })
-    expect(await isWidgetSessionHmacVerified('s')).toBe(true)
+    expect(await hasSignedWidgetIdentity('s')).toBe(true)
     hoisted.provenanceRow.mockResolvedValueOnce({ hmacVerified: false })
-    expect(await isWidgetSessionHmacVerified('s')).toBe(false)
+    expect(await hasSignedWidgetIdentity('s')).toBe(false)
     hoisted.provenanceRow.mockResolvedValueOnce(undefined)
-    expect(await isWidgetSessionHmacVerified('s')).toBe(false)
+    expect(await hasSignedWidgetIdentity('s')).toBe(false)
   })
 })
 
@@ -875,7 +876,7 @@ describe('the two lookups behind the handoff (J11, J12, J14)', () => {
   })
 
   it("asks whether the token's own session was signed (J11)", async () => {
-    await isWidgetSessionHmacVerified('sess_42')
+    await hasSignedWidgetIdentity('sess_42')
 
     expect(hoisted.provenanceRow).toHaveBeenCalledWith({
       where: { column: 'widget_identified_session.session_id', value: 'sess_42' },
@@ -899,15 +900,18 @@ describe('the two lookups behind the handoff (J11, J12, J14)', () => {
     const cause = new Error('connection refused')
     hoisted.provenanceRow.mockRejectedValueOnce(cause)
 
-    expect(await isWidgetSessionHmacVerified('s')).toBe(false)
-    expect(hoisted.logChild).toHaveBeenCalledWith({ component: 'widget-handoff' })
-    expect(hoisted.log.error).toHaveBeenCalledWith({ err: cause }, 'provenance lookup failed')
+    expect(await hasSignedWidgetIdentity('s')).toBe(false)
+    expect(hoisted.logChild).toHaveBeenCalledWith({ component: 'widget-signed-identity' })
+    expect(hoisted.log.error).toHaveBeenCalledWith(
+      { err: cause },
+      'signed identity lookup failed; treating the session as unsigned'
+    )
   })
 
   it('reads a session without a provenance row as unsigned, without calling it an outage (J11)', async () => {
     hoisted.provenanceRow.mockResolvedValueOnce(undefined)
 
-    expect(await isWidgetSessionHmacVerified('s')).toBe(false)
+    expect(await hasSignedWidgetIdentity('s')).toBe(false)
     expect(hoisted.log.error).not.toHaveBeenCalled()
   })
 })

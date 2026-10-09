@@ -269,10 +269,10 @@ describe.skipIf(!fixture.available)('the signed flag on a real widget session (J
     try {
       await expect(hasSignedWidgetIdentity(sessionId)).resolves.toBe(false)
       // The operator learns which check fell back, and why.
-      expect(childLogger).toHaveBeenCalledWith({ component: 'widget-portal-gate' })
+      expect(childLogger).toHaveBeenCalledWith({ component: 'widget-signed-identity' })
       expect(logged).toHaveBeenCalledWith(
         { err: outage },
-        'signed identity lookup failed; keeping the portal gate'
+        'signed identity lookup failed; treating the session as unsigned'
       )
     } finally {
       lookup.mockRestore()

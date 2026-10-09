@@ -53,7 +53,11 @@ export async function resolveWidgetPortalAccess(
  * Whether a session was minted by a signed widget identify: it has a
  * `widget_identified_session` row with `hmac_verified = true`. A missing row,
  * an unverified row and a failed lookup all answer false, so an outage never
- * lifts the gate.
+ * lifts the gate and never earns a portal session.
+ *
+ * The one place this is decided: the widget endpoints ask it before lifting
+ * the private-portal gate (J22), and the widget-to-portal handoff asks it
+ * before installing a portal session (J11).
  */
 export async function hasSignedWidgetIdentity(sessionId: string): Promise<boolean> {
   try {
@@ -66,8 +70,8 @@ export async function hasSignedWidgetIdentity(sessionId: string): Promise<boolea
   } catch (error) {
     const { logger } = await import('@/lib/server/logger')
     logger
-      .child({ component: 'widget-portal-gate' })
-      .error({ err: error }, 'signed identity lookup failed; keeping the portal gate')
+      .child({ component: 'widget-signed-identity' })
+      .error({ err: error }, 'signed identity lookup failed; treating the session as unsigned')
     return false
   }
 }
