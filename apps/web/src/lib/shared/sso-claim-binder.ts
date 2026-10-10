@@ -6,6 +6,7 @@
 
 import {
   DEFAULT_IDENTITY_SOURCES,
+  OIDC_PROFILE_DEFAULTS,
   claimPathIsUnsafe,
   getClaimByPath,
   isAffirmativeClaim,
@@ -13,6 +14,7 @@ import {
   type SourceSnapshot,
   type SourceUnavailableReason,
 } from './oidc-claim-mapping'
+import { asHttpsAvatarUrl } from './avatar-url'
 
 export type IdentityMapping = {
   sources?: IdentitySource[]
@@ -78,18 +80,6 @@ export function asNonEmptyString(value: unknown): string | undefined {
 /** Same missing-value rule as `planClaimAttributeWrites`. */
 export function claimIsMissing(value: unknown): boolean {
   return value === undefined || value === null || value === ''
-}
-
-export function asHttpUrl(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  if (trimmed === '') return undefined
-  try {
-    const url = new URL(trimmed)
-    return url.protocol === 'http:' || url.protocol === 'https:' ? trimmed : undefined
-  } catch {
-    return undefined
-  }
 }
 
 function requiredPathsResolved(
@@ -177,10 +167,10 @@ export function createBindingState(config: BindingConfig = {}): BindingState {
   return {
     config: {
       sources: mapping?.sources ?? DEFAULT_IDENTITY_SOURCES,
-      idClaim: mapping?.idClaim ?? 'sub',
-      emailClaim: mapping?.emailClaim ?? 'email',
-      nameClaim: mapping?.nameClaim ?? 'name',
-      imageClaim: mapping?.imageClaim ?? 'picture',
+      idClaim: mapping?.idClaim ?? OIDC_PROFILE_DEFAULTS.id,
+      emailClaim: mapping?.emailClaim ?? OIDC_PROFILE_DEFAULTS.email,
+      nameClaim: mapping?.nameClaim ?? OIDC_PROFILE_DEFAULTS.name,
+      imageClaim: mapping?.imageClaim ?? OIDC_PROFILE_DEFAULTS.image,
       explicitIdClaim: Boolean(mapping?.idClaim),
       requiredClaimPaths: config.requiredClaimPaths,
       wantImage: config.wantImage === true,
@@ -295,7 +285,7 @@ export function advanceBindingState(
     }
   }
   if (config.wantImage && !identity.image) {
-    const claimedImage = asHttpUrl(getClaimByPath(incoming, config.imageClaim))
+    const claimedImage = asHttpsAvatarUrl(getClaimByPath(incoming, config.imageClaim))
     if (claimedImage) {
       identity.image = claimedImage
       provenance.image = { source, path: config.imageClaim }

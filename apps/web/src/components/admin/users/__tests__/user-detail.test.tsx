@@ -118,6 +118,9 @@ const BASE_USER: PortalUserDetail = {
   contactEmail: null,
   lastSeenAt: new Date('2026-04-01T12:00:00.000Z'),
   country: 'DE',
+  teamRole: null,
+  hasSignedIn: true,
+  addressVerified: true,
   engagedPosts: [],
 }
 

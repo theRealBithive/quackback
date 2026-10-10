@@ -531,6 +531,18 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
           'apps/web/src/routes/api/auth/__tests__/dcr-redirect-restore.test.ts',
         ],
       },
+      {
+        file: 'apps/web/src/lib/shared/avatar-url.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/avatar-url.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/domains/principals/team-candidate.ts',
+        suites: ['apps/web/src/lib/server/domains/principals/__tests__/team-candidate.test.ts'],
+      },
+      {
+        file: 'apps/web/src/lib/server/auth/sso-role-sync.ts',
+        suites: ['apps/web/src/lib/server/auth/__tests__/sso-role-sync.test.ts'],
+      },
     ])
   })
 

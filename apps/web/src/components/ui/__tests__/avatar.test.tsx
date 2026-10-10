@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { Avatar } from '../avatar'
@@ -55,6 +55,21 @@ describe('Avatar (simple API)', () => {
     fireEvent.load(screen.getByRole('img'))
     expect(screen.queryByText('JD')).not.toBeInTheDocument()
     expect(screen.getByRole('img')).toBeInTheDocument()
+  })
+
+  it('reports a failed load, including one that happened before hydration', () => {
+    const onImageError = vi.fn()
+    render(
+      <Avatar src="https://example.com/broken.png" name="Jane Doe" onImageError={onImageError} />
+    )
+    expect(onImageError).not.toHaveBeenCalled()
+    fireEvent.error(screen.getByRole('img'))
+    expect(onImageError).toHaveBeenCalledTimes(1)
+    cleanup()
+    imgComplete = true
+    const early = vi.fn()
+    render(<Avatar src="https://example.com/early.png" name="Jane Doe" onImageError={early} />)
+    expect(early).toHaveBeenCalledTimes(1)
   })
 
   it('drops the image and shows initials when it fails to load', () => {

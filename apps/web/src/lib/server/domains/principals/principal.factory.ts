@@ -243,6 +243,19 @@ export interface SetRoleOpts extends MutateOpts {
    * legacy-preset reconciles (system-derived rows stay heal-eligible).
    */
   assignGrantedBy?: PrincipalId
+  /**
+   * Rewrite the workspace assignment to the preset for `role` even when the
+   * role column does not move: clears an explicit grant (a custom role) back
+   * to the plain tier. Ignored with `assignRoleId`.
+   */
+  resetAssignment?: boolean
+  /**
+   * The assignment this call writes comes from a sign-in through an identity
+   * provider (a role rule or the provider's default role), not from a person.
+   * Role sync on sign-in changes only such assignments; every other writer
+   * leaves this unset, so a later change by hand marks the row as hand-given.
+   */
+  assignedBySso?: boolean
 }
 
 /**
@@ -328,14 +341,13 @@ export async function setPrincipalRole(
   // workspace grant (a custom role) with the legacy preset. A guard-filtered
   // no-op update (no target row) reconciles nothing.
   const roleMoved = !target || target.role !== role || opts.assignRoleId != null
-  if (reconcilable && target && (opts.assignRoleId != null || target.role !== role)) {
-    await reconcileWorkspaceAssignment(
-      exec,
-      target.id,
-      role,
-      opts.assignRoleId,
-      opts.assignGrantedBy
-    )
+  const reassign = opts.assignRoleId != null || opts.resetAssignment === true
+  if (reconcilable && target && (reassign || target.role !== role)) {
+    await reconcileWorkspaceAssignment(exec, target.id, role, {
+      assignRoleId: opts.assignRoleId,
+      assignGrantedBy: opts.assignGrantedBy,
+      assignedBySso: opts.assignedBySso === true,
+    })
   }
   const type = target?.type ?? current?.type
   const fromRole = target?.role ?? current?.role
@@ -358,9 +370,9 @@ async function reconcileWorkspaceAssignment(
   exec: Executor,
   principalId: PrincipalId,
   role: Role,
-  assignRoleId?: RoleId,
-  assignGrantedBy?: PrincipalId
+  assignment: { assignRoleId?: RoleId; assignGrantedBy?: PrincipalId; assignedBySso: boolean }
 ): Promise<void> {
+  const { assignRoleId, assignGrantedBy, assignedBySso } = assignment
   await exec
     .delete(principalRoleAssignments)
     .where(
@@ -392,6 +404,7 @@ async function reconcileWorkspaceAssignment(
       // Only explicit grants record a grantor; preset reconciles stay NULL so
       // the seed heal keeps owning them.
       grantedByPrincipalId: assignRoleId != null ? (assignGrantedBy ?? null) : null,
+      grantedBySso: assignedBySso,
     })
     .onConflictDoNothing()
 }

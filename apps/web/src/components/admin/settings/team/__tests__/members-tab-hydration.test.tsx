@@ -61,8 +61,11 @@ vi.mock('@/lib/client/queries/settings', () => ({
 }))
 vi.mock('@/lib/client/hooks/use-root-context', () => ({
   useSessionContext: () => ({ user: { email: 'ada@example.com' } }),
+  useWorkspaceSettings: () => ({ name: 'Acme' }),
 }))
-vi.mock('@/components/auth/invite-member-dialog', () => ({ InviteMemberDialog: () => null }))
+vi.mock('@/components/admin/settings/team/add-people-dialog', () => ({
+  AddPeopleDialog: () => null,
+}))
 vi.mock('@/components/admin/settings/team/cloud-ownership-actions', () => ({
   CloudOwnershipActions: () => null,
 }))
@@ -90,6 +93,7 @@ const tab = (
   <MembersTab
     workspaceName="Acme"
     currentMember={{ id: 'principal_admin' as never, role: 'admin', userId: 'user_admin' as never }}
+    canManageMembers
   />
 )
 

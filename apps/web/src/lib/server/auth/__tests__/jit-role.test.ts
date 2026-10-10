@@ -25,6 +25,9 @@ const mockRecordAuditEvent = vi.fn()
 // Recordable so a test can assert `readSsoClaims` queries by the CALLBACK
 // provider id rather than a hardcoded 'sso'.
 const mockEq = vi.fn()
+// The workspace role a teammate holds (`workspaceAssignmentOf`): none unless a
+// case seeds one.
+const mockHeldAssignment = vi.fn(async (): Promise<unknown[]> => [])
 
 // Spread the real module (lazy db proxy; importing is safe) and override only
 // what these tests drive, so the mock never needs re-teaching as the factory's
@@ -39,7 +42,12 @@ vi.mock('@/lib/server/db', async (importOriginal) => ({
     },
     update: () => ({ set: mockSet, where: mockWhere }),
     // Default-team enrollment lookup: resolves empty (no default team seeded).
-    select: () => ({ from: () => ({ where: () => ({ limit: async () => [] }) }) }),
+    select: () => ({
+      from: () => ({
+        where: () => ({ limit: async () => [] }),
+        innerJoin: () => ({ where: () => ({ limit: () => mockHeldAssignment() }) }),
+      }),
+    }),
     // Role writes note a membership change, which cancels and re-enqueues the
     // membership-sync job through `db.execute`. No rows: nothing was queued.
     execute: async () => [],
@@ -72,7 +80,16 @@ beforeEach(() => {
   mockInsertValues.mockResolvedValue(undefined)
   mockUserFindFirst.mockResolvedValue({ name: 'Returning User', image: null })
   mockRecordAuditEvent.mockResolvedValue(undefined)
+  mockHeldAssignment.mockResolvedValue([])
 })
+
+/** The Owner preset, written by an earlier sign-in through the provider. */
+const OWNER_GIVEN_BY_SIGN_IN = {
+  id: 'role_owner',
+  key: 'owner',
+  name: 'Owner',
+  grantedBySso: true,
+}
 
 type SsoOidc = {
   enabled: boolean
@@ -240,8 +257,15 @@ describe('handleAutoProvisionAfter -- syncOnEverySignIn', () => {
     expect(mockSet).not.toHaveBeenCalled()
   })
 
+  /**
+   * Batch M (decision D6c, M38): under sync a sign-in changes only a role a
+   * sign-in gave, so this admin's Owner preset is seeded as written by an
+   * earlier sign-in. The same admin assigned by hand keeps the role; that case
+   * is pinned in sso-role-sync.test.ts and jit-role-origin.db.test.ts.
+   */
   it('re-applies on every sign-in when claimMapping.role.syncOnEverySignIn=true (and can demote)', async () => {
     mockFindFirst.mockResolvedValue({ role: 'admin' })
+    mockHeldAssignment.mockResolvedValue([OWNER_GIVEN_BY_SIGN_IN])
     mockAccountFindFirst.mockResolvedValue({ idToken: null })
     await callHandlerWith({
       ssoOidc: {
@@ -256,8 +280,10 @@ describe('handleAutoProvisionAfter -- syncOnEverySignIn', () => {
     expect(mockSet).toHaveBeenCalledWith({ role: 'member' })
   })
 
+  /** Batch M (D6c, M38): the admin role was given by a sign-in, see the case above. */
   it('honours a resolved role="user" under sync mode (demotes existing admin)', async () => {
     mockFindFirst.mockResolvedValue({ role: 'admin' })
+    mockHeldAssignment.mockResolvedValue([OWNER_GIVEN_BY_SIGN_IN])
     mockAccountFindFirst.mockResolvedValue({ idToken: null })
     // With sync on, the resolved-from-claims role is authoritative on
     // every sign-in. The role mapping has no matching rules, so the resolver
@@ -389,6 +415,22 @@ describe('handleAutoProvisionAfter -- claim-driven provisioning is domain-indepe
   })
 })
 
+/**
+ * Batch M (decision D6c, M38) changed one assertion in the two cases below.
+ * They used to require that no UPDATE follows the recreate. Now the role is
+ * written once more through the role writer right after the insert, so the
+ * workspace assignment records that a sign-in gave it; without that record a
+ * later "Every sign-in" could never change it. What the cases protect is
+ * unchanged and still asserted: the principal is created in-band with the
+ * provisioned role, and the write that follows targets that same role, after
+ * the insert, never a zero-row update in its place.
+ */
+function expectRoleWrittenAfterInsert(role: string) {
+  expect(mockSet.mock.calls).toEqual([[{ role }]])
+  const insertedAt = mockInsertValues.mock.invocationCallOrder[0]!
+  expect(mockSet.mock.invocationCallOrder[0]).toBeGreaterThan(insertedAt)
+}
+
 describe('handleAutoProvisionAfter -- returning user whose principal was soft-removed', () => {
   it('recreates the principal with the claim-mapped role when no principal exists', async () => {
     // "Remove from portal" deletes the principal but keeps the auth user, so a
@@ -408,7 +450,7 @@ describe('handleAutoProvisionAfter -- returning user whose principal was soft-re
       },
     })
     expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ role: 'member' }))
-    expect(mockSet).not.toHaveBeenCalled()
+    expectRoleWrittenAfterInsert('member')
   })
 
   it('recreates the principal with the default role for a returning user at a verified domain', async () => {
@@ -427,7 +469,7 @@ describe('handleAutoProvisionAfter -- returning user whose principal was soft-re
       },
     })
     expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ role: 'member' }))
-    expect(mockSet).not.toHaveBeenCalled()
+    expectRoleWrittenAfterInsert('member')
   })
 
   it('does not provision a returning user with no claim match and no verified domain', async () => {

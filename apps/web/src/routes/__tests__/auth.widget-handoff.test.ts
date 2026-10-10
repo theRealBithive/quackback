@@ -288,17 +288,23 @@ describe('an identified customer following "View on portal" (J11, J15, R6)', () 
     expect(result).toEqual({ kind: 'redirect', to: '/' })
   })
 
-  it('forwards the browser cookie to the verify call, and the token in the body (J11)', async () => {
+  /**
+   * Rewritten in batch M. This case used to require that the browser's cookie
+   * be forwarded to the verify call. The contract changed by the user's
+   * decision D7 (accepting upstream #684): the verify call carries only the
+   * token, and the browser's cookies never reach it (M43). That is a narrower
+   * request, not a weaker test: the assertion still pins the exact headers
+   * and body, now with a cookie present in the browser that must not appear.
+   */
+  it('sends only the token to the verify call, never the browser cookie (J11, M43)', async () => {
     hoisted.requestCookie = 'better-auth.session_token=old'
 
     await handoff({ ott: 'tok' })
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('http://localhost:3000/api/auth/one-time-token/verify')
-    expect(init.headers).toEqual({
-      'content-type': 'application/json',
-      cookie: 'better-auth.session_token=old',
-    })
+    expect(init.headers).toEqual({ 'content-type': 'application/json' })
+    expect(JSON.stringify(init)).not.toContain('better-auth.session_token=old')
     expect(JSON.parse(String(init.body))).toEqual({ token: 'tok' })
   })
 
@@ -805,14 +811,21 @@ describe('what the handoff forwards to the browser (J11, J15)', () => {
     expect(hoisted.writes).toEqual(['promote', 'marker'])
   })
 
-  it('asks Better Auth to verify the token by POST, with the browser cookie alongside (J11)', async () => {
+  /**
+   * Rewritten in batch M. This case used to expect the browser cookie
+   * alongside the token. The contract changed by the user's decision D7
+   * (upstream #684): the verify request is a POST carrying the token and
+   * nothing the browser holds (M43), so a cookie the browser already has
+   * cannot change which session the token installs.
+   */
+  it('asks Better Auth to verify the token by POST, with no browser cookie (J11, M43)', async () => {
     hoisted.requestCookie = 'better-auth.session_token=old'
 
     await handoff({ ott: 'tok' })
 
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/auth/one-time-token/verify', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: 'better-auth.session_token=old' },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ token: 'tok' }),
     })
   })

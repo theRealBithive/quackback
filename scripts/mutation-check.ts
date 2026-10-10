@@ -60,8 +60,16 @@ function couldNotMeasure(reason: string, remedy: string): never {
   process.exit(1)
 }
 
+// A batch of upstream picks produces a diff past Node's 1 MiB default, and
+// execFileSync then throws ENOBUFS: the gate fails without measuring anything.
+const gitOutputLimitBytes = 256 * 1024 * 1024
+
 function git(...args: string[]): string {
-  return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' })
+  return execFileSync('git', args, {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    maxBuffer: gitOutputLimitBytes,
+  })
 }
 
 /**
