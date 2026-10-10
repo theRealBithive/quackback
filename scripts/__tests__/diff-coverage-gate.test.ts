@@ -6,6 +6,9 @@
  *    missing provider, budget exceeded.
  * B8 The comparison is against the merge base of the change, so a branch cannot
  *    pass by comparing against itself.
+ * B9 A change is graded whatever its size: a large diff is read in full, never
+ *    turned into a crash that grades nothing. (Proposed in batch M after the
+ *    gate died with ENOBUFS on a 1.1 MB diff; awaiting the user's confirmation.)
  *
  * B8 needs a repository whose base branch has moved on after the fork point,
  * so each test builds a throwaway one. The failure it exists for is quiet:
@@ -107,7 +110,7 @@ function writeCoverage(root: string, files: Record<string, number[]>) {
   )
 }
 
-describe('the diff-coverage gate as a process (B7, B8)', () => {
+describe('the diff-coverage gate as a process (B7, B8, B9)', () => {
   it('judges only what this change added, not what the base branch deleted (B8)', async () => {
     const root = repoWhoseBaseMovedOn()
     try {
@@ -305,6 +308,34 @@ describe('the diff-coverage gate as a process (B7, B8)', () => {
 
       const result = await runGate(root, { DIFF_BASE: 'main' })
 
+      expect(result.stdout).toContain('PASS')
+      expect(result.exitCode).toBe(0)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  /** Batch M's diff passed 1 MiB and the gate died with ENOBUFS, grading nothing. */
+  it('grades a change whose diff is larger than a mebibyte (B9)', async () => {
+    const root = repoWhoseBaseMovedOn()
+    try {
+      const bigLine = 'x'.repeat(99) + '\n'
+      writeFileSync(path.join(root, 'notes.md'), bigLine.repeat(15_000))
+      git(root, 'add', '.')
+      git(root, 'commit', '-m', 'a large change')
+      const covered = {
+        [path.join(root, 'mine.ts')]: {
+          path: path.join(root, 'mine.ts'),
+          statementMap: { '0': { start: { line: 1 } } },
+          s: { '0': 1 },
+        },
+      }
+      mkdirSync(path.join(root, 'coverage'), { recursive: true })
+      writeFileSync(path.join(root, 'coverage', 'coverage-final.json'), JSON.stringify(covered))
+
+      const result = await runGate(root, { DIFF_BASE: 'main' })
+
+      expect(result.stderr).not.toContain('ENOBUFS')
       expect(result.stdout).toContain('PASS')
       expect(result.exitCode).toBe(0)
     } finally {

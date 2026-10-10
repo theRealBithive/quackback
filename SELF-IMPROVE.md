@@ -2637,3 +2637,6 @@ and `mutation-check.ts` read it through `execFileSync` with Node's default
 stack trace printed the whole diff into the terminal (2 MB of output). Both now
 pass an explicit limit. A gate that cannot read its input fails, which is the
 right direction, but the error names the buffer nowhere a reader would look.
+
+Pinned since: `diff-coverage-gate.test.ts` (B9) commits a 1.5 MB file and
+expects a graded PASS; without the `maxBuffer` it fails with ENOBUFS.
