@@ -275,6 +275,37 @@ describe('every sign-in, a role a sign-in gave (M38)', () => {
     expect(plan).toMatchObject({ role: 'member', assignRoleId: BILLING.id, customMoves: true })
   })
 
+  /**
+   * "Moved back to plain Member" (M38) is the change for someone who stays on
+   * the member tier. A sign-in that moves the tier itself is a role change,
+   * not that reset, whatever workspace role the person held before.
+   */
+  it('resets to plain Member only someone who stays a member, never on a tier change (M38)', () => {
+    const memberWithRuleRole = facts({ currentAssignment: held('support', true) })
+    expect(planSignInRoleChange({ ...memberWithRuleRole, targetRole: 'admin' })).toEqual({
+      role: 'admin',
+      assignRoleId: undefined,
+      resetAssignment: false,
+      customMoves: false,
+      clearsCustom: false,
+    })
+    expect(planSignInRoleChange({ ...memberWithRuleRole, targetRole: 'user' })).toMatchObject({
+      role: 'user',
+      resetAssignment: false,
+    })
+    const adminGivenBySignIn = facts({
+      currentRole: 'admin',
+      currentAssignment: held('owner', true),
+    })
+    expect(planSignInRoleChange(adminGivenBySignIn)).toEqual({
+      role: 'member',
+      assignRoleId: undefined,
+      resetAssignment: false,
+      customMoves: false,
+      clearsCustom: false,
+    })
+  })
+
   it('changes nothing when the provider gives what the person already holds (M38)', () => {
     expect(planSignInRoleChange(facts())).toBeNull()
     expect(
