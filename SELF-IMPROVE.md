@@ -1191,6 +1191,74 @@ so the role-sync hook's new `innerJoin` lookup failed eleven cases with
 assignment only when it can matter fixed nine; the two sync cases got an
 `innerJoin` branch on the stub that returns the held role they now depend on.
 
+## 2x — The root vitest config pins `DATABASE_URL`, so a shell override reaches only the global setup
+
+`vitest.config.ts` sets `test.env.DATABASE_URL` to `quackback_test`. Running
+from the repo root with `DATABASE_URL=...quackback_test_batch_m` in the shell,
+`vitest.global-setup.ts` (which reads `process.env`) checked the batch database
+and passed, while every test worker got `quackback_test` from the config: 47
+DB cases failed with `column "granted_by_sso" does not exist`, and the run had
+read from, and written rolled-back transactions to, the database other agents
+share. Nothing in the output names the database a worker used. What worked: an
+untracked root-level config, deleted afterwards, that merges the root one and
+overrides `test.env.DATABASE_URL`, passed with `--config`. A config outside the
+checkout cannot resolve `vitest/config`. Worth fixing in the config: take
+`process.env.DATABASE_URL` when set, the way the global setup already does.
+
+The reverse bites too (second run): with the scratch config but no
+`DATABASE_URL` in the shell, the workers get the batch database and the
+global setup, which reads only `process.env`, probes the default
+`.../quackback`, so under `REQUIRE_TEST_DB=1` the run stops with
+`database "quackback" does not exist` before any test. Set both: the shell
+variable for the global setup and the config override for the workers.
+
+## 2x — A rule inlined in the Better Auth options object is reachable by no test, and the diff-coverage gate counts it anyway
+
+Upstream's session-audience hook arrived as an arrow function inside the
+`betterAuth({ … })` literal. Nothing in the repository executes it: measured over
+all 43 suites in `lib/server/auth/__tests__`, not one statement between lines 540
+and 660 of `auth/index.ts` is covered, because `createAuth()` builds the options
+and the hook bodies only run inside a live auth instance. The lines are still
+`apps/web/src/**/*.ts`, so the diff-coverage gate grades them, and a pick that
+adds thirteen lines there adds thirteen holes.
+
+The repository already has the shape that fixes it —
+`databaseHooks.user.create.before` is `guardBetterAuthUserCreation`, imported
+from `signup-policy.ts` — and the reason it works is worth stating, because the
+obvious half-measure does not: delegating from an inline arrow
+(`before: async (d, c) => rule(d, c?.path)`) leaves an arrow body behind, and an
+arrow body is a statement the gate counts. Only passing the function **by
+reference** puts zero statements in the config. Whether the reference is
+actually wired in is then its own claim, and it takes standing the instance up
+with `betterAuth` doubled (see `mcp-resource-bootstrap.test.ts`) to assert it.
+
+## 2x — A line that is only an arrow function passed as a JSX prop reads as uncovered until the handler actually fires
+
+Filling a diff-coverage hole for `onEdit={() => onEdit(row)}`-shaped lines
+(`claims-table.tsx`, `use-sso-test-sign-in.tsx`) it looked safe to assume that
+simply rendering the component past the point where such a prop is created
+already counts as covering the line — the closure exists, so the statement
+"ran". Reasoning about it that way is wrong, and the wrongness is invisible
+from the terminal summary (`Statements 92%` reads the same either way).
+
+v8/istanbul records the statement for a line like this as the arrow's _body_,
+not its creation, so the count on that line is how many times the callback was
+**invoked** (the control clicked), not how many times the enclosing JSX was
+rendered. The only way to see this directly is to dump the report itself:
+
+```
+node -e "const r=require('./coverage/client/coverage-final.json'); \
+  for (const f of Object.values(r)) if (f.path.endsWith('claims-table.tsx')) { \
+    for (const [id, loc] of Object.entries(f.statementMap)) \
+      if (loc.start.line===90) console.log(id, f.s[id]) }"
+```
+
+`count=0` on the prop line next to `count=23` on the surrounding block is the
+proof; nothing about reading the source settles it either way. Generalises to
+every interactive component in this repo: a coverage hole on a line whose only
+content is a prop-value arrow function means "write a test that clicks the
+control", never "render something that passes near it".
+
 ## 1x — The native TypeScript 7 binary can hang the whole typecheck, unkillably
 
 In batch M every exec of `@typescript/typescript-linux-x64@7.0.2/lib/tsc`
@@ -1242,26 +1310,6 @@ A `close` that refused to run while another describe in the file still holds
 tests, or an error text that said "this file already closed its fixture", would
 cost nothing and save the detour.
 
-## 1x — A rule inlined in the Better Auth options object is reachable by no test, and the diff-coverage gate counts it anyway
-
-Upstream's session-audience hook arrived as an arrow function inside the
-`betterAuth({ … })` literal. Nothing in the repository executes it: measured over
-all 43 suites in `lib/server/auth/__tests__`, not one statement between lines 540
-and 660 of `auth/index.ts` is covered, because `createAuth()` builds the options
-and the hook bodies only run inside a live auth instance. The lines are still
-`apps/web/src/**/*.ts`, so the diff-coverage gate grades them, and a pick that
-adds thirteen lines there adds thirteen holes.
-
-The repository already has the shape that fixes it —
-`databaseHooks.user.create.before` is `guardBetterAuthUserCreation`, imported
-from `signup-policy.ts` — and the reason it works is worth stating, because the
-obvious half-measure does not: delegating from an inline arrow
-(`before: async (d, c) => rule(d, c?.path)`) leaves an arrow body behind, and an
-arrow body is a statement the gate counts. Only passing the function **by
-reference** puts zero statements in the config. Whether the reference is
-actually wired in is then its own claim, and it takes standing the instance up
-with `betterAuth` doubled (see `mcp-resource-bootstrap.test.ts`) to assert it.
-
 ## 1x — Replacing a whole `describe` block drops the tests inside it, and nothing counts
 
 Strengthening a suite by rewriting one `describe` in place — reading its
@@ -1282,33 +1330,6 @@ Two cheap habits, in order of value. Diff the test _names_ across the edit —
 trusting that a block boundary was read correctly. And prefer appending a new
 `describe` to rewriting an existing one: the merge is then additive and a
 deletion has to be deliberate.
-
-## 1x — A line that is only an arrow function passed as a JSX prop reads as uncovered until the handler actually fires
-
-Filling a diff-coverage hole for `onEdit={() => onEdit(row)}`-shaped lines
-(`claims-table.tsx`, `use-sso-test-sign-in.tsx`) it looked safe to assume that
-simply rendering the component past the point where such a prop is created
-already counts as covering the line — the closure exists, so the statement
-"ran". Reasoning about it that way is wrong, and the wrongness is invisible
-from the terminal summary (`Statements 92%` reads the same either way).
-
-v8/istanbul records the statement for a line like this as the arrow's _body_,
-not its creation, so the count on that line is how many times the callback was
-**invoked** (the control clicked), not how many times the enclosing JSX was
-rendered. The only way to see this directly is to dump the report itself:
-
-```
-node -e "const r=require('./coverage/client/coverage-final.json'); \
-  for (const f of Object.values(r)) if (f.path.endsWith('claims-table.tsx')) { \
-    for (const [id, loc] of Object.entries(f.statementMap)) \
-      if (loc.start.line===90) console.log(id, f.s[id]) }"
-```
-
-`count=0` on the prop line next to `count=23` on the surrounding block is the
-proof; nothing about reading the source settles it either way. Generalises to
-every interactive component in this repo: a coverage hole on a line whose only
-content is a prop-value arrow function means "write a test that clicks the
-control", never "render something that passes near it".
 
 ## 1x — A test file named after a TanStack Router `$param` file collides with shell parameter expansion
 
@@ -2608,16 +2629,11 @@ object-literal cast onto it needs to go through `unknown`.
 Fixed in the batch C pull request by adding `bun run --cwd packages/ids
 typecheck` to the `check` job, next to the other package typechecks.
 
-## 1x — The root vitest config pins `DATABASE_URL`, so a shell override reaches only the global setup
+## 1x — A batch-sized diff overflows the gates' `git diff` buffer, and the gate dies with ENOBUFS
 
-`vitest.config.ts` sets `test.env.DATABASE_URL` to `quackback_test`. Running
-from the repo root with `DATABASE_URL=...quackback_test_batch_m` in the shell,
-`vitest.global-setup.ts` (which reads `process.env`) checked the batch database
-and passed, while every test worker got `quackback_test` from the config: 47
-DB cases failed with `column "granted_by_sso" does not exist`, and the run had
-read from, and written rolled-back transactions to, the database other agents
-share. Nothing in the output names the database a worker used. What worked: an
-untracked root-level config, deleted afterwards, that merges the root one and
-overrides `test.env.DATABASE_URL`, passed with `--config`. A config outside the
-checkout cannot resolve `vitest/config`. Worth fixing in the config: take
-`process.env.DATABASE_URL` when set, the way the global setup already does.
+Batch M's `git diff -U0` against `main` was 1.12 MB. `diff-coverage-check.ts`
+and `mutation-check.ts` read it through `execFileSync` with Node's default
+`maxBuffer` of 1 MiB, so both threw `ENOBUFS` before grading a line, and the
+stack trace printed the whole diff into the terminal (2 MB of output). Both now
+pass an explicit limit. A gate that cannot read its input fails, which is the
+right direction, but the error names the buffer nowhere a reader would look.
