@@ -176,7 +176,7 @@ shared hoisted mocks, so the next test fails an assertion it never caused
 Read a red test right after a timed-out property as the timeout, not as a
 second finding, and give a heavy property its own timeout.
 
-## 9x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
+## 10x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
 `lib/server/email/__tests__/sns-signature.test.ts` fails on Fedora with
 `error:03000098:digital envelope routines::invalid digest`. It is not the repo:
@@ -256,6 +256,13 @@ went red here and on an untouched `main` too (`client-ip.test.ts` twice,
 `admin.no-billing-gate` reading a root-relative path. Run from the repo root
 they all pass; only `module-state.test.ts` still times out under coverage.
 Run from the root before treating any of them as a finding.
+
+Tenth hit, 2026-11-05, security dependency bump: the same `client-ip.test.ts`
+pair and `upload.batch-h.contract.test.ts` H4 went red from `apps/web`, again
+on an untouched `main` as well, which took a second worktree and install to
+establish. Separately, port 5432 was held by another project's Postgres, so
+`docker start quackback-test-pg` failed; a throwaway pgvector container on
+another port with `DATABASE_URL` pointed at it works without touching it.
 
 ## 6x — The mutation manifest is all-or-nothing per file, so one upstream line can lock a file out
 
@@ -1259,6 +1266,26 @@ every interactive component in this repo: a coverage hole on a line whose only
 content is a prop-value arrow function means "write a test that clicks the
 control", never "render something that passes near it".
 
+## 2x — happy-dom's `Headers` loses a `__Secure-` cookie, so an OAuth round trip fails with `state_mismatch`
+
+The batch F OIDC contract suites run real Better Auth against a stub identity
+provider. Under the default happy-dom environment the state cookie Better Auth
+sets is `__Secure-`-prefixed, and happy-dom's `Headers.getSetCookie` drops it,
+so the callback finds no state and answers `state_mismatch` — which reads as a
+bug in the sign-in flow. `// @vitest-environment node` at the top of the suite
+fixes it. Any test that carries a cookie across two real auth requests needs
+that line.
+
+Second hit, 2026-11-05, upstream #774's `magic-link-mint.db.test.ts`: a plain
+`better-auth.session_token` cookie, not `__Secure-`, and a single request, not
+a round trip. Under happy-dom the verify response carried `set-auth-token`
+(the session existed) but no `set-cookie` header at all, so "a minted link
+signs its recipient in" failed against a sign-in that had worked; it fails the
+same way on a clean upstream checkout. So the rule is wider than the title:
+**any** suite that reads `Set-Cookie` off a `Response` needs
+`// @vitest-environment node`, because happy-dom follows the browser Fetch
+spec, where that header is forbidden to script.
+
 ## 1x — The native TypeScript 7 binary can hang the whole typecheck, unkillably
 
 In batch M every exec of `@typescript/typescript-linux-x64@7.0.2/lib/tsc`
@@ -2113,16 +2140,6 @@ command in the foreground finished in under three minutes both times. The
 budget has to fit the foreground call's ten-minute ceiling, so pass
 `MUTATION_BUDGET_SECONDS=570`; the runs here took 2m40s–4m40s for nine to
 eleven graded files.
-
-## 1x — happy-dom's `Headers` loses a `__Secure-` cookie, so an OAuth round trip fails with `state_mismatch`
-
-The batch F OIDC contract suites run real Better Auth against a stub identity
-provider. Under the default happy-dom environment the state cookie Better Auth
-sets is `__Secure-`-prefixed, and happy-dom's `Headers.getSetCookie` drops it,
-so the callback finds no state and answers `state_mismatch` — which reads as a
-bug in the sign-in flow. `// @vitest-environment node` at the top of the suite
-fixes it. Any test that carries a cookie across two real auth requests needs
-that line.
 
 # Resolved
 
