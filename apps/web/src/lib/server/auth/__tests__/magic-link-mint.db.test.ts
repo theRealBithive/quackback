@@ -1,8 +1,15 @@
+// @vitest-environment node
 /**
  * A link from `mintMagicLinkUrl` signs its recipient in through Better-Auth's own
  * verify endpoint, on real Postgres, and a revoked link does not. Invitations,
  * recovery codes and bootstrap claims all mint through this helper, and the
  * mock-based suite cannot see whether Better-Auth accepts the row it writes.
+ *
+ * Runs under `node`, not the default `happy-dom`: happy-dom's `Response`
+ * follows the browser Fetch spec and hides `Set-Cookie` from `headers`, so
+ * under it the session cookie the verifier issues reads as absent even though
+ * the sign-in succeeded. This suite exercises server code and needs the
+ * server's `Response`.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createId, type UserId } from '@quackback/ids'
