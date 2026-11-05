@@ -399,7 +399,14 @@ jobs:
   e2e-full:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Sharded, so one slow or failing area cannot spend the whole budget and
+    # take every other area's result down with it: a single 60-minute job used
+    # to be cancelled before it printed a single error message.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -444,5 +451,13 @@ jobs:
           if ! timeout 90 ./node_modules/.bin/playwright install-deps chromium; then
             echo '::warning::playwright install-deps timed out or failed; continuing with browser-only install'
           fi
-      - run: ./node_modules/.bin/playwright test
+      - run: ./node_modules/.bin/playwright test --shard=${{ matrix.shard }}/3
         working-directory: apps/web
+      # Always, not on failure only: a job cancelled at its timeout reports
+      # `cancelled`, and the report is the one place its errors survive.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: e2e-full-report-${{ matrix.shard }}
+          path: apps/web/blob-report
+          retention-days: 7
