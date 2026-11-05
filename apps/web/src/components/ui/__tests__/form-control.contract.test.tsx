@@ -14,6 +14,8 @@
  *   E4 Whoever opens a saved article, post or changelog entry for editing sees
  *      its saved content, however the page was reached, and the form has no
  *      unsaved changes until the person changes something.
+ *   E5 A post can be created and saved without a description; an editor
+ *      nobody typed in never makes the server reject the submit.
  *
  * E4 failed on a hard load of the help-center article editor: TipTap's
  * `setEditable` emits an `update` by default, the editor emitted it while it
@@ -24,6 +26,12 @@
  * `RichTextEditor` with a three-argument `onChange` that copies the Markdown
  * into the form. E1 is tested on exactly that arrangement; the help-center and
  * changelog e2e specs drive two of the real forms end to end.
+ *
+ * E5 follows from E4: an editor that no longer reports an update on mount
+ * leaves its document null, and the post forms sent that null to schemas that
+ * take an absent body only. It is tested at each form that sends one:
+ * `create-post-dialog.test.tsx`, `edit-post-dialog.test.tsx`,
+ * `post-modal-metadata-wiring.test.tsx` and `feedback-header-animated.test.tsx`.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { cleanup, render, act } from '@testing-library/react'

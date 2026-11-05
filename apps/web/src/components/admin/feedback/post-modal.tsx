@@ -213,7 +213,8 @@ function PostModalContent({
         postId: post.id as PostId,
         title: title.trim(),
         content: contentMarkdown,
-        contentJson: contentJson ?? null,
+        // The schema takes an absent body, not null.
+        contentJson: contentJson ?? undefined,
       })
       toast.success('Post updated')
       onClose()

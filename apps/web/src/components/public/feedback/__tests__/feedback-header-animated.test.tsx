@@ -18,6 +18,10 @@
  * V3 After signing out, the router is told to invalidate, so the surrounding
  *    loaders rebuild against the fresh (now anonymous) session instead of
  *    serving back the team-scoped data they already hold.
+ *
+ * E5 A post can be created and saved without a description; an editor
+ *    nobody typed in never makes the server reject the submit.
+ *    (Contract list: `components/ui/__tests__/form-control.contract.test.tsx`.)
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
@@ -26,10 +30,11 @@ import { renderInGerman } from '@/test/render-with-intl'
 import type { ComponentProps, ReactNode } from 'react'
 
 // vi.hoisted so these are ready before the vi.mock factories below run.
-const { mockSignOut, mockInvalidate, mockRouteContext } = vi.hoisted(() => ({
+const { mockSignOut, mockInvalidate, mockRouteContext, mockCreatePost } = vi.hoisted(() => ({
   mockSignOut: vi.fn(() => Promise.resolve(undefined)),
   mockInvalidate: vi.fn(),
   mockRouteContext: vi.fn(),
+  mockCreatePost: vi.fn(),
 }))
 
 vi.mock('@/lib/client/auth-client', () => ({
@@ -59,7 +64,7 @@ vi.mock('@/lib/client/hooks/use-image-upload', () => ({
 }))
 
 vi.mock('@/lib/client/mutations/portal-posts', () => ({
-  useCreatePublicPost: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreatePublicPost: () => ({ mutateAsync: mockCreatePost, isPending: false }),
 }))
 
 vi.mock('@/components/auth/auth-popover-context', () => ({
@@ -117,6 +122,7 @@ vi.mock('framer-motion', () => {
 
 import { FeedbackHeaderAnimated } from '../feedback-header-animated'
 import { VIEWER_SCOPED_PORTAL_QUERY_KEYS } from '@/lib/client/queries/portal'
+import { createPublicPostSchema } from '@/lib/shared/schemas/posts'
 
 function renderHeader(queryClient: QueryClient) {
   return renderInGerman(
@@ -185,5 +191,34 @@ describe('FeedbackHeaderAnimated — sign-out cache hygiene', () => {
     expect(queryClient.getQueryData(['votedPosts'])).toEqual(['post_1'])
     // (V3)
     await waitFor(() => expect(mockInvalidate).toHaveBeenCalled())
+  })
+})
+
+describe('FeedbackHeaderAnimated — submitting without a description', () => {
+  beforeEach(() => {
+    mockCreatePost.mockReset()
+    mockCreatePost.mockResolvedValue({ id: 'post_1', board: { slug: 'features' } })
+    mockRouteContext.mockReturnValue({
+      session: {
+        user: { name: 'Ada Lovelace', email: 'ada@example.com', principalType: 'user' },
+      },
+    })
+  })
+
+  afterEach(() => cleanup())
+
+  it('sends a title-only post in a shape the server accepts (E5)', async () => {
+    // A description is optional (ec3e34e18). An editor nobody typed in holds no
+    // document, and the submit must send no body rather than null, which the
+    // server's schema rejects with a raw validation message.
+    const { container } = renderHeader(new QueryClient())
+    expandComposer(container)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Absenden' }))
+
+    await waitFor(() => expect(mockCreatePost).toHaveBeenCalledTimes(1))
+    const payload = mockCreatePost.mock.calls[0]![0]
+    expect(payload.title).toBe('A')
+    expect(createPublicPostSchema.safeParse(payload).success).toBe(true)
   })
 })

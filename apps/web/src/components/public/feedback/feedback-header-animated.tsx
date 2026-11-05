@@ -226,7 +226,8 @@ export function FeedbackHeaderAnimated({
         boardId: selectedBoardId as BoardId,
         title: title.trim(),
         content: contentMarkdown,
-        contentJson,
+        // Untouched editor: null here, while the schema takes an absent body.
+        contentJson: contentJson ?? undefined,
         ...(boardCustomFields.length > 0 ? { customFields: customFieldValues } : {}),
       })
 
