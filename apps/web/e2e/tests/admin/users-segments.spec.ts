@@ -15,18 +15,12 @@ test.describe('Admin Users Segments', () => {
     await expect(page.getByRole('button', { name: 'Create segment' })).toBeVisible()
   })
 
-  test('shows segments list or empty state', async ({ page }) => {
-    await page.waitForTimeout(500)
-
-    const emptyState = page.getByText(/no segments yet/i)
-    const editButtons = page.getByRole('button', { name: 'Edit segment' })
-
-    // Either at least one segment row exists (each has a hover edit button in
-    // the DOM) or the empty state prompt is shown.
-    const hasSegments = (await editButtons.count()) > 0
-    const hasEmptyState = (await emptyState.count()) > 0
-
-    expect(hasSegments || hasEmptyState).toBe(true)
+  test('lists the seeded segments, each with an edit action', async ({ page }) => {
+    // The seed creates segments, so the list is never empty here; every row
+    // carries its (hover-revealed) edit button in the DOM.
+    const editButtons = page.locator('button[title="Edit segment"]')
+    await expect(editButtons.first()).toBeAttached({ timeout: 10000 })
+    expect(await editButtons.count()).toBeGreaterThan(0)
   })
 
   test('can open "Create segment" dialog', async ({ page }) => {
@@ -34,7 +28,7 @@ test.describe('Admin Users Segments', () => {
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 5000 })
-    await expect(dialog.getByText(/create segment/i)).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: 'Create Segment' })).toBeVisible()
   })
 
   test('create dialog has manual and dynamic type selectors', async ({ page }) => {
@@ -44,8 +38,8 @@ test.describe('Admin Users Segments', () => {
     await expect(dialog).toBeVisible({ timeout: 5000 })
 
     // Type selector buttons (manual / dynamic) — text is lowercase in the DOM (CSS capitalize)
-    await expect(dialog.getByText('manual')).toBeVisible()
-    await expect(dialog.getByText('dynamic')).toBeVisible()
+    await expect(dialog.getByRole('button', { name: /^manual/ })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: /^dynamic/ })).toBeVisible()
   })
 
   test('create dialog has name and description fields', async ({ page }) => {
@@ -110,10 +104,10 @@ test.describe('Admin Users Segments', () => {
     await expect(dialog).toBeVisible({ timeout: 5000 })
 
     // Click the "dynamic" type option (text is lowercase in DOM; CSS capitalize makes it visually "Dynamic")
-    await dialog.getByText('dynamic').click()
+    await dialog.getByRole('button', { name: /^dynamic/ }).click()
 
     // Rule builder should appear
-    await expect(dialog.getByText('Rules')).toBeVisible({ timeout: 3000 })
+    await expect(dialog.getByText('Rules', { exact: true })).toBeVisible({ timeout: 3000 })
     await expect(dialog.getByText(/add condition/i)).toBeVisible()
   })
 
@@ -123,7 +117,7 @@ test.describe('Admin Users Segments', () => {
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 5000 })
 
-    await dialog.getByText('dynamic').click()
+    await dialog.getByRole('button', { name: /^dynamic/ }).click()
 
     const addConditionButton = dialog.getByRole('button', { name: /add condition/i })
     await expect(addConditionButton).toBeVisible({ timeout: 3000 })
@@ -142,7 +136,7 @@ test.describe('Admin Users Segments', () => {
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 5000 })
 
-    await dialog.getByText('dynamic').click()
+    await dialog.getByRole('button', { name: /^dynamic/ }).click()
     await dialog.getByRole('button', { name: /add condition/i }).click()
 
     // At least 2 comboboxes: attribute + operator
@@ -156,21 +150,15 @@ test.describe('Admin Users Segments', () => {
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 5000 })
 
-    await dialog.getByText('dynamic').click()
+    await dialog.getByRole('button', { name: /^dynamic/ }).click()
     await dialog.getByRole('button', { name: /add condition/i }).click()
 
     // Click the attribute combobox (second combobox — first is match all/any)
     const comboboxes = dialog.locator('[role="combobox"]')
     await comboboxes.nth(1).click()
 
-    const optionContainer = page
-      .locator('[role="listbox"]')
-      .or(page.locator('[data-slot="select-content"]'))
-
-    if ((await optionContainer.count()) > 0) {
-      await expect(optionContainer.getByText('Email Domain')).toBeVisible()
-      await expect(optionContainer.getByText('Post Count')).toBeVisible()
-    }
+    await expect(page.getByRole('option', { name: 'Name', exact: true })).toBeVisible()
+    await expect(page.getByRole('option', { name: 'Email', exact: true })).toBeVisible()
 
     await page.keyboard.press('Escape')
   })
@@ -183,34 +171,18 @@ test.describe('Admin Users Segments', () => {
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 5000 })
 
-    await dialog.getByText('dynamic').click()
+    await dialog.getByRole('button', { name: /^dynamic/ }).click()
     await dialog.locator('#seg-name').fill(segmentName)
 
     // Add a condition
     await dialog.getByRole('button', { name: /add condition/i }).click()
 
-    // Fill a value for the condition (e.g. post_count >= 1)
+    // Condition: Email Verified is True (a boolean field needs no typed value)
     const comboboxes = dialog.locator('[role="combobox"]')
-    // Select "Post Count" attribute
     await comboboxes.nth(1).click()
-    const optionContainer = page
-      .locator('[role="listbox"]')
-      .or(page.locator('[data-slot="select-content"]'))
-
-    if ((await optionContainer.count()) > 0) {
-      const postCountOption = optionContainer.getByText('Post Count')
-      if ((await postCountOption.count()) > 0) {
-        await postCountOption.click()
-      } else {
-        await page.keyboard.press('Escape')
-      }
-    }
-
-    // Fill value input
-    const valueInput = dialog.locator('input[type="number"]').first()
-    if ((await valueInput.count()) > 0) {
-      await valueInput.fill('1')
-    }
+    await page.getByRole('option', { name: 'Email Verified', exact: true }).click()
+    await expect(comboboxes.nth(1)).toHaveText('Email Verified')
+    await expect(comboboxes.nth(3)).toHaveText('True')
 
     await dialog.getByRole('button', { name: /create segment/i }).click()
     await expect(dialog).toBeHidden({ timeout: 10000 })
@@ -278,8 +250,10 @@ test.describe('Admin Users Segments', () => {
     // Confirm deletion
     await confirmDialog.getByRole('button', { name: /^delete$/i }).click()
 
-    // Segment should no longer appear
-    await expect(page.getByText(segmentName)).toBeHidden({ timeout: 10000 })
+    // The dialog closes and the segment's nav row is gone. (The name is not
+    // looked up page-wide: the closing dialog still quotes it for a moment.)
+    await expect(confirmDialog).toBeHidden({ timeout: 10000 })
+    await expect(page.getByRole('button', { name: segmentName })).toHaveCount(0)
   })
 
   test('delete confirmation can be cancelled', async ({ page }) => {
@@ -313,21 +287,15 @@ test.describe('Admin Users Segments', () => {
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 5000 })
 
-    await dialog.getByText('dynamic').click()
+    await dialog.getByRole('button', { name: /^dynamic/ }).click()
     await dialog.getByRole('button', { name: /add condition/i }).click()
 
     // The match selector is the first combobox (renders "ALL" / "ANY")
     const matchSelect = dialog.locator('[role="combobox"]').first()
     await matchSelect.click()
 
-    const optionContainer = page
-      .locator('[role="listbox"]')
-      .or(page.locator('[data-slot="select-content"]'))
-
-    if ((await optionContainer.count()) > 0) {
-      await expect(optionContainer.getByText(/all/i).first()).toBeVisible()
-      await expect(optionContainer.getByText(/any/i).first()).toBeVisible()
-    }
+    await expect(page.getByRole('option', { name: 'ALL', exact: true })).toBeVisible()
+    await expect(page.getByRole('option', { name: 'ANY', exact: true })).toBeVisible()
 
     await page.keyboard.press('Escape')
   })

@@ -17,12 +17,22 @@
  * The mutation, segments, and portalConfig queries are mocked. The
  * portalConfig mock is mutable so tests can flip workspace flags between
  * renders.
+ *
+ * Contract (confirmed 2026-11-05):
+ *   B1 Opening the Access tab changes nothing: without input there are no
+ *      unsaved changes and nothing is saved.
+ *   B2 When the workspace forbids anonymous access, the form shows vote,
+ *      comment and submit as "signed-in", even where "anonymous" is stored.
+ *   B3 The first real edit saves those bumped values along with it: after a
+ *      save no permission sits on "anonymous" that the workspace forbids.
+ *   B4 A reload of the board from the server never overwrites unsaved input.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import fc from 'fast-check'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BoardAccessForm, PRESET_META } from '../board-access-form'
-import { DEFAULT_BOARD_ACCESS, type BoardAccess } from '@/lib/shared/db-types'
+import { DEFAULT_BOARD_ACCESS, type AccessTier, type BoardAccess } from '@/lib/shared/db-types'
 import { accessForPreset } from '@/lib/shared/schemas/boards'
 import type { BoardId } from '@quackback/ids'
 
@@ -518,4 +528,188 @@ describe('PRESET_META ↔ accessForPreset agreement (round-trip guard)', () => {
       })
     })
   }
+})
+
+// ---------------------------------------------------------------------------
+// Opening the tab, the workspace ceiling, and server reloads (B1–B4)
+// ---------------------------------------------------------------------------
+
+const ALL_TIERS: AccessTier[] = ['anonymous', 'authenticated', 'segments', 'team']
+const CEILING_ACTIONS = ['vote', 'comment', 'submit'] as const
+
+/** Stored access for any tier combination; a segments tier carries a segment. */
+const storedAccessArb = fc
+  .record({
+    view: fc.constantFrom(...ALL_TIERS),
+    vote: fc.constantFrom(...ALL_TIERS),
+    comment: fc.constantFrom(...ALL_TIERS),
+    submit: fc.constantFrom(...ALL_TIERS),
+  })
+  .map((tiers): BoardAccess => ({
+    ...tiers,
+    segments: {
+      view: tiers.view === 'segments' ? ['seg_alpha'] : [],
+      vote: tiers.vote === 'segments' ? ['seg_alpha'] : [],
+      comment: tiers.comment === 'segments' ? ['seg_alpha'] : [],
+      submit: tiers.submit === 'segments' ? ['seg_alpha'] : [],
+    },
+    moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+  }))
+
+const ALL_ANONYMOUS: BoardAccess = {
+  view: 'anonymous',
+  vote: 'anonymous',
+  comment: 'anonymous',
+  submit: 'anonymous',
+  segments: { view: [], vote: [], comment: [], submit: [] },
+  moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+}
+
+function renderReloadableForm(access: BoardAccess) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <BoardAccessForm board={{ id: BOARD_ID, access }} />
+    </QueryClientProvider>
+  )
+  function reloadFromServer(next: BoardAccess) {
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <BoardAccessForm board={{ id: BOARD_ID, access: next }} />
+      </QueryClientProvider>
+    )
+  }
+  return { ...view, reloadFromServer }
+}
+
+function saveDockIsDirty(container: HTMLElement): boolean {
+  const region = within(container).getByRole('region', { name: /save changes/i })
+  return region.getAttribute('data-dirty') === 'true'
+}
+
+/** Resolves once the mocked portal config has reached the form. */
+async function waitForWorkspacePolicy(container: HTMLElement, allowAnonymous: boolean) {
+  const banner = /Workspace policy disables/
+  if (allowAnonymous) {
+    await waitFor(() => expect(within(container).queryByText(banner)).toBeNull())
+    return
+  }
+  await waitFor(() => expect(within(container).getByText(banner)).toBeTruthy())
+}
+
+describe('<BoardAccessForm> opening the tab, ceiling and reloads', () => {
+  it('opening the tab leaves the form clean for any stored access and either workspace policy (B1)', async () => {
+    await fc.assert(
+      fc.asyncProperty(storedAccessArb, fc.boolean(), async (stored, allowAnonymous) => {
+        setWsFlags({ allowAnonymous })
+        const view = renderForm(stored)
+        await waitForWorkspacePolicy(view.container, allowAnonymous)
+
+        expect(saveDockIsDirty(view.container)).toBe(false)
+        expect(mutate).not.toHaveBeenCalled()
+        view.unmount()
+      }),
+      { numRuns: 30 }
+    )
+  })
+
+  it('shows forbidden anonymous tiers as signed-in without offering a save (B2, B1)', async () => {
+    setWsFlags({ allowAnonymous: false })
+    const view = renderForm(ALL_ANONYMOUS)
+    await waitForWorkspacePolicy(view.container, false)
+
+    expect(isCellSelected('Vote', 'Signed-in')).toBe(true)
+    expect(isCellSelected('Comment', 'Signed-in')).toBe(true)
+    expect(isCellSelected('Submit posts', 'Signed-in')).toBe(true)
+    expect(isCellSelected('View', 'Anyone')).toBe(true)
+    expect(saveDockIsDirty(view.container)).toBe(false)
+  })
+
+  it('the first real edit saves no anonymous tier the workspace forbids, for any stored access (B3)', async () => {
+    await fc.assert(
+      fc.asyncProperty(storedAccessArb, async (stored) => {
+        mutate.mockReset()
+        setWsFlags({ allowAnonymous: false })
+        const view = renderForm(stored)
+        await waitForWorkspacePolicy(view.container, false)
+
+        // Team only is the most restrictive tier, so this edit is always allowed.
+        fireEvent.click(within(view.container).getByRole('button', { name: 'Comment: Team only' }))
+        fireEvent.click(within(view.container).getByRole('button', { name: /save changes/i }))
+        await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1))
+
+        const saved = mutate.mock.calls[0][0].access as BoardAccess
+        for (const action of CEILING_ACTIONS) {
+          expect(saved[action]).not.toBe('anonymous')
+        }
+        expect(saved.comment).toBe('team')
+        expect(saved.view).toBe(stored.view)
+        view.unmount()
+      }),
+      { numRuns: 30 }
+    )
+  })
+
+  it('the saved bumped values are the ones the form showed (B3)', async () => {
+    setWsFlags({ allowAnonymous: false })
+    const view = renderForm(ALL_ANONYMOUS)
+    await waitForWorkspacePolicy(view.container, false)
+
+    clickTierCell('Comment', 'Team only')
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+
+    await waitFor(() =>
+      expect(mutate).toHaveBeenCalledWith({
+        boardId: BOARD_ID,
+        access: expect.objectContaining({
+          view: 'anonymous',
+          vote: 'authenticated',
+          comment: 'team',
+          submit: 'authenticated',
+        }),
+      })
+    )
+  })
+
+  it('a reload from the server keeps an unsaved edit (B4)', () => {
+    const view = renderReloadableForm(PUBLIC_ACCESS)
+    clickTierCell('Comment', 'Team only')
+
+    view.reloadFromServer({ ...PUBLIC_ACCESS, vote: 'team' })
+
+    expect(isCellSelected('Comment', 'Team only')).toBe(true)
+    expect(isCellSelected('Vote', 'Signed-in')).toBe(true)
+    expect(saveDockIsDirty(view.container)).toBe(true)
+  })
+
+  it('a reload that brings back what the form shows ends the unsaved state (B4)', () => {
+    const view = renderReloadableForm(PUBLIC_ACCESS)
+    clickTierCell('Comment', 'Team only')
+
+    view.reloadFromServer({ ...PUBLIC_ACCESS, comment: 'team' })
+
+    expect(isCellSelected('Comment', 'Team only')).toBe(true)
+    expect(saveDockIsDirty(view.container)).toBe(false)
+  })
+
+  it('a reload without an edit shows the server state (B4)', () => {
+    const view = renderReloadableForm(PUBLIC_ACCESS)
+
+    view.reloadFromServer({ ...PUBLIC_ACCESS, vote: 'team' })
+
+    expect(isCellSelected('Vote', 'Team only')).toBe(true)
+    expect(saveDockIsDirty(view.container)).toBe(false)
+  })
+
+  it('Discard returns to the stored access with the ceiling applied, and clean (B2, B1)', async () => {
+    setWsFlags({ allowAnonymous: false })
+    const view = renderForm(ALL_ANONYMOUS)
+    await waitForWorkspacePolicy(view.container, false)
+
+    clickTierCell('Comment', 'Team only')
+    fireEvent.click(screen.getByRole('button', { name: /discard/i }))
+
+    expect(isCellSelected('Comment', 'Signed-in')).toBe(true)
+    expect(saveDockIsDirty(view.container)).toBe(false)
+  })
 })

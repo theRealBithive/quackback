@@ -173,8 +173,8 @@ test.describe('Admin Users - User Selection', () => {
       // Should show account section
       await expect(page.getByText('Account', { exact: true })).toBeVisible({ timeout: 15000 })
 
-      // Should show join date
-      await expect(page.getByText(/Joined portal/)).toBeVisible()
+      // Should show when the account was created
+      await expect(page.getByText('Account created', { exact: true })).toBeVisible()
     }
   })
 
@@ -306,8 +306,7 @@ test.describe('Admin Users - Filters Panel', () => {
     const mobileFiltersButton = page.getByRole('button', { name: 'Filters', exact: true })
 
     // At least one should exist in the DOM
-    const hasFiltersUI =
-      (await desktopAside.count()) > 0 || (await mobileFiltersButton.count()) > 0
+    const hasFiltersUI = (await desktopAside.count()) > 0 || (await mobileFiltersButton.count()) > 0
 
     expect(hasFiltersUI).toBe(true)
   })
@@ -533,25 +532,16 @@ test.describe('Admin Users - Engagement Metrics', () => {
     const userCards = page.locator('[class*="cursor-pointer"]').filter({
       has: page.locator('div').filter({ hasText: /@/ }),
     })
-    if ((await userCards.count()) === 0) return
+    await expect(userCards.first()).toBeVisible({ timeout: 10000 })
 
     await userCards.first().click()
     await expect(page).toHaveURL(/selected=/, { timeout: 10000 })
 
-    // Stats section loads after a brief delay - wait for Posts label
-    await expect(page.getByText('Posts', { exact: true })).toBeVisible({ timeout: 15000 })
-    await expect(page.getByText('Comments', { exact: true })).toBeVisible()
-    await expect(page.getByText('Votes', { exact: true })).toBeVisible()
-
-    // Each stat label should be preceded by a numeric count (even if it's 0)
-    const statsSection = page.locator('[class*="grid"]').filter({
-      has: page.getByText('Posts', { exact: true }),
-    })
-    if ((await statsSection.count()) > 0) {
-      // At least one sibling element should contain a digit
-      const hasNumbers = (await statsSection.locator('text=/^\\d+$/').count()) > 0
-      // Counts can be 0 for brand-new users — just verify the structure exists
-      expect(hasNumbers || true).toBe(true)
+    // Each fact cell of the detail panel is a number over its label; the
+    // list's column headers carry the same labels without a number.
+    for (const label of ['Posts', 'Comments', 'Votes']) {
+      const factCell = page.locator('div').filter({ hasText: new RegExp(`^\\d+${label}$`) })
+      await expect(factCell.last()).toBeVisible({ timeout: 15000 })
     }
   })
 
@@ -725,9 +715,9 @@ test.describe('Admin Users - Advanced Filters', () => {
     await page.waitForLoadState('networkidle')
 
     // Locate the remove (×) button on the email filter chip
-    const filterChip = page.locator('[class*="FilterChip"]').or(
-      page.locator('button').filter({ hasText: /verified/i })
-    )
+    const filterChip = page
+      .locator('[class*="FilterChip"]')
+      .or(page.locator('button').filter({ hasText: /verified/i }))
     // Find the close/remove icon button near the chip
     const removeButton = page.locator('button[aria-label*="remove"], button[aria-label*="clear"]')
     if ((await removeButton.count()) > 0) {

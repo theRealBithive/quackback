@@ -606,8 +606,12 @@ function PeopleField({
     ? 'Search people who have signed in, or type a full email to invite someone new. You can paste several emails.'
     : 'Type a full email to invite someone. You can paste several emails.'
 
+  // The panel floats over the form instead of taking space in it. In the flow
+  // it pushed Role and the buttons down while open, and pressing one of them
+  // blurs the input, which hides the panel: the button jumped up before the
+  // pointer was released, so the click landed on nothing.
   return (
-    <div className="space-y-1.5">
+    <div className="relative space-y-1.5">
       <Label htmlFor={inputId}>People</Label>
       <div
         className="flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-field border border-input px-2 py-1.5 focus-within:border-muted-foreground"
@@ -656,7 +660,7 @@ function PeopleField({
       <div
         ref={panelRef}
         hidden={!showPanel}
-        className="max-h-64 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-md"
+        className="absolute inset-x-0 top-full z-10 mt-1 max-h-64 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-md"
       >
         <div id={listId} role="listbox" aria-label={recent ? 'Recently active' : 'People'}>
           {recent && options.length > 0 && (

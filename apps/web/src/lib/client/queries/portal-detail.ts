@@ -77,6 +77,8 @@ export interface PublicPostDetailView {
   commentsNextCursor?: string | null
   /** Total live root-comment count (for the "show N more" label). */
   commentsTotalRootCount?: number
+  /** Comments this viewer can read, replies included, across all pages (for the heading). */
+  commentsTotalCount?: number
   pinnedComment: PinnedCommentView | null
   pinnedCommentId: PostCommentId | null
   /** Whether comments are locked (portal users can't comment) */

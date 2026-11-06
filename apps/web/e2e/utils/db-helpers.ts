@@ -74,6 +74,38 @@ export function setSupportSurfaces(enabled: boolean = true): void {
   runScript('set-support-surfaces.ts', [enabled ? 'on' : 'off'], 'set support surfaces')
 }
 
+/**
+ * Turn the help center on, with the fixture category and articles from
+ * `e2e/fixtures/help-center.ts`, or off. Specs that read the help center call
+ * this themselves instead of relying on another spec having enabled it.
+ */
+export function setHelpCenter(enabled: boolean): void {
+  runScript('set-help-center.ts', [enabled ? 'on' : 'off'], 'set help center')
+}
+
+export interface SeededAdminNotifications {
+  unread: string[]
+  read: string[]
+}
+
+/**
+ * Replace the e2e admin's notifications with two unread and one read, none
+ * linked to a post, or with none at all ('empty'). The seed creates none, so
+ * the page would only ever show its empty state otherwise.
+ */
+export function seedAdminNotifications(mode: 'list' | 'empty' = 'list'): SeededAdminNotifications {
+  const output = runScript('seed-admin-notifications.ts', [mode], 'seed admin notifications')
+  return JSON.parse(output) as SeededAdminNotifications
+}
+
+/**
+ * Give one seeded portal user a live session, so the Add people dialog has
+ * someone to list as recently active. Returns that user's email.
+ */
+export function seedRecentPortalSession(): string {
+  return runScript('seed-recent-portal-session.ts', [], 'seed a recent portal session').trim()
+}
+
 /** Enable (or disable) widget Help/Changelog/Messages tabs plus product flags. */
 export function setWidgetSurfaces(enabled: boolean = true): void {
   runScript('set-widget-surfaces.ts', [enabled ? 'on' : 'off'], 'set widget surfaces')

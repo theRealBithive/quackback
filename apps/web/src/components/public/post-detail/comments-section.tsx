@@ -95,6 +95,11 @@ interface CommentsSectionProps {
   isLoadingMoreComments?: boolean
   /** Remaining root comments not yet loaded (for the button label). */
   remainingCommentCount?: number
+  /**
+   * Comments the viewer can read on this post, replies included, across every
+   * page — not only the loaded ones. Without it the heading counts what is loaded.
+   */
+  totalCommentCount?: number
   /** When set, comment composers expose image insert. */
   onImageUpload?: (file: File) => Promise<string>
   /** Team members with post.approve can approve/reject pending comments inline. */
@@ -123,11 +128,13 @@ export function CommentsSection({
   onLoadMoreComments,
   isLoadingMoreComments = false,
   remainingCommentCount,
+  totalCommentCount,
   onImageUpload,
   canModerate = false,
 }: CommentsSectionProps) {
   const intl = useIntl()
-  const commentCount = useMemo(() => countAllComments(comments), [comments])
+  const loadedCommentCount = useMemo(() => countAllComments(comments), [comments])
+  const commentCount = totalCommentCount ?? loadedCommentCount
 
   // useQuery reads from cache if available (prefetched in loader), fetches if not
   // Skip query in admin mode where we provide user directly

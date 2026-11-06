@@ -3,6 +3,9 @@
  * ## F — Forms
  * - F1 Typing in a post, changelog or help-center article editor updates the form's content as markdown and marks the form dirty, without running validation on each keystroke.
  * - F2 A checkbox that feeds a boolean setting (ticket field required, incident restores the status) stores true for a checked box and false for an unchecked one.
+ *
+ * ## E — Editor
+ * - E5 A post can be created and saved without a description; an editor nobody typed in never makes the server reject the submit. (Contract list: `components/ui/__tests__/form-control.contract.test.tsx`.)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
@@ -11,6 +14,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { generateId } from '@quackback/ids'
 import type { Board, PostStatusEntity, PostTag } from '@/lib/shared/db-types'
 import type { CurrentUser } from '@/lib/shared/types/inbox'
+import { tiptapContentSchema } from '@/lib/shared/schemas/posts'
 
 const createPost = vi.hoisted(() => ({ mutate: vi.fn(), reset: vi.fn() }))
 
@@ -133,5 +137,21 @@ describe('CreatePostDialog content editor', () => {
 
     expect(screen.queryByText('Title is required')).toBeNull()
     expect(createPost.mutate).not.toHaveBeenCalled()
+  })
+
+  it('creates a post with a title and no body (E5)', async () => {
+    // A post may be created without a description. An editor nobody typed in
+    // holds no document, and the create must send no body rather than null,
+    // which the server's `tiptapContentSchema.optional()` rejects.
+    renderDialog()
+    await screen.findByLabelText('Post body')
+
+    await userEvent.type(screen.getByRole('textbox', { name: /feedback about/i }), 'Dark mode')
+    await userEvent.click(screen.getByRole('button', { name: 'Create post' }))
+
+    expect(createPost.mutate).toHaveBeenCalledTimes(1)
+    const payload = createPost.mutate.mock.calls[0]![0]
+    expect(payload.title).toBe('Dark mode')
+    expect(tiptapContentSchema.optional().safeParse(payload.contentJson).success).toBe(true)
   })
 })

@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 18x — Test suites are flaky under parallel load
+## 19x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -175,6 +175,11 @@ shared hoisted mocks, so the next test fails an assertion it never caused
 "keeps a private workspace closed" test then saw a call it had not made).
 Read a red test right after a timed-out property as the timeout, not as a
 second finding, and give a heavy property its own timeout.
+
+2026-11-05: `message-bubble-edit.contract.test.tsx` and
+`changelog-notified-at.test.ts` failed together in a 63-file unit run while a
+Playwright run drove the dev server on the same machine, and both passed alone a
+minute later. A unit run beside an e2e run is a load test of the laptop.
 
 ## 10x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
@@ -547,6 +552,68 @@ seconds); and the script fails loudly if no file appeared, because a silent
 no-op would quietly restore the number. CI cannot catch that rot on its own —
 the `check` job builds before it typechecks, and the build writes the same file
 — which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
+
+## 5x — The coverage config lives in the root config, so a run from apps/web measures nothing
+
+`vitest.config.ts` at the repo root carries the `coverage` block;
+`apps/web/vitest.config.ts` does not. Run the documented coverage command from
+`apps/web` — the natural place, since that is where the suites are — and vitest
+writes **no report at all**, with no error.
+
+`scripts/diff-coverage-check.ts` then reads every `coverage-final.json` under
+`coverage/`, finds the one a _previous_ run left there, and grades the diff
+against it. The output is entirely plausible: a file count, a line count, and a
+list of "added lines that no test executed" — which are simply every line
+added since that stale report was written. Two cycles went into chasing those
+as real holes.
+
+Two things would have caught it: the report's own age, and the fact that new
+source files appeared under "out of scope, although they look like source" —
+a file the run had definitely executed cannot be out of scope. The second one
+is the tell worth remembering.
+
+The invocation that works, from the repo **root**, with `apps/web/` on the
+paths:
+
+```bash
+rm -rf coverage/local   # a stale report is graded silently
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportsDirectory=coverage/local apps/web/src/<the suites>
+```
+
+Worth fixing in the gate rather than in memory: refuse a report older than the
+newest file it is being asked to grade.
+
+Second run, and it does not need a stale report to mislead. With `coverage/`
+cleared first, the run from `apps/web` writes a report that is real but
+measured under `apps/web/vitest.config.ts`, whose coverage block does not
+exist — so the gate graded a brand-new source file as **out of scope** and
+called seven added lines in two edited files never executed, all of which that
+same run had just run. Re-running the identical suites from the repo root
+turned that into `12 executed, 0 never executed`. The tell held: a file the run
+definitely executed was listed under "out of scope, although they look like
+source". Read that line before reading the holes.
+
+Third hit, batch M fork fixes: a coverage run from `apps/web` against the batch
+database produced no report at all (it also had red tests, see the next entry),
+and the rerun from the root needed the database override described in "The
+root vitest config pins `DATABASE_URL`" below, which the `apps/web` run had not.
+
+2026-11-05: hit again. A coverage run from `apps/web` wrote its report under
+`apps/web/coverage/local`, and the gate, reading from the root, judged 0 files
+and printed PASS. Only the "out of scope, although they look like source" list
+gave it away.
+
+2026-11-06: the other direction. The root config pins
+`DATABASE_URL` to `localhost:5432/quackback_test` and ignores the environment,
+so with `REQUIRE_TEST_DB=1` every `.db.test.ts` failed to load from the root on
+a machine whose 5432 belongs to someone else, and with `reportOnFailure` off
+the 40 suites that passed left no report either. `apps/web/vitest.config.ts`
+does honour `DATABASE_URL`, and from there a coverage run did write a report
+this time. Measured the branch in two runs: the non-DB suites from the root into
+`coverage/local`, the DB suites from `apps/web` with
+`--coverage.reportsDirectory=../../coverage/db`, then the gate with
+`COVERAGE_DIR=coverage`, which reads both.
 
 ## 4x — A picked upstream suite is written against module names from commits we skipped
 
@@ -922,52 +989,6 @@ the workaround tried before committing (pointing `HEAD` at a throwaway
 trick that should not be needed. Commit on the feature branch first; the gates
 are then one plain command each.
 
-## 3x — The coverage config lives in the root config, so a run from apps/web measures nothing
-
-`vitest.config.ts` at the repo root carries the `coverage` block;
-`apps/web/vitest.config.ts` does not. Run the documented coverage command from
-`apps/web` — the natural place, since that is where the suites are — and vitest
-writes **no report at all**, with no error.
-
-`scripts/diff-coverage-check.ts` then reads every `coverage-final.json` under
-`coverage/`, finds the one a _previous_ run left there, and grades the diff
-against it. The output is entirely plausible: a file count, a line count, and a
-list of "added lines that no test executed" — which are simply every line
-added since that stale report was written. Two cycles went into chasing those
-as real holes.
-
-Two things would have caught it: the report's own age, and the fact that new
-source files appeared under "out of scope, although they look like source" —
-a file the run had definitely executed cannot be out of scope. The second one
-is the tell worth remembering.
-
-The invocation that works, from the repo **root**, with `apps/web/` on the
-paths:
-
-```bash
-rm -rf coverage/local   # a stale report is graded silently
-bun x vitest run --coverage.enabled --coverage.reporter=json \
-  --coverage.reportsDirectory=coverage/local apps/web/src/<the suites>
-```
-
-Worth fixing in the gate rather than in memory: refuse a report older than the
-newest file it is being asked to grade.
-
-Second run, and it does not need a stale report to mislead. With `coverage/`
-cleared first, the run from `apps/web` writes a report that is real but
-measured under `apps/web/vitest.config.ts`, whose coverage block does not
-exist — so the gate graded a brand-new source file as **out of scope** and
-called seven added lines in two edited files never executed, all of which that
-same run had just run. Re-running the identical suites from the repo root
-turned that into `12 executed, 0 never executed`. The tell held: a file the run
-definitely executed was listed under "out of scope, although they look like
-source". Read that line before reading the holes.
-
-Third hit, batch M fork fixes: a coverage run from `apps/web` against the batch
-database produced no report at all (it also had red tests, see the next entry),
-and the rerun from the root needed the database override described in "The
-root vitest config pins `DATABASE_URL`" below, which the `apps/web` run had not.
-
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
 `scripts/mutation-manifest.json` and the `toEqual` in
@@ -1265,6 +1286,69 @@ proof; nothing about reading the source settles it either way. Generalises to
 every interactive component in this repo: a coverage hole on a line whose only
 content is a prop-value arrow function means "write a test that clicks the
 control", never "render something that passes near it".
+
+## 2x — A strict-mode violation fails `expect` at once, so a closing dialog fails a "gone" check
+
+`expect(page.getByText(name)).toBeHidden()` right after confirming a delete fails
+in milliseconds with "strict mode violation … resolved to 2 elements": for the
+length of its close animation the confirm dialog still quotes the name next to
+the row. A strict-mode violation is not retried, so the failure screenshot shows
+that in-between frame, and it reads like a dialog that never closes. Three specs
+(tags, user attributes, segments) failed this way while the product deleted
+correctly; a hand-written Playwright script never reproduced it, because it
+waited before looking. Assert the dialog hidden first and then the specific row
+(`toHaveCount(0)`), never a page-wide text lookup of something the dialog also
+names. The same trap hides behind every `getByText` that a responsive page
+renders twice (a desktop table and a hidden mobile list).
+
+2026-11-06: bit again within the same run, in the webhooks spec written to
+replace a guarded one: `getByText(url).toBeHidden()` after confirming the delete.
+Same fix — the dialog hidden first, then the row by `toHaveCount(0)`.
+
+## 2x — An e2e spec depends on a workspace setting another spec happened to set
+
+Workspace settings are global, and several e2e specs flip them
+(`setWorkspaceAnon`, `setHelpCenter`, `setSupportSurfaces`). A spec that reads
+one without setting it passes or fails depending on which spec ran before it in
+the shard, and the failure points at the wrong place. Measured on 2026-11-05:
+anonymous voting opened the sign-in dialog, because the seed leaves
+`features.allowAnonymous` unset (read as off, fail-closed) and only
+board-access-matrix switched it on. Once voting switched it on, the
+unauthenticated comments block failed, because it had silently relied on "off".
+Each spec now sets the state it describes in a `beforeAll`. That is safe only
+because CI runs one worker. Locally, `--workers 1` is needed for the same reason.
+When an e2e failure makes no sense on its own, check the settings row before
+the selectors.
+
+2026-11-06: twice more, from two directions. `comments.spec` signed in through
+the email code and got "No live OTP verification row" in all three attempts.
+The send had been refused with a redirect to `error=magic_link_method_not_allowed`,
+which `page.request.post` followed to a 200 page. The method is switched on only
+by global setup, and only the admin project depends on `setup`, so shard 3,
+which holds no admin spec, never ran it. The OTP helper now switches the method
+on itself and refuses redirects, so a blocked send fails under its own name.
+Separately, the Add people dialog opens a "Recently active" list once any portal
+user has a session, and that list is what made Cancel miss in a full shard and
+pass alone. It was a product bug that only shared state could reveal. When a
+spec is green alone and red in a shard, compare the state the shard left behind
+with a fresh seed before reading the selectors.
+
+## 2x — A click on a server-rendered control before hydration does nothing, and Playwright reports it as a missing element
+
+Under `vite dev`, the admin and portal pages render their buttons on the server.
+A Playwright click that lands before React hydrates opens no menu, fills no
+input, switches no tab, and the next assertion fails as "element not found" or
+a text that was typed is silently dropped. Seen on 2026-11-05 on the help-center
+"New" menu, the changelog "New entry" button, the board Access tab, the
+goal-change button, the post-list Search popover and the type-to-confirm delete
+input after a reload. `waitForLoadState('networkidle')` does not help. What
+does: repeat the action until its effect shows, `expect(async () => { click;
+expect(effect).toBeVisible({ timeout: 2000 }) }).toPass()`. A test-only
+hydration marker on `<html>` would let every spec wait once instead.
+
+2026-11-06: the team spec's dialog tests and a hand-written probe both opened
+Add people with one click on a cold dev server and waited two minutes for a
+dialog that never came. Same fix, as `openAddPeople` in the spec.
 
 ## 2x — happy-dom's `Headers` loses a `__Secure-` cookie, so an OAuth round trip fails with `state_mismatch`
 
@@ -2140,6 +2224,58 @@ command in the foreground finished in under three minutes both times. The
 budget has to fit the foreground call's ten-minute ceiling, so pass
 `MUTATION_BUDGET_SECONDS=570`; the runs here took 2m40s–4m40s for nine to
 eleven graded files.
+
+## 1x — An e2e spec that returns early on a missing element passes over a changed UI
+
+`e2e/tests/admin/help-center.spec.ts`, `changelog.spec.ts`, `boards.spec.ts`
+and the public post-list specs guarded most tests with
+`if ((await x.count()) === 0) return` or `test.skip()` on exactly the element
+under test. When the UI moved on (the changelog status became a popover, the
+help-center settings toggle stopped rendering while the product was off, the
+board settings lost their `/access` route), the tests kept passing while asserting
+nothing. Replacing the guards with assertions in one run (2026-11-05) turned
+about 60 green tests red, and behind them sat two real production bugs: no
+admin could create a help-center article, changelog entry or post
+(`FormControl` broke the editor's Markdown), and the article editor lost its
+body on a hard load. Any e2e test that branches on whether its subject exists
+should be read as unverified until it asserts the subject.
+
+## 1x — The root `.env` points `DATABASE_URL` at whatever Postgres owns port 5432
+
+The repo-root `.env` sets `DATABASE_URL=postgresql://…@localhost:5432/quackback_dev`.
+The e2e helper scripts under `apps/web/e2e/scripts/` are run with bun, which
+loads that `.env` when the variable is not already in the environment. On this
+machine port 5432 belongs to another project's container, so a script run
+without an exported `DATABASE_URL` connected to the wrong database and failed
+with "password authentication failed". It could just as well have connected.
+Always export the test database explicitly for e2e work
+(`DATABASE_URL=postgresql://postgres:password@localhost:55499/quackback_test`
+for the e2e container), and consider having the e2e scripts refuse a
+`DATABASE_URL` whose database name does not end in `_test`.
+
+## 1x — The MinIO images in `docker-compose.yml` can no longer be pulled
+
+`minio/minio` and `minio/mc` (also on quay.io and from Bitnami) answer "pull
+access denied" (checked 2026-11-05), so `docker compose up minio minio-init` fails
+and a fresh dev setup has no object storage. With none configured, every upload
+route answers 503 "Storage not configured", and a test that uploads for real fails
+as a missing element several steps later. The real-paste conversation-image spec
+was red in e2e-full for exactly this reason, beside a stubbed twin that passed.
+e2e-full now runs `rustfs/rustfs` (pinned by digest) as a service container plus an
+`aws s3 mb` step. With no subcommand the image starts the server on `/data`, so a
+service container works without a `command:`. `docker-compose.yml` is upstream's
+and still names MinIO; for local e2e, start the same RustFS image on port 9000 and
+pass the `S3_*` block from `.env.example` with the RustFS keys.
+
+## 1x — A role query that finds no dialog can mean two dialogs hide each other
+
+On `/admin/roadmap`, `getByRole('dialog')` found nothing while two `role=dialog`
+elements sat in the DOM: the layout's feedback post modal and the roadmap's own
+both opened for the same `?post=`, and each modal marks everything outside it
+`aria-hidden`, so each hid the other. The URL was right and every server call
+returned 200, which made it look like a slow load. Count
+`document.querySelectorAll('[role=dialog]')` against `getByRole('dialog')` before
+blaming timing; a mismatch means stacked modals.
 
 # Resolved
 

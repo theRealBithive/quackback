@@ -1,9 +1,16 @@
 import { test, expect } from '@playwright/test'
-import { setWidgetSurfaces } from '../../utils/db-helpers'
+import { setHelpCenter, setWidgetSurfaces } from '../../utils/db-helpers'
+import { HELP_CENTER_FIXTURE } from '../../fixtures/help-center'
+import { setWorkspaceAnon } from '../../utils/access-helpers'
 
 test.describe('Widget visitor surfaces', { tag: '@smoke' }, () => {
   test.beforeAll(() => {
     setWidgetSurfaces(true)
+    // The Help tab lists categories; the fixture guarantees one.
+    setHelpCenter(true)
+    // The post detail offers "Log in to join the conversation" only while the
+    // workspace does not allow anonymous comments; voting.spec.ts turns that on.
+    setWorkspaceAnon(false)
   })
 
   test('Feedback tab lists posts and opens post detail', async ({ page }) => {
@@ -30,9 +37,10 @@ test.describe('Widget visitor surfaces', { tag: '@smoke' }, () => {
     await page.getByRole('button', { name: 'Help', exact: true }).click()
     const search = page.getByRole('textbox', { name: 'Search help articles' })
     await expect(search).toBeVisible({ timeout: 10000 })
-    const empty = page.getByText('No articles yet')
-    const category = page.locator('button').filter({ hasNotText: 'Help' }).first()
-    await expect(empty.or(category)).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText(HELP_CENTER_FIXTURE.categoryName).first()).toBeVisible({
+      timeout: 10000,
+    })
+    await expect(page.getByText('No articles yet')).toHaveCount(0)
   })
 
   test('Changelog tab loads via the widget BFF', async ({ page }) => {

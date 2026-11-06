@@ -339,6 +339,7 @@ export const fetchPostWithDetails = createServerFn({ method: 'GET' })
       commentsHasMore: commentsPage.hasMore,
       commentsNextCursor: commentsPage.nextCursor,
       commentsTotalRootCount: commentsPage.totalRootCount,
+      commentsTotalCount: commentsPage.totalCount,
       pinnedComment: serializedPinnedComment,
       canonicalPostId: result.canonicalPostId,
       mergedAt: toIsoStringOrNull(result.mergedAt),

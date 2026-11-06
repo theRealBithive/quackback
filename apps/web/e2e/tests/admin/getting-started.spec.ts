@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { setHelpCenter } from '../../utils/db-helpers'
 
 // Admin project uses stored auth state (e2e/.auth/admin.json) — no manual login needed.
 
@@ -98,11 +99,13 @@ test.describe('Launch plan (Getting Started)', () => {
   })
 
   test('changing the goal to Help Center turns the product on', async ({ page }) => {
-    const changeGoal = page.getByRole('button', { name: 'Change goal' })
-    if ((await changeGoal.count()) === 0 || (await changeGoal.isDisabled())) {
-      test.skip(true, 'This workspace does not let the admin change the goal')
-      return
-    }
+    // Start with the product off, so the sidebar link can only come from the
+    // goal change; the help-center specs switch it back on for themselves.
+    setHelpCenter(false)
+    await page.goto('/admin/getting-started')
+    const sidebarLink = page.getByRole('complementary').getByRole('link', { name: 'Help Center' })
+    await expect(sidebarLink).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Change goal' })).toBeEnabled()
 
     const seededGoal = 'Product feedback'
     const goalHeading = page.locator('#activation-goal + h2')
@@ -110,15 +113,26 @@ test.describe('Launch plan (Getting Started)', () => {
     async function selectGoal(label: string): Promise<void> {
       const current = (await goalHeading.textContent())?.trim()
       if (current === label) return
-      await page.getByRole('button', { name: 'Change goal' }).click()
-      await page.getByRole('radio', { name: label }).click()
+      // The button is server-rendered; a click before hydration opens nothing.
+      // "Change goal" toggles the picker, so it is clicked only while closed.
+      const goalPicker = page.getByRole('radiogroup', { name: 'Workspace goal' })
+      await expect(async () => {
+        if (!(await goalPicker.isVisible())) {
+          await page.getByRole('button', { name: 'Change goal' }).click()
+        }
+        await expect(goalPicker).toBeVisible({ timeout: 2000 })
+      }).toPass({ timeout: 15000 })
+      // The radio input is visually hidden (sr-only); a person clicks its label.
+      const goalOption = goalPicker.getByRole('radio', { name: new RegExp(`^${label}`) })
+      await goalPicker.getByText(label, { exact: true }).click()
+      await expect(goalOption).toBeChecked()
       await page.getByRole('button', { name: 'Use this goal' }).click()
       await expect(goalHeading).toHaveText(label)
     }
 
     try {
       await selectGoal('Help Center')
-      await expect(page.getByRole('link', { name: 'Help Center' }).first()).toBeVisible()
+      await expect(sidebarLink).toBeVisible()
       await expect(page.getByRole('progressbar', { name: 'Setup progress' })).toHaveAttribute(
         'aria-valuemax',
         /[1-9]\d*/
@@ -126,10 +140,8 @@ test.describe('Launch plan (Getting Started)', () => {
     } finally {
       await page.goto('/admin/getting-started')
       await page.waitForLoadState('networkidle')
-      const restore = page.getByRole('button', { name: 'Change goal' })
-      if ((await restore.count()) > 0 && (await restore.isEnabled())) {
-        await selectGoal(seededGoal)
-      }
+      await selectGoal(seededGoal)
+      setHelpCenter(true)
     }
   })
 

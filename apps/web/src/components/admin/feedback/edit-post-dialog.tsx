@@ -127,7 +127,9 @@ export function EditPostDialog({
           postId: post.id as PostId,
           title: input.title,
           content: input.content,
-          contentJson,
+          // A post saved without a body has no document; the schema takes an
+          // absent one, not null.
+          contentJson: contentJson ?? undefined,
           statusId: input.statusId,
         }),
       ]

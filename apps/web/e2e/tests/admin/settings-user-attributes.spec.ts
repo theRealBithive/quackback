@@ -74,7 +74,7 @@ test.describe('Admin User Attributes Settings', () => {
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 5000 })
-    await expect(dialog.getByText(/new user attribute/i)).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: 'New person attribute' })).toBeVisible()
   })
 
   test('create dialog has key, label, type, and description fields', async ({ page }) => {
@@ -299,22 +299,23 @@ test.describe('Admin User Attributes Settings', () => {
       .filter({ has: page.getByText(attrLabel, { exact: true }) })
     const deleteButton = attrRow.first().locator('button[title="Delete attribute"]')
 
-    if ((await deleteButton.count()) > 0) {
-      await deleteButton.click()
+    await expect(deleteButton).toBeVisible()
+    await deleteButton.click()
 
-      // Confirmation dialog should appear
-      const confirmDialog = page.getByRole('alertdialog').or(page.getByRole('dialog'))
-      await expect(confirmDialog).toBeVisible({ timeout: 5000 })
+    // Confirmation dialog should appear
+    const confirmDialog = page.getByRole('alertdialog').or(page.getByRole('dialog'))
+    await expect(confirmDialog).toBeVisible({ timeout: 5000 })
 
-      // Should mention the attribute label
-      await expect(confirmDialog.getByText(attrLabel)).toBeVisible()
+    // Should mention the attribute label
+    await expect(confirmDialog.getByText(attrLabel)).toBeVisible()
 
-      // Confirm deletion
-      await confirmDialog.getByRole('button', { name: /^delete$/i }).click()
+    // Confirm deletion
+    await confirmDialog.getByRole('button', { name: /^delete$/i }).click()
 
-      // Attribute should no longer appear
-      await expect(page.getByText(attrLabel)).toBeHidden({ timeout: 10000 })
-    }
+    // The dialog closes and the attribute's row is gone. (The label is not
+    // looked up page-wide: the closing dialog still quotes it for a moment.)
+    await expect(confirmDialog).toBeHidden({ timeout: 10000 })
+    await expect(page.getByText(attrLabel, { exact: true })).toHaveCount(0)
   })
 
   test('delete confirmation dialog can be cancelled', async ({ page }) => {
@@ -340,17 +341,16 @@ test.describe('Admin User Attributes Settings', () => {
       .filter({ has: page.getByText(attrLabel, { exact: true }) })
     const deleteButton = attrRowCancel.first().locator('button[title="Delete attribute"]')
 
-    if ((await deleteButton.count()) > 0) {
-      await deleteButton.click()
+    await expect(deleteButton).toBeVisible()
+    await deleteButton.click()
 
-      const confirmDialog = page.getByRole('alertdialog').or(page.getByRole('dialog'))
-      await expect(confirmDialog).toBeVisible({ timeout: 5000 })
+    const confirmDialog = page.getByRole('alertdialog').or(page.getByRole('dialog'))
+    await expect(confirmDialog).toBeVisible({ timeout: 5000 })
 
-      // Cancel — attribute should still be there
-      await confirmDialog.getByRole('button', { name: /cancel/i }).click()
-      await expect(confirmDialog).toBeHidden({ timeout: 5000 })
-      await expect(page.getByText(attrLabel)).toBeVisible()
-    }
+    // Cancel — attribute should still be there
+    await confirmDialog.getByRole('button', { name: /cancel/i }).click()
+    await expect(confirmDialog).toBeHidden({ timeout: 5000 })
+    await expect(page.getByText(attrLabel)).toBeVisible()
   })
 
   test('currency type selector shows currency code picker', async ({ page }) => {

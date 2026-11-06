@@ -298,6 +298,8 @@ export interface PublicPostDetail {
   commentsNextCursor: string | null
   /** Total live root-comment count (drives the "show N more" label). */
   commentsTotalRootCount: number
+  /** Comments this viewer can read, replies included, across all pages (drives the heading). */
+  commentsTotalCount: number
   /** Pinned comment as official response */
   pinnedComment: PinnedComment | null
   /** ID of the pinned comment (for UI to identify which comment is pinned) */

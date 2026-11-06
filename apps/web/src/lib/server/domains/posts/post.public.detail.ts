@@ -28,6 +28,7 @@ import {
   type Actor,
 } from '@/lib/server/policy'
 import { hydrateMentions } from './hydrate-mentions'
+import { countReadableComments } from './readable-comment-count'
 import type { TiptapContent } from '@/lib/shared/db-types'
 import type { JSONContent } from '@tiptap/core'
 import { contentJsonForClient } from '@/lib/server/content/storage-read-urls'
@@ -340,6 +341,12 @@ export async function getPublicPostDetail(
   const totalRootRows = getExecuteRows<{ count: string | number }>(totalRootResult)
   const commentsTotalRootCount = Number(totalRootRows[0]?.count ?? 0)
 
+  const visibilityFilterSql = sql`
+      ${includePrivateComments ? sql`` : sql`AND c.is_private = false`}
+      ${moderationFilterSql}
+  `
+  const commentsTotalCount = await countReadableComments(postIdInList, visibilityFilterSql)
+
   const commentsNextCursor =
     commentsHasMore && pageRootRows.length > 0
       ? encodeCommentCursor(
@@ -516,6 +523,7 @@ export async function getPublicPostDetail(
     commentsHasMore,
     commentsNextCursor,
     commentsTotalRootCount,
+    commentsTotalCount,
     pinnedComment,
     pinnedCommentId: pinnedComment ? (postResult.pinnedCommentId as PostCommentId) : null,
     isCommentsLocked: postResult.isCommentsLocked,

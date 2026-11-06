@@ -1765,10 +1765,13 @@ function RichTextEditorBase({
     }
   }, [value, editor])
 
-  // Update editable state
+  // Update editable state. Without `false` TipTap emits an `update` here, and
+  // on a hard load it carried the still-empty document into onChange: the form
+  // took that for an edit and replaced the saved body it had just loaded.
   useEffect(() => {
     if (editor) {
-      editor.setEditable(!disabled)
+      const emitUpdate = false
+      editor.setEditable(!disabled, emitUpdate)
     }
   }, [disabled, editor])
 

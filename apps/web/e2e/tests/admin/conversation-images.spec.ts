@@ -60,6 +60,7 @@ test.describe('Admin conversation images', { tag: '@smoke' }, () => {
 
     const composer = page.locator('[data-inbox-composer]')
     await expect(composer).toBeVisible()
+    await expect(composer.locator('.ProseMirror[contenteditable="true"]')).toBeVisible()
     await pasteImageOn(composer, png, 'pasted-shot.png')
 
     const trayThumb = composer.getByRole('button', { name: 'Enlarge pasted-shot.png' })
@@ -149,6 +150,12 @@ test.describe('Post images stay inline', () => {
 })
 
 test.describe('Local Vite storage serves conversation thumbs', () => {
+  // The inbox needs the support product. The first describe's beforeAll turns
+  // it on, but a sharded run can place this describe in a different shard.
+  test.beforeAll(() => {
+    setSupportSurfaces(true)
+  })
+
   test('sec-fetch-dest:image hits the storage route, not Vite Cannot GET', async ({ request }) => {
     const res = await request.get('/api/storage/chat-images/e2e-missing.png', {
       headers: {
@@ -171,6 +178,9 @@ test.describe('Local Vite storage serves conversation thumbs', () => {
 
     const composer = page.locator('[data-inbox-composer]')
     await expect(composer).toBeVisible()
+    // The editor mounts on the client only; a paste before that has no
+    // handler and is dropped.
+    await expect(composer.locator('.ProseMirror[contenteditable="true"]')).toBeVisible()
     await pasteImageOn(composer, png, 'real-refresh.png')
 
     const trayThumb = composer.getByRole('button', { name: 'Enlarge real-refresh.png' })

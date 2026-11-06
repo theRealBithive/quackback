@@ -170,6 +170,25 @@ export const PRESET_META: readonly PresetMeta[] = [
 const ANON_CEILING_ACTIONS = ['vote', 'comment', 'submit'] as const
 type AnonCeilingAction = (typeof ANON_CEILING_ACTIONS)[number]
 
+/**
+ * The access the form shows for a stored access under the workspace policy.
+ * When the workspace forbids anonymous access, vote/comment/submit cannot sit
+ * on 'anonymous', so they are shown as 'authenticated'. The form is reset to
+ * this value rather than edited towards it, so opening the tab is never an
+ * unsaved change; the next real edit saves the bumped tiers with it.
+ */
+function withWorkspaceCeiling(access: BoardAccess, allowAnonymous: boolean): BoardAccess {
+  if (allowAnonymous) return access
+  const shown: BoardAccess = { ...access, segments: { ...access.segments } }
+  for (const action of ANON_CEILING_ACTIONS) {
+    if (shown[action] === 'anonymous') {
+      shown[action] = 'authenticated'
+      shown.segments[action] = []
+    }
+  }
+  return shown
+}
+
 // ─── Form shape ───────────────────────────────────────────────────────
 
 interface Board {
@@ -232,32 +251,20 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
   const [openPicker, setOpenPicker] = useState<ActionId | null>(null)
 
   // Sync form state when the server-side board.access changes (e.g. after a
-  // successful save invalidates the boards query).
+  // successful save invalidates the boards query). A refetch never replaces
+  // an unsaved edit; it does re-baseline the form once the server holds what
+  // the form shows, which is what a successful save looks like.
   const accessKey = JSON.stringify(board.access)
   useEffect(() => {
-    const next = board.access ?? DEFAULT_BOARD_ACCESS
+    const next = withWorkspaceCeiling(board.access ?? DEFAULT_BOARD_ACCESS, wsAllowAnonymous)
+    const serverHoldsFormValues = JSON.stringify(form.getValues()) === JSON.stringify(next)
+    const hasUnsavedEdit = form.formState.isDirty && !serverHoldsFormValues
+    if (hasUnsavedEdit) return
     form.reset(next)
     setOpenPicker(null)
-  }, [accessKey, board.access, form])
+  }, [accessKey, board.access, form, wsAllowAnonymous])
 
   const values = form.watch()
-
-  // Auto-bump: when the workspace `allowAnonymous` master switch flips
-  // off, any of vote/comment/submit currently set to 'anonymous' gets
-  // bumped to 'authenticated' together. The bumped form is dirty so the
-  // user sees the save dock and can confirm or discard. We read the
-  // current tier via `form.getValues()` so the effect doesn't have to
-  // depend on `values` (which would re-fire on every keystroke / cell
-  // click).
-  useEffect(() => {
-    if (wsAllowAnonymous) return
-    ANON_CEILING_ACTIONS.forEach((id) => {
-      if (form.getValues(id) === 'anonymous') {
-        form.setValue(id, 'authenticated', { shouldDirty: true })
-        form.setValue(`segments.${id}`, [], { shouldDirty: true })
-      }
-    })
-  }, [wsAllowAnonymous, form])
 
   const activePreset = useMemo(() => deriveActivePreset(values), [values])
 
@@ -367,10 +374,10 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
   )
 
   const handleDiscard = useCallback(() => {
-    const original = board.access ?? DEFAULT_BOARD_ACCESS
+    const original = withWorkspaceCeiling(board.access ?? DEFAULT_BOARD_ACCESS, wsAllowAnonymous)
     form.reset(original)
     setOpenPicker(null)
-  }, [board.access, form])
+  }, [board.access, form, wsAllowAnonymous])
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 pb-24">

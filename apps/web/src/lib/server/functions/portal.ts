@@ -390,6 +390,7 @@ export const runFetchPublicPostDetail = createServerOnlyFn(async function runFet
     commentsHasMore: result.commentsHasMore,
     commentsNextCursor: result.commentsNextCursor,
     commentsTotalRootCount: result.commentsTotalRootCount,
+    commentsTotalCount: result.commentsTotalCount,
     mergeInfo,
     mergedPostCount: mergedPostsList.length > 0 ? mergedPostsList.length : undefined,
     canVote,

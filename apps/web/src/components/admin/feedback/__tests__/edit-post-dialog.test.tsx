@@ -3,6 +3,9 @@
  * ## F — Forms
  * - F1 Typing in a post, changelog or help-center article editor updates the form's content as markdown and marks the form dirty, without running validation on each keystroke.
  * - F2 A checkbox that feeds a boolean setting (ticket field required, incident restores the status) stores true for a checked box and false for an unchecked one.
+ *
+ * ## E — Editor
+ * - E5 A post can be created and saved without a description; an editor nobody typed in never makes the server reject the submit. (Contract list: `components/ui/__tests__/form-control.contract.test.tsx`.)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
@@ -11,6 +14,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { generateId } from '@quackback/ids'
 import type { BoardId, PostId, PostStatusId } from '@quackback/ids'
 import type { Board, PostStatusEntity, PostTag } from '@/lib/shared/db-types'
+import { tiptapContentSchema } from '@/lib/shared/schemas/posts'
 
 const updatePost = vi.hoisted(() => ({ mutateAsync: vi.fn() }))
 const updateTags = vi.hoisted(() => ({ mutateAsync: vi.fn() }))
@@ -43,7 +47,7 @@ vi.mock('@/lib/client/mutations/posts', () => ({
 
 import { EditPostDialog } from '../edit-post-dialog'
 
-function renderDialog() {
+function renderDialog({ content = 'Original body' }: { content?: string } = {}) {
   // TypeIDs are parsed by the edit schema, so they have to be real ones.
   const boardId = generateId('board') as BoardId
   const statusId = generateId('post_status') as PostStatusId
@@ -55,7 +59,7 @@ function renderDialog() {
   const post = {
     id: generateId('post') as PostId,
     title: 'Dark mode',
-    content: 'Original body',
+    content,
     statusId,
     board: { id: boardId, name: 'Feature requests', slug: 'feature-requests' },
     tags: [],
@@ -105,5 +109,20 @@ describe('EditPostDialog content editor', () => {
 
     expect(screen.queryByText('Title is required')).toBeNull()
     expect(updatePost.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('saves a post that has no body without touching the editor (E5)', async () => {
+    // A post may be created without a description. Its editor then holds no
+    // document, and the save must send no body rather than null, which the
+    // server's `tiptapContentSchema.optional()` rejects.
+    renderDialog({ content: '' })
+
+    await userEvent.type(screen.getByRole('textbox', { name: /feedback about/i }), ' v2')
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(updatePost.mutateAsync).toHaveBeenCalledTimes(1))
+    const payload = updatePost.mutateAsync.mock.calls[0]![0]
+    expect(payload.title).toBe('Dark mode v2')
+    expect(tiptapContentSchema.optional().safeParse(payload.contentJson).success).toBe(true)
   })
 })

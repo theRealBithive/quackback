@@ -2,6 +2,22 @@ import { test, expect, type Page, type Locator } from '@playwright/test'
 import { slugify } from '../../../src/lib/shared/utils/string'
 
 /**
+ * Open the "New board" dialog. The button is server-rendered, so a click
+ * before hydration opens nothing; it is repeated, only while no dialog is
+ * open, until the dialog shows.
+ */
+async function openNewBoardDialog(page: Page): Promise<Locator> {
+  const dialog = page.getByRole('dialog')
+  await expect(async () => {
+    if (!(await dialog.isVisible())) {
+      await page.getByRole('button', { name: 'New board' }).click()
+    }
+    await expect(dialog).toBeVisible({ timeout: 2000 })
+  }).toPass({ timeout: 15000 })
+  return dialog
+}
+
+/**
  * Select an access preset and persist it. The save dock is a `fixed bottom-0`
  * bar that only slides into view (translate-y-0) — and accepts pointer events —
  * while the form is dirty, so we save only when the click was a real change
@@ -31,9 +47,7 @@ async function setPresetAndSave(page: Page, preset: Locator): Promise<void> {
 async function createBoard(page: Page, name: string): Promise<void> {
   await page.goto('/admin/settings/boards')
   await page.waitForLoadState('networkidle')
-  await page.getByRole('button', { name: 'New board' }).click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog).toBeVisible()
+  const dialog = await openNewBoardDialog(page)
   await dialog.getByLabel('Board name').fill(name)
   await dialog.getByRole('button', { name: 'Create board' }).click()
   await expect(dialog).toBeHidden({ timeout: 10000 })
@@ -41,6 +55,22 @@ async function createBoard(page: Page, name: string): Promise<void> {
     timeout: 10000,
   })
   await expect(page.getByRole('heading', { name })).toBeVisible({ timeout: 10000 })
+}
+
+/** The per-action permission grid; it only renders on the Access tab. */
+function accessMatrix(page: Page) {
+  return page.getByRole('grid', { name: 'Permissions matrix' })
+}
+
+/**
+ * Switch to the Access tab. The tab list is server-rendered, so a click before
+ * hydration changes nothing; the click is repeated until the matrix shows.
+ */
+async function openAccessTab(page: Page): Promise<void> {
+  await expect(async () => {
+    await page.getByRole('tab', { name: 'Access' }).click()
+    await expect(accessMatrix(page)).toBeVisible({ timeout: 2000 })
+  }).toPass({ timeout: 15000 })
 }
 
 /** Open the first board row on the settings list. */
@@ -55,8 +85,7 @@ async function openFirstBoard(page: Page): Promise<void> {
 /** Create a throwaway board and open its Access tab, settled on Public. */
 async function createBoardOnAccessTab(page: Page, name: string): Promise<void> {
   await createBoard(page, name)
-  await page.getByRole('tab', { name: 'Access' }).click()
-  await expect(page.getByText('Access Control')).toBeVisible({ timeout: 5000 })
+  await openAccessTab(page)
   // New boards default to the Public preset; wait for the matrix to settle on it
   // (the optimistic insert can briefly show defaults before the refetch lands).
   await expect(page.getByRole('button', { name: 'Public', exact: true })).toHaveAttribute(
@@ -70,9 +99,13 @@ async function createBoardOnAccessTab(page: Page, name: string): Promise<void> {
 async function deleteCurrentBoard(page: Page, name: string): Promise<void> {
   await page.getByRole('tab', { name: 'General' }).click()
   await expect(page.getByText('Danger Zone')).toBeVisible({ timeout: 5000 })
-  await page.getByPlaceholder(name).fill(name)
   const del = page.getByRole('button', { name: 'Delete board', exact: true })
-  await expect(del).toBeEnabled()
+  // Text typed before hydration (right after a reload) is dropped, so typing
+  // is repeated until the button answers.
+  await expect(async () => {
+    await page.getByPlaceholder(name).fill(name)
+    await expect(del).toBeEnabled({ timeout: 2000 })
+  }).toPass({ timeout: 15000 })
   await del.click()
   await expect(page).toHaveURL(/\/admin\/settings\/boards\/?(\?|$)/, { timeout: 10000 })
 }
@@ -95,46 +128,41 @@ test.describe('Admin Board Management', () => {
     await expect(page.getByTestId('board-switcher')).toHaveCount(0)
   })
 
-  test('can edit board name', async ({ page }) => {
-    await openFirstBoard(page)
-    // Find the board name input in the General Settings section (first input, not the delete confirmation)
-    const nameInput = page.getByRole('textbox', { name: 'Board name', exact: true })
+  // Both edits use a throwaway board: renaming the first seeded board left every
+  // later spec (and shard) without the slug it expected.
+  test('an edited board name is saved and shown after a reload', async ({ page }) => {
+    const name = `Rename Me ${Date.now()}`
+    await createBoard(page, name)
+    const updatedName = `Renamed Board ${Date.now()}`
 
-    if ((await nameInput.count()) > 0) {
-      // Clear and type new name
-      await nameInput.clear()
-      await nameInput.fill('Test Board Name')
-
-      // Find and click save button - use exact match for "Save changes"
-      const saveButton = page.getByRole('button', { name: 'Save changes' })
-      if ((await saveButton.count()) > 0) {
-        await saveButton.click()
-
-        // Should show success message or the name should persist
-        await page.waitForLoadState('networkidle')
+    await page.getByRole('textbox', { name: 'Board name', exact: true }).fill(updatedName)
+    await page.getByRole('button', { name: 'Save changes' }).click()
+    await expect(page).toHaveURL(
+      new RegExp(`/admin/settings/boards/${slugify(updatedName)}(?:\\?|$)`),
+      {
+        timeout: 10000,
       }
-    }
+    )
+    await page.reload()
+
+    await expect(page.getByRole('textbox', { name: 'Board name', exact: true })).toHaveValue(
+      updatedName
+    )
+    await deleteCurrentBoard(page, updatedName)
   })
 
-  test('can edit board description', async ({ page }) => {
-    await openFirstBoard(page)
-    // Find the description input/textarea
-    const descInput = page.getByLabel('Description').or(page.locator('textarea'))
+  test('an edited board description is saved and shown after a reload', async ({ page }) => {
+    const name = `Describe Me ${Date.now()}`
+    await createBoard(page, name)
+    const description = `Updated board description ${Date.now()}`
 
-    if ((await descInput.count()) > 0) {
-      // Clear and type new description
-      await descInput.first().clear()
-      await descInput.first().fill('Updated board description for testing')
+    await page.getByLabel('Description').fill(description)
+    await page.getByRole('button', { name: 'Save changes' }).click()
+    await page.waitForLoadState('networkidle')
+    await page.reload()
 
-      // Find and click save button - use exact match for "Save changes"
-      const saveButton = page.getByRole('button', { name: 'Save changes' })
-      if ((await saveButton.count()) > 0) {
-        await saveButton.click()
-
-        // Wait for save to complete
-        await page.waitForLoadState('networkidle')
-      }
-    }
+    await expect(page.getByLabel('Description')).toHaveValue(description)
+    await deleteCurrentBoard(page, name)
   })
 
   test('can change board access via presets on the Access tab', async ({ page }) => {
@@ -166,63 +194,6 @@ test.describe('Admin Board Management', () => {
     const deleteButton = page.getByRole('button', { name: 'Delete board', exact: true })
     await expect(deleteButton).toBeVisible()
   })
-
-  test('delete button shows confirmation dialog', async ({ page }) => {
-    await openFirstBoard(page)
-    const deleteButton = page.getByRole('button', { name: 'Delete board', exact: true })
-
-    // Check if button exists
-    if ((await deleteButton.count()) > 0) {
-      // Check if button is enabled before trying to click
-      const isEnabled = await deleteButton.isEnabled()
-
-      if (isEnabled) {
-        await deleteButton.click()
-
-        // Should show confirmation dialog or alert - wait for any dialog
-        const confirmDialog = page.getByRole('alertdialog').or(page.getByRole('dialog'))
-        await expect(confirmDialog).toBeVisible({ timeout: 5000 })
-
-        // Close the dialog
-        await page.keyboard.press('Escape')
-      } else {
-        // Button exists but is disabled - this is expected behavior
-        // Just verify the button is visible
-        await expect(deleteButton).toBeVisible()
-      }
-    }
-  })
-
-  test('can navigate between settings tabs', async ({ page }) => {
-    await openFirstBoard(page)
-    // Look for board navigation links in sidebar nav
-    const boardNav = page.locator('nav ul')
-
-    if ((await boardNav.count()) > 0) {
-      // Should have settings navigation links
-      const navLinks = boardNav.locator('a')
-      if ((await navLinks.count()) > 1) {
-        // Click on Access link
-        await navLinks.filter({ hasText: 'Access' }).click()
-
-        // URL should change to include /access
-        await page.waitForURL(/\/access/)
-      }
-    }
-  })
-
-  test('can access board access settings', async ({ page }) => {
-    await openFirstBoard(page)
-    // Navigate to access settings tab
-    const accessLink = page.getByRole('link', { name: 'Access' })
-
-    if ((await accessLink.count()) > 0) {
-      await accessLink.click()
-
-      // Should navigate to access settings page
-      await expect(page).toHaveURL(/\/access/, { timeout: 5000 })
-    }
-  })
 })
 
 test.describe('Board Access Settings', () => {
@@ -234,8 +205,7 @@ test.describe('Board Access Settings', () => {
     await openFirstBoard(page)
 
     // Switch to the Access tab (sets ?tab=access).
-    await page.getByRole('tab', { name: 'Access' }).click()
-    await expect(page.getByText('Access Control')).toBeVisible({ timeout: 5000 })
+    await openAccessTab(page)
   })
 
   test('displays the access matrix with presets and per-action permissions', async ({ page }) => {
@@ -267,7 +237,7 @@ test.describe('Board Access Settings', () => {
     // Reload — the URL keeps ?tab=access — and confirm the saved preset is active.
     await page.reload()
     await page.waitForLoadState('networkidle')
-    await expect(page.getByText('Access Control')).toBeVisible({ timeout: 10000 })
+    await expect(accessMatrix(page)).toBeVisible({ timeout: 10000 })
     await expect(privatePreset).toHaveAttribute('aria-pressed', 'true')
 
     await deleteCurrentBoard(page, name)
@@ -284,13 +254,7 @@ test.describe('Board Deletion Flow', () => {
     await page.goto('/admin/settings/boards')
     await page.waitForLoadState('networkidle')
 
-    // Click "New board" button
-    const newBoardButton = page.getByRole('button', { name: 'New board' })
-    await newBoardButton.click()
-
-    // Wait for dialog
-    const dialog = page.getByRole('dialog')
-    await expect(dialog).toBeVisible()
+    const dialog = await openNewBoardDialog(page)
 
     // Fill in board details with unique name (scoped to dialog)
     const testBoardName = `Test Delete Board ${Date.now()}`
@@ -339,21 +303,20 @@ test.describe('Board Deletion Flow', () => {
     const labelText = await confirmLabel.textContent()
     const boardNameMatch = labelText?.match(/Type\s+(.+?)\s+to confirm/)
     const boardName = boardNameMatch?.[1] || ''
+    expect(boardName.length).toBeGreaterThan(0)
 
-    if (boardName) {
-      // Type partial name - button should stay disabled
-      const confirmInput = page.getByPlaceholder(boardName)
-      await confirmInput.fill(boardName.substring(0, 3))
-      await expect(deleteButton).toBeDisabled()
+    // Type partial name - button should stay disabled
+    const confirmInput = page.getByPlaceholder(boardName)
+    await confirmInput.fill(boardName.substring(0, 3))
+    await expect(deleteButton).toBeDisabled()
 
-      // Type wrong name - button should stay disabled
-      await confirmInput.clear()
-      await confirmInput.fill('wrong name')
-      await expect(deleteButton).toBeDisabled()
+    // Type wrong name - button should stay disabled
+    await confirmInput.clear()
+    await confirmInput.fill('wrong name')
+    await expect(deleteButton).toBeDisabled()
 
-      // Clear for cleanup
-      await confirmInput.clear()
-    }
+    // Clear for cleanup
+    await confirmInput.clear()
   })
 })
 
@@ -374,21 +337,13 @@ test.describe('Create Board Dialog', () => {
   })
 
   test('can open create board dialog', async ({ page }) => {
-    // Click "New board" button
-    const newBoardButton = page.getByRole('button', { name: 'New board' })
-    await expect(newBoardButton).toBeVisible({ timeout: 5000 })
-    await newBoardButton.click()
-
-    // Dialog should appear
-    await expect(page.getByRole('dialog')).toBeVisible()
+    await openNewBoardDialog(page)
     await expect(page.getByText('Create new board')).toBeVisible()
   })
 
   test('dialog has all required fields', async ({ page }) => {
     // Open dialog
-    await page.getByRole('button', { name: 'New board' }).click()
-    const dialog = page.getByRole('dialog')
-    await expect(dialog).toBeVisible()
+    const dialog = await openNewBoardDialog(page)
 
     // Check all fields are present (scoped to dialog)
     await expect(dialog.getByLabel('Board name')).toBeVisible()
@@ -405,8 +360,7 @@ test.describe('Create Board Dialog', () => {
 
   test('can close dialog with Cancel button', async ({ page }) => {
     // Open dialog
-    await page.getByRole('button', { name: 'New board' }).click()
-    await expect(page.getByRole('dialog')).toBeVisible()
+    await openNewBoardDialog(page)
 
     // Click Cancel
     await page.getByRole('button', { name: 'Cancel' }).click()
@@ -417,8 +371,7 @@ test.describe('Create Board Dialog', () => {
 
   test('can close dialog with Escape key', async ({ page }) => {
     // Open dialog
-    await page.getByRole('button', { name: 'New board' }).click()
-    await expect(page.getByRole('dialog')).toBeVisible()
+    await openNewBoardDialog(page)
 
     // Press Escape
     await page.keyboard.press('Escape')
@@ -429,9 +382,7 @@ test.describe('Create Board Dialog', () => {
 
   test('form resets when dialog is reopened', async ({ page }) => {
     // Open dialog
-    await page.getByRole('button', { name: 'New board' }).click()
-    let dialog = page.getByRole('dialog')
-    await expect(dialog).toBeVisible()
+    let dialog = await openNewBoardDialog(page)
 
     // Fill in some data (scoped to dialog)
     await dialog.getByLabel('Board name').fill('Test Board')
@@ -442,9 +393,7 @@ test.describe('Create Board Dialog', () => {
     await expect(dialog).toBeHidden()
 
     // Reopen dialog
-    await page.getByRole('button', { name: 'New board' }).click()
-    dialog = page.getByRole('dialog')
-    await expect(dialog).toBeVisible()
+    dialog = await openNewBoardDialog(page)
 
     // Fields should be empty
     await expect(dialog.getByLabel('Board name')).toHaveValue('')
@@ -453,9 +402,7 @@ test.describe('Create Board Dialog', () => {
 
   test('can create a new board', async ({ page }) => {
     // Open dialog
-    await page.getByRole('button', { name: 'New board' }).click()
-    const dialog = page.getByRole('dialog')
-    await expect(dialog).toBeVisible()
+    const dialog = await openNewBoardDialog(page)
 
     // Fill in board details with unique name (scoped to dialog)
     const testBoardName = `E2E Test Board ${Date.now()}`
@@ -489,9 +436,7 @@ test.describe('Create Board Dialog', () => {
 
   test('can create a private board', async ({ page }) => {
     // Open dialog
-    await page.getByRole('button', { name: 'New board' }).click()
-    const dialog = page.getByRole('dialog')
-    await expect(dialog).toBeVisible()
+    const dialog = await openNewBoardDialog(page)
 
     // Fill in board details (scoped to dialog)
     const testBoardName = `Private Board ${Date.now()}`
@@ -515,9 +460,7 @@ test.describe('Create Board Dialog', () => {
 
   test('shows validation error for empty board name', async ({ page }) => {
     // Open dialog
-    await page.getByRole('button', { name: 'New board' }).click()
-    const dialog = page.getByRole('dialog')
-    await expect(dialog).toBeVisible()
+    const dialog = await openNewBoardDialog(page)
 
     // Try to create without filling name
     await dialog.getByRole('button', { name: 'Create board' }).click()
@@ -533,9 +476,7 @@ test.describe('Create Board Dialog', () => {
 
   test('shows loading state while creating', async ({ page }) => {
     // Open dialog
-    await page.getByRole('button', { name: 'New board' }).click()
-    const dialog = page.getByRole('dialog')
-    await expect(dialog).toBeVisible()
+    const dialog = await openNewBoardDialog(page)
 
     // Fill in board details (scoped to dialog)
     await dialog.getByLabel('Board name').fill(`Loading Test ${Date.now()}`)
@@ -559,12 +500,6 @@ test.describe('Board Settings Tabs', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/admin/settings/boards')
     await page.waitForLoadState('networkidle')
-    await expect(
-      page.getByRole('heading', { name: 'Boards' }).or(page.getByText('No boards yet'))
-    ).toBeVisible({
-      timeout: 10000,
-    })
-    if (await page.getByText('No boards yet').count()) return
     await openFirstBoard(page)
   })
 
@@ -582,19 +517,14 @@ test.describe('Board Settings Tabs', () => {
     await expect(page.getByRole('tab', { name: 'Export Data' })).toBeVisible()
   })
 
-  test('clicking Access tab switches to Access Control view', async ({ page }) => {
-    const accessTab = page.getByRole('tab', { name: 'Access' })
-    if ((await accessTab.count()) === 0) return
-
-    await accessTab.click()
-    await expect(page.getByText('Access Control')).toBeVisible({ timeout: 5000 })
+  test('clicking Access tab switches to the permissions matrix', async ({ page }) => {
+    await openAccessTab(page)
     // URL should reflect the tab change
     await expect(page).toHaveURL(/tab=access/)
   })
 
   test('clicking Import Data tab switches to import view', async ({ page }) => {
     const importTab = page.getByRole('tab', { name: 'Import Data' })
-    if ((await importTab.count()) === 0) return
 
     await importTab.click()
     await expect(page.getByText('Import Data')).toBeVisible({ timeout: 5000 })
@@ -605,7 +535,6 @@ test.describe('Board Settings Tabs', () => {
     page,
   }) => {
     const exportTab = page.getByRole('tab', { name: 'Export Data' })
-    if ((await exportTab.count()) === 0) return
 
     await exportTab.click()
     await expect(page.getByText('Export Data')).toBeVisible({ timeout: 5000 })
@@ -615,7 +544,6 @@ test.describe('Board Settings Tabs', () => {
 
   test('arrow keys move between board settings tabs', async ({ page }) => {
     const generalTab = page.getByRole('tab', { name: 'General' })
-    if ((await generalTab.count()) === 0) return
 
     await generalTab.focus()
     await page.keyboard.press('ArrowRight')
@@ -625,15 +553,12 @@ test.describe('Board Settings Tabs', () => {
 
   test('General tab is active by default (highlighted)', async ({ page }) => {
     const generalTab = page.getByRole('tab', { name: 'General' })
-    if ((await generalTab.count()) === 0) return
 
     await expect(generalTab).toHaveAttribute('data-active')
   })
 
   test('active tab button is visually distinct after switching', async ({ page }) => {
     const accessTab = page.getByRole('tab', { name: 'Access' })
-    if ((await accessTab.count()) === 0) return
-
     await accessTab.click()
     await page.waitForLoadState('networkidle')
 
@@ -650,12 +575,6 @@ test.describe('Board Slug', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/admin/settings/boards')
     await page.waitForLoadState('networkidle')
-    await expect(
-      page.getByRole('heading', { name: 'Boards' }).or(page.getByText('No boards yet'))
-    ).toBeVisible({
-      timeout: 10000,
-    })
-    if (await page.getByText('No boards yet').count()) return
     await openFirstBoard(page)
   })
 
@@ -663,17 +582,13 @@ test.describe('Board Slug', () => {
     const boardNameInput = page.getByRole('textbox', { name: 'Board name', exact: true })
     const descInput = page.getByLabel('Description')
 
-    if ((await boardNameInput.count()) > 0) {
-      await expect(boardNameInput).toBeVisible()
-      await expect(descInput).toBeVisible()
-    }
+    await expect(boardNameInput).toBeVisible()
+    await expect(descInput).toBeVisible()
   })
 
   test('board name field is pre-populated with the current board name', async ({ page }) => {
     const boardNameInput = page.getByRole('textbox', { name: 'Board name', exact: true })
-    if ((await boardNameInput.count()) === 0) return
-
-    // Should not be empty
+    await expect(boardNameInput).toBeVisible()
     const currentName = await boardNameInput.inputValue()
     expect(currentName.trim().length).toBeGreaterThan(0)
   })

@@ -399,7 +399,14 @@ jobs:
   e2e-full:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Sharded, so one slow or failing area cannot spend the whole budget and
+    # take every other area's result down with it: a single 60-minute job used
+    # to be cancelled before it printed a single error message.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -409,9 +416,21 @@ jobs:
           POSTGRES_DB: quackback_test
         ports: ['5432:5432']
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      # S3-compatible storage for the specs that upload for real (the real-paste
+      # conversation image). Without it /api/upload/image answers 503. RustFS,
+      # because the MinIO images in docker-compose.yml can no longer be pulled;
+      # with no subcommand the image starts the server on /data.
+      s3:
+        image: rustfs/rustfs:1.0.4@sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2
+        env:
+          RUSTFS_ACCESS_KEY: e2e-access-key
+          RUSTFS_SECRET_KEY: e2e-secret-key-for-ci-only
+        ports: ['9000:9000']
     env:
       SECRET_KEY: e2e-full-secret-key-for-ci-only-at-least-32-chars
       BASE_URL: http://acme.localhost:3000
+      S3_ACCESS_KEY_ID: e2e-access-key
+      S3_SECRET_ACCESS_KEY: e2e-secret-key-for-ci-only
       # See e2e-smoke: the widget harness exists only under this flag (J31).
       E2E_HARNESS: '1'
     steps:
@@ -428,7 +447,29 @@ jobs:
           DATABASE_URL=$DATABASE_URL
           SECRET_KEY=$SECRET_KEY
           BASE_URL=$BASE_URL
+          S3_ENDPOINT=http://localhost:9000
+          S3_BUCKET=quackback
+          S3_REGION=us-east-1
+          S3_ACCESS_KEY_ID=$S3_ACCESS_KEY_ID
+          S3_SECRET_ACCESS_KEY=$S3_SECRET_ACCESS_KEY
+          S3_FORCE_PATH_STYLE=true
           EOF
+      - name: Create the storage bucket
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.S3_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        # The service has no health check (the image ships no probe), so the
+        # first attempts may meet a server that is still starting.
+        run: |
+          for attempt in $(seq 1 30); do
+            if aws --endpoint-url http://localhost:9000 s3 mb s3://quackback; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo '::error::the S3 service never accepted the bucket'
+          exit 1
       - run: bun run --filter @quackback/widget build
       - run: bun run db:migrate
       - run: bun run db:seed
@@ -444,5 +485,13 @@ jobs:
           if ! timeout 90 ./node_modules/.bin/playwright install-deps chromium; then
             echo '::warning::playwright install-deps timed out or failed; continuing with browser-only install'
           fi
-      - run: ./node_modules/.bin/playwright test
+      - run: ./node_modules/.bin/playwright test --shard=${{ matrix.shard }}/3
         working-directory: apps/web
+      # Always, not on failure only: a job cancelled at its timeout reports
+      # `cancelled`, and the report is the one place its errors survive.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: e2e-full-report-${{ matrix.shard }}
+          path: apps/web/blob-report
+          retention-days: 7

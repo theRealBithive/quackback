@@ -27,7 +27,7 @@ test.describe('Admin Portal Settings', () => {
   })
 
   test('shows Theme mode select', async ({ page }) => {
-    await expect(page.getByText('Theme mode')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText('Theme mode', { exact: true })).toBeVisible({ timeout: 10000 })
     const themeModeSelect = page.getByRole('combobox').first()
     await expect(themeModeSelect).toBeVisible()
   })

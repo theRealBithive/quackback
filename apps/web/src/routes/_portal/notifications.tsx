@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import { useIntl, FormattedMessage } from 'react-intl'
 import {
   BellIcon,
@@ -44,6 +44,14 @@ interface NotificationsSearch {
 }
 
 export const Route = createFileRoute('/_portal/notifications')({
+  // Notifications belong to a signed-in user. An anonymous visitor goes back to
+  // the portal home, as on the settings pages; the data itself is guarded on
+  // the server by `getNotificationsFn`'s `requireAuth()` either way.
+  beforeLoad: ({ context }) => {
+    if (!context.session?.user) {
+      throw redirect({ to: '/' })
+    }
+  },
   // Only the literal 'unread' is accepted — anything else falls back to the
   // default All tab rather than surfacing a broken filter state.
   validateSearch: (search: Record<string, unknown>): NotificationsSearch => ({

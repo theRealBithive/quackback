@@ -537,35 +537,25 @@ test.describe('Admin Roadmap - Kanban Accuracy', () => {
   })
 
   test('clicking a card opens detail modal with matching title', async ({ page }) => {
-    const noRoadmapMsg = page.getByText('No roadmap selected')
-    if ((await noRoadmapMsg.count()) > 0) return
-
+    // The seeded roadmap has cards; a card opens exactly one modal, the
+    // roadmap's own, and that modal is reachable by its role (R1, R3 in
+    // `lib/shared/__tests__/admin-post-modal.test.ts`). Opening the layout's
+    // feedback modal as well used to stack two, each hiding the other.
     const cards = page.locator('main [class*="bg-card"][class*="rounded-lg"]')
-    await page.waitForLoadState('networkidle')
-
-    if ((await cards.count()) === 0) return
+    await expect(cards.first()).toBeVisible({ timeout: 10000 })
 
     const firstCard = cards.first()
-
-    // Read the title text from the card before clicking
-    const titleEl = firstCard.locator('p.text-sm.font-medium')
-    const cardTitle = (await titleEl.textContent())?.trim() ?? ''
+    const cardTitle = (await firstCard.locator('p.text-sm.font-medium').textContent())?.trim() ?? ''
     expect(cardTitle.length).toBeGreaterThan(0)
 
     await firstCard.click()
-
-    // URL gains ?post= param
     await expect(page).toHaveURL(/[?&]post=/, { timeout: 5000 })
 
-    // Modal opens
-    const modal = page.getByRole('dialog')
+    const modal = page.getByRole('dialog', { name: 'View post' })
     await expect(modal).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('dialog')).toHaveCount(1)
+    await expect(modal.getByRole('heading', { level: 1, name: cardTitle })).toBeVisible()
 
-    // Modal heading should contain the same title text
-    const modalHeading = modal.locator('h1, h2, h3').filter({ hasText: cardTitle }).first()
-    await expect(modalHeading).toBeVisible({ timeout: 5000 })
-
-    // Close modal
     await page.keyboard.press('Escape')
     await expect(modal).toBeHidden({ timeout: 5000 })
   })

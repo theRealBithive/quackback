@@ -19,6 +19,14 @@
  *   V4 Whatever the failure carries — an Error, a bare string, blanks, nothing
  *      at all — the message shown is never empty and names what failed.
  *
+ *   E5 A post can be created and saved without a description; an editor
+ *      nobody typed in never makes the server reject the submit.
+ *      (Contract list: `components/ui/__tests__/form-control.contract.test.tsx`.)
+ *
+ *   C7 The portal post page, the admin post modal and the roadmap modal show
+ *      the same number to the same viewer for the same post.
+ *      (Contract list: `domains/posts/__tests__/comment-total-count.db.test.ts`.)
+ *
  * The modal is 641 lines of Suspense, editor and router state, so everything
  * around the sidebar is stubbed. What is deliberately NOT stubbed is the path
  * under test: the real `useMetadataHandlers`, the real mutations, and the real
@@ -29,6 +37,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { PostStatusId, PostTagId } from '@quackback/ids'
+import { tiptapContentSchema } from '@/lib/shared/schemas/posts'
 
 const server = vi.hoisted(() => ({
   changePostStatusFn: vi.fn(),
@@ -86,8 +95,13 @@ vi.mock('@/components/public/post-detail/metadata-sidebar', () => ({
   ),
 }))
 
+const commentsSectionProps = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+
 vi.mock('@/components/public/post-detail/comments-section', () => ({
-  CommentsSection: () => <div />,
+  CommentsSection: (props: Record<string, unknown>) => {
+    commentsSectionProps.push(props)
+    return <div />
+  },
   CommentsSectionSkeleton: () => <div />,
 }))
 vi.mock('@/components/admin/feedback/merge-section', () => ({
@@ -196,8 +210,19 @@ beforeEach(() => {
       board: { id: 'board_1', slug: 'general' },
       tags: [],
       comments: [],
+      commentsTotalCount: 37,
       moderationState: 'approved',
     },
+  })
+  commentsSectionProps.length = 0
+})
+
+describe('the comment heading of the feedback modal', () => {
+  it('shows the server total, not the loaded comments (C7)', () => {
+    shownModal()
+
+    const lastProps = commentsSectionProps[commentsSectionProps.length - 1]
+    expect(lastProps.totalCommentCount).toBe(37)
   })
 })
 
@@ -240,4 +265,21 @@ describe('the other controls of the modal, when the failure says nothing (V4)', 
       expect(toast.error).toHaveBeenCalledWith(fallback)
     })
   }
+})
+
+describe('saving a post that has no body', () => {
+  it('sends a body the server accepts when the editor was never touched (E5)', async () => {
+    // The fixture post has no body: a description is optional (ec3e34e18), and
+    // its editor then holds no document. The save must send no body rather
+    // than null, which the server's `tiptapContentSchema.optional()` rejects.
+    server.updatePostFn.mockResolvedValue({ id: 'post_01m1s177v6e4erscr5qgckrdwm' })
+    shownModal()
+
+    await userEvent.click(screen.getByText('save changes'))
+
+    expect(server.updatePostFn).toHaveBeenCalledTimes(1)
+    const sent = server.updatePostFn.mock.calls[0]![0].data
+    expect(sent.title).toBe('A post')
+    expect(tiptapContentSchema.optional().safeParse(sent.contentJson).success).toBe(true)
+  })
 })

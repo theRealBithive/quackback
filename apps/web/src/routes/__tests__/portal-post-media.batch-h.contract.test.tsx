@@ -40,6 +40,12 @@
  * H19 The public feedback composer offers headings (#568; the fork already did, kept).
  */
 /*
+ * C7 The portal post page, the admin post modal and the roadmap modal show the
+ *    same number to the same viewer for the same post.
+ *    (Contract list: `domains/posts/__tests__/comment-total-count.db.test.ts`;
+ *    the page's wiring of it is pinned below because this harness renders it.)
+ */
+/*
  * The portal post page's half of H1, H5 and H6: which uploads it wires into
  * the post editor and the comment editor, and that every upload first mints
  * the anonymous session the server then judges. Everything the page renders
@@ -88,6 +94,7 @@ vi.mock('@/lib/client/queries/portal-detail', () => ({
         createdAt: '2026-10-01T00:00:00Z',
         tags: [],
         commentsTotalRootCount: 0,
+        commentsTotalCount: 37,
       },
     }),
   },
@@ -194,6 +201,13 @@ beforeEach(() => {
 })
 
 afterEach(() => cleanup())
+
+describe('the portal post page wires the comment heading', () => {
+  it('hands the server total to the heading, not the loaded comments (C7)', () => {
+    const { comments } = renderPostPage()
+    expect(comments.totalCommentCount).toBe(37)
+  })
+})
 
 describe('the portal post page wires uploads (H1, H5, H6)', () => {
   it('a comment upload mints the anonymous session before it uploads (H1, H6)', async () => {

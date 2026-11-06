@@ -130,7 +130,8 @@ export function CreatePostDialog({
         boardId: data.boardId,
         statusId: data.statusId,
         tagIds: data.tagIds,
-        contentJson,
+        // Untouched editor: null here, while the schema takes an absent body.
+        contentJson: contentJson ?? undefined,
         authorPrincipalId,
       } as CreatePostInput & { authorPrincipalId?: string },
       {

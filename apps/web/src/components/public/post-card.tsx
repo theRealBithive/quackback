@@ -153,6 +153,11 @@ export function PostCard({
   // and the author quick-actions (edit/delete), so the two concerns are split.
   const isAdminMode = !!onClick
   const currentStatus = statuses.find((s) => s.id === statusId)
+  // Status slug and every tag name, including tags the card truncates, so a
+  // filtered list can be checked against the filter it claims to apply. Names,
+  // not ids: on the portal list the ids arrive as raw UUIDs while filters use
+  // TypeIDs, and names are unique within a workspace.
+  const tagNameList = JSON.stringify(tags.map((tag) => tag.name))
   const createdAtDate = typeof createdAt === 'string' ? new Date(createdAt) : createdAt
 
   // Vote handling - only used in portal mode
@@ -566,6 +571,8 @@ export function PostCard({
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
         data-post-id={id}
+        data-status={currentStatus?.slug}
+        data-tag-names={tagNameList}
       >
         {cardContent}
       </div>
@@ -580,6 +587,8 @@ export function PostCard({
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       data-post-id={id}
+      data-status={currentStatus?.slug}
+      data-tag-names={tagNameList}
     >
       {cardContent}
     </Link>

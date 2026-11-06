@@ -19,6 +19,7 @@ import { UpdateBanner } from '@/components/admin/update-banner'
 import { PlanNoticeBanner } from '@/components/admin/plan-notice-banner'
 import { getPlanNotice } from '@/lib/server/functions/plan-notice'
 import { isProductEnabled } from '@/lib/shared/types/settings'
+import { layoutOpensPostModal } from '@/lib/shared/admin-post-modal'
 
 const PostModal = lazy(() =>
   import('@/components/admin/feedback/post-modal').then((m) => ({ default: m.PostModal }))
@@ -144,6 +145,10 @@ function usePostIdFromUrl(): string | undefined {
   })
 }
 
+function useLayoutOpensPostModal(): boolean {
+  return useRouterState({ select: (s) => layoutOpensPostModal(s.location.pathname) })
+}
+
 function AdminLayout() {
   const {
     initialUserData,
@@ -155,6 +160,7 @@ function AdminLayout() {
     messages,
   } = Route.useLoaderData()
   const postId = usePostIdFromUrl()
+  const opensPostModal = useLayoutOpensPostModal()
 
   // Mark team members online for conversation routing across the whole admin (not just
   // the inbox), but only when the support inbox feature is on.
@@ -187,7 +193,7 @@ function AdminLayout() {
               </div>
             </div>
           </main>
-          {currentUser && feedbackEnabled && postId && (
+          {currentUser && feedbackEnabled && postId && opensPostModal && (
             <Suspense fallback={<PostModalChunkFallback />}>
               <PostModal postId={postId} currentUser={currentUser} />
             </Suspense>

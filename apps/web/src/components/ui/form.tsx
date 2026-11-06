@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { useRender } from '@base-ui/react/use-render'
 import {
   Controller,
   FormProvider,
@@ -91,18 +90,27 @@ function FormLabel({ className, ...props }: React.ComponentProps<'label'>) {
   )
 }
 
+/**
+ * Adds the field's id and aria wiring to its control and touches nothing else.
+ *
+ * `cloneElement` rather than Base UI's `useRender`: `useRender` merges props
+ * with `mergeProps`, which replaces every `on*` handler of the child with a
+ * wrapper of arity 0. `RichTextEditor` reads its `onChange` arity to decide
+ * whether to serialise Markdown, so behind the wrapper every admin editor
+ * (post, changelog, help-center article) reported an empty body and the form
+ * rejected visible text with "Content is required".
+ */
 function FormControl({ children }: { children: React.ReactElement }) {
   const { error, formItemId, formDescriptionId, formMessageId } = useFormField()
 
-  return useRender({
-    render: children,
-    props: {
-      'data-slot': 'form-control',
-      id: formItemId,
-      'aria-describedby': !error ? `${formDescriptionId}` : `${formDescriptionId} ${formMessageId}`,
-      'aria-invalid': !!error,
-    },
-  })
+  const describedBy = error ? `${formDescriptionId} ${formMessageId}` : formDescriptionId
+  const controlProps = {
+    'data-slot': 'form-control',
+    id: formItemId,
+    'aria-describedby': describedBy,
+    'aria-invalid': !!error,
+  }
+  return React.cloneElement(children, controlProps)
 }
 
 function FormDescription({ className, ...props }: React.ComponentProps<'p'>) {
