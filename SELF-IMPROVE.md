@@ -546,6 +546,68 @@ no-op would quietly restore the number. CI cannot catch that rot on its own —
 the `check` job builds before it typechecks, and the build writes the same file
 — which is what `apps/web/scripts/__tests__/generate-route-tree.test.ts` is for.
 
+## 5x — The coverage config lives in the root config, so a run from apps/web measures nothing
+
+`vitest.config.ts` at the repo root carries the `coverage` block;
+`apps/web/vitest.config.ts` does not. Run the documented coverage command from
+`apps/web` — the natural place, since that is where the suites are — and vitest
+writes **no report at all**, with no error.
+
+`scripts/diff-coverage-check.ts` then reads every `coverage-final.json` under
+`coverage/`, finds the one a _previous_ run left there, and grades the diff
+against it. The output is entirely plausible: a file count, a line count, and a
+list of "added lines that no test executed" — which are simply every line
+added since that stale report was written. Two cycles went into chasing those
+as real holes.
+
+Two things would have caught it: the report's own age, and the fact that new
+source files appeared under "out of scope, although they look like source" —
+a file the run had definitely executed cannot be out of scope. The second one
+is the tell worth remembering.
+
+The invocation that works, from the repo **root**, with `apps/web/` on the
+paths:
+
+```bash
+rm -rf coverage/local   # a stale report is graded silently
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportsDirectory=coverage/local apps/web/src/<the suites>
+```
+
+Worth fixing in the gate rather than in memory: refuse a report older than the
+newest file it is being asked to grade.
+
+Second run, and it does not need a stale report to mislead. With `coverage/`
+cleared first, the run from `apps/web` writes a report that is real but
+measured under `apps/web/vitest.config.ts`, whose coverage block does not
+exist — so the gate graded a brand-new source file as **out of scope** and
+called seven added lines in two edited files never executed, all of which that
+same run had just run. Re-running the identical suites from the repo root
+turned that into `12 executed, 0 never executed`. The tell held: a file the run
+definitely executed was listed under "out of scope, although they look like
+source". Read that line before reading the holes.
+
+Third hit, batch M fork fixes: a coverage run from `apps/web` against the batch
+database produced no report at all (it also had red tests, see the next entry),
+and the rerun from the root needed the database override described in "The
+root vitest config pins `DATABASE_URL`" below, which the `apps/web` run had not.
+
+2026-11-05: hit again. A coverage run from `apps/web` wrote its report under
+`apps/web/coverage/local`, and the gate, reading from the root, judged 0 files
+and printed PASS. Only the "out of scope, although they look like source" list
+gave it away.
+
+2026-11-06: the other direction. The root config pins
+`DATABASE_URL` to `localhost:5432/quackback_test` and ignores the environment,
+so with `REQUIRE_TEST_DB=1` every `.db.test.ts` failed to load from the root on
+a machine whose 5432 belongs to someone else, and with `reportOnFailure` off
+the 40 suites that passed left no report either. `apps/web/vitest.config.ts`
+does honour `DATABASE_URL`, and from there a coverage run did write a report
+this time. Measured the branch in two runs: the non-DB suites from the root into
+`coverage/local`, the DB suites from `apps/web` with
+`--coverage.reportsDirectory=../../coverage/db`, then the gate with
+`COVERAGE_DIR=coverage`, which reads both.
+
 ## 4x — A picked upstream suite is written against module names from commits we skipped
 
 Three suites in upstream batch F failed for reasons that had nothing to do with
@@ -757,57 +819,6 @@ Fourth hit, batch M fork fixes: `no coverage report was found under coverage`
 after a run whose only reds were tests this machine cannot run (see the 8x
 entry). `--coverage.reportOnFailure=true` for the probe, then a separate check
 that the reds are the known local ones, was again the sequence that worked.
-
-## 4x — The coverage config lives in the root config, so a run from apps/web measures nothing
-
-`vitest.config.ts` at the repo root carries the `coverage` block;
-`apps/web/vitest.config.ts` does not. Run the documented coverage command from
-`apps/web` — the natural place, since that is where the suites are — and vitest
-writes **no report at all**, with no error.
-
-`scripts/diff-coverage-check.ts` then reads every `coverage-final.json` under
-`coverage/`, finds the one a _previous_ run left there, and grades the diff
-against it. The output is entirely plausible: a file count, a line count, and a
-list of "added lines that no test executed" — which are simply every line
-added since that stale report was written. Two cycles went into chasing those
-as real holes.
-
-Two things would have caught it: the report's own age, and the fact that new
-source files appeared under "out of scope, although they look like source" —
-a file the run had definitely executed cannot be out of scope. The second one
-is the tell worth remembering.
-
-The invocation that works, from the repo **root**, with `apps/web/` on the
-paths:
-
-```bash
-rm -rf coverage/local   # a stale report is graded silently
-bun x vitest run --coverage.enabled --coverage.reporter=json \
-  --coverage.reportsDirectory=coverage/local apps/web/src/<the suites>
-```
-
-Worth fixing in the gate rather than in memory: refuse a report older than the
-newest file it is being asked to grade.
-
-Second run, and it does not need a stale report to mislead. With `coverage/`
-cleared first, the run from `apps/web` writes a report that is real but
-measured under `apps/web/vitest.config.ts`, whose coverage block does not
-exist — so the gate graded a brand-new source file as **out of scope** and
-called seven added lines in two edited files never executed, all of which that
-same run had just run. Re-running the identical suites from the repo root
-turned that into `12 executed, 0 never executed`. The tell held: a file the run
-definitely executed was listed under "out of scope, although they look like
-source". Read that line before reading the holes.
-
-Third hit, batch M fork fixes: a coverage run from `apps/web` against the batch
-database produced no report at all (it also had red tests, see the next entry),
-and the rerun from the root needed the database override described in "The
-root vitest config pins `DATABASE_URL`" below, which the `apps/web` run had not.
-
-2026-11-05: hit again. A coverage run from `apps/web` wrote its report under
-`apps/web/coverage/local`, and the gate, reading from the root, judged 0 files
-and printed PASS. Only the "out of scope, although they look like source" list
-gave it away.
 
 ## 3x — Coverage had to be re-installed for every measurement
 
