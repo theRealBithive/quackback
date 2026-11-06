@@ -6,27 +6,27 @@ import { test, expect } from '@playwright/test'
 
 /**
  * Open the "New Entry" dialog and return the dialog locator.
- * Returns null if the button is not present.
  */
 async function openCreateDialog(page: import('@playwright/test').Page) {
   const newEntryBtn = page.getByRole('button', { name: /new entry/i })
-  if ((await newEntryBtn.count()) === 0) return null
-  await newEntryBtn.first().click()
   const dialog = page.getByRole('dialog')
-  await expect(dialog).toBeVisible({ timeout: 5000 })
+  // The button is server-rendered; a click before hydration opens nothing.
+  await expect(async () => {
+    await newEntryBtn.first().click()
+    await expect(dialog).toBeVisible({ timeout: 2000 })
+  }).toPass({ timeout: 20000 })
   return dialog
 }
 
 /**
  * Create a new changelog entry via the dialog and wait for it to close.
- * Returns the entry title used, or null if creation was unavailable.
+ * Returns the entry title used.
  */
 async function createEntry(
   page: import('@playwright/test').Page,
   title = `E2E Entry ${Date.now()}`
-): Promise<string | null> {
+): Promise<string> {
   const dialog = await openCreateDialog(page)
-  if (!dialog) return null
 
   // Title input uses "What's new?" placeholder
   await dialog.getByPlaceholder("What's new?").fill(title)
@@ -41,6 +41,28 @@ async function createEntry(
   await expect(dialog).toBeHidden({ timeout: 15000 })
 
   return title
+}
+
+/**
+ * Pick a publish status in the dialog's metadata sidebar. The control is a
+ * popover: its trigger is named after the current status, and each status is
+ * a button inside it.
+ */
+async function choosePublishStatus(
+  page: import('@playwright/test').Page,
+  dialog: import('@playwright/test').Locator,
+  status: 'Draft' | 'Scheduled' | 'Published'
+): Promise<void> {
+  const trigger = dialog
+    .getByRole('complementary')
+    .getByRole('button', { name: /^(Draft|Scheduled|Published)$/ })
+  await trigger.click()
+  const popover = page.locator('[data-slot="popover-content"]')
+  await popover.getByRole('button', { name: status, exact: true }).click()
+  await expect(trigger).toHaveText(status)
+  // The popover is a role="dialog" too; until it has gone, getByRole('dialog')
+  // matches two elements.
+  await expect(popover).toHaveCount(0)
 }
 
 /**
@@ -97,7 +119,6 @@ test.describe('Changelog create entry', () => {
 
   test('can open create dialog via "New Entry" button', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
 
     await expect(dialog).toBeVisible()
     await page.keyboard.press('Escape')
@@ -105,7 +126,6 @@ test.describe('Changelog create entry', () => {
 
   test('create dialog has title input and rich text editor', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
 
     await expect(dialog.getByPlaceholder("What's new?")).toBeVisible()
     await expect(dialog.locator('.ProseMirror[contenteditable="true"]')).toBeVisible()
@@ -117,23 +137,25 @@ test.describe('Changelog create entry', () => {
     page,
   }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
 
-    // The status select in the metadata sidebar is visible on desktop
-    const statusSelect = dialog.locator('button[role="combobox"]').first()
-    if ((await statusSelect.count()) > 0) {
-      await expect(statusSelect).toBeVisible()
+    const statusTrigger = dialog.getByRole('complementary').getByRole('button', { name: 'Draft' })
+    await statusTrigger.click()
+    const statusOptions = page.locator('[data-slot="popover-content"]')
+    for (const status of ['Draft', 'Scheduled', 'Published']) {
+      await expect(statusOptions.getByRole('button', { name: status, exact: true })).toBeVisible()
     }
+    await page.keyboard.press('Escape')
 
-    // Footer always has a submit button labeled "Save Draft" by default
+    // The submit button follows the chosen status.
     await expect(dialog.getByRole('button', { name: /save draft/i })).toBeVisible()
+    await choosePublishStatus(page, dialog, 'Published')
+    await expect(dialog.getByRole('button', { name: /publish now/i })).toBeVisible()
 
     await page.keyboard.press('Escape')
   })
 
   test('can create a new changelog entry with title and content', async ({ page }) => {
     const title = await createEntry(page)
-    if (!title) return
 
     await page.waitForLoadState('networkidle')
     // Entry should appear in the list
@@ -142,7 +164,6 @@ test.describe('Changelog create entry', () => {
 
   test('can create entry using Cmd+Enter keyboard shortcut', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
 
     const title = `Keyboard Entry ${Date.now()}`
     await dialog.getByPlaceholder("What's new?").fill(title)
@@ -162,7 +183,6 @@ test.describe('Changelog create entry', () => {
 
   test('shows validation error when submitting without a title', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
 
     // Leave title empty and attempt to submit
     await dialog.getByRole('button', { name: /save draft/i }).click()
@@ -177,9 +197,12 @@ test.describe('Changelog create entry', () => {
 
   test('dialog closes after successful creation', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
 
     await dialog.getByPlaceholder("What's new?").fill(`Close Test ${Date.now()}`)
+    // Content is required; before the FormControl fix typed content never
+    // reached the form, and this dialog stayed open with "Content is required".
+    await dialog.locator('.ProseMirror[contenteditable="true"]').click()
+    await page.keyboard.type('Entry body.')
     await dialog.getByRole('button', { name: /save draft/i }).click()
 
     await expect(dialog).toBeHidden({ timeout: 15000 })
@@ -187,7 +210,6 @@ test.describe('Changelog create entry', () => {
 
   test('dialog can be dismissed with Escape', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
 
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden({ timeout: 5000 })
@@ -207,10 +229,7 @@ test.describe('Changelog edit entry', () => {
   test('clicking an entry row opens the edit modal', async ({ page }) => {
     // Ensure there is at least one entry to click
     const firstCard = page.locator('h3').first()
-    if ((await firstCard.count()) === 0) {
-      test.skip()
-      return
-    }
+    await expect(firstCard).toBeVisible({ timeout: 15000 })
 
     await firstCard.click()
 
@@ -223,10 +242,7 @@ test.describe('Changelog edit entry', () => {
 
   test('edit modal shows title input pre-populated', async ({ page }) => {
     const firstCard = page.locator('h3').first()
-    if ((await firstCard.count()) === 0) {
-      test.skip()
-      return
-    }
+    await expect(firstCard).toBeVisible({ timeout: 15000 })
 
     const titleText = (await firstCard.textContent()) ?? ''
     await firstCard.click()
@@ -246,13 +262,12 @@ test.describe('Changelog edit entry', () => {
   test('can update an entry title and save', async ({ page }) => {
     // Create a fresh entry so we have something deterministic to edit
     const originalTitle = await createEntry(page)
-    if (!originalTitle) return
 
     await page.waitForLoadState('networkidle')
 
     // Click to open the edit modal
     const card = entryCard(page, originalTitle)
-    if ((await card.count()) === 0) return
+    await expect(card.first()).toBeVisible()
     await card.click()
 
     const dialog = page.getByRole('dialog')
@@ -273,10 +288,7 @@ test.describe('Changelog edit entry', () => {
 
   test('edit modal can be dismissed with Escape', async ({ page }) => {
     const firstCard = page.locator('h3').first()
-    if ((await firstCard.count()) === 0) {
-      test.skip()
-      return
-    }
+    await expect(firstCard).toBeVisible({ timeout: 15000 })
 
     await firstCard.click()
     const dialog = page.getByRole('dialog')
@@ -288,13 +300,13 @@ test.describe('Changelog edit entry', () => {
 
   test('closing edit modal removes entry param from URL', async ({ page }) => {
     const firstCard = page.locator('h3').first()
-    if ((await firstCard.count()) === 0) {
-      test.skip()
-      return
-    }
+    await expect(firstCard).toBeVisible({ timeout: 15000 })
 
     await firstCard.click()
     await expect(page).toHaveURL(/entry=/, { timeout: 10000 })
+    // Escape only reaches the modal once it is open and focused.
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('dialog').getByPlaceholder("What's new?")).toBeVisible()
 
     await page.keyboard.press('Escape')
     await expect(page).not.toHaveURL(/entry=/, { timeout: 5000 })
@@ -314,32 +326,19 @@ test.describe('Changelog publish and unpublish', () => {
   test('can publish a draft entry via status select in edit modal', async ({ page }) => {
     // Create a fresh draft entry
     const title = await createEntry(page)
-    if (!title) return
 
     await page.waitForLoadState('networkidle')
 
     // Open edit modal
     const card = entryCard(page, title)
-    if ((await card.count()) === 0) return
+    await expect(card.first()).toBeVisible()
     await card.click()
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 10000 })
 
     // Change status to "Published" via the StatusSelect combobox in the sidebar
-    const statusSelect = dialog.locator('button[role="combobox"]').first()
-    if ((await statusSelect.count()) === 0) {
-      await page.keyboard.press('Escape')
-      return
-    }
-
-    await statusSelect.click()
-    const publishedOption = page.getByRole('option', { name: /published/i })
-    if ((await publishedOption.count()) === 0) {
-      await page.keyboard.press('Escape')
-      return
-    }
-    await publishedOption.click()
+    await choosePublishStatus(page, dialog, 'Published')
 
     // Submit button should now say "Update & Publish"
     const submitBtn = dialog.getByRole('button', { name: /update & publish|publish now/i })
@@ -355,7 +354,7 @@ test.describe('Changelog publish and unpublish', () => {
       .filter({ hasText: title })
       .locator('xpath=ancestor::div[contains(@class,"group")]')
       .first()
-      .getByText(/published/i)
+      .getByText('Published', { exact: true })
 
     await expect(publishedBadge).toBeVisible({ timeout: 10000 })
   })
@@ -367,29 +366,14 @@ test.describe('Changelog publish and unpublish', () => {
       .filter({ hasText: /published/i })
       .locator('h3')
 
-    if ((await publishedRows.count()) === 0) {
-      test.skip()
-      return
-    }
+    await expect(publishedRows.first()).toBeVisible()
 
     await publishedRows.first().click()
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 10000 })
 
-    const statusSelect = dialog.locator('button[role="combobox"]').first()
-    if ((await statusSelect.count()) === 0) {
-      await page.keyboard.press('Escape')
-      return
-    }
-
-    await statusSelect.click()
-    const draftOption = page.getByRole('option', { name: /^draft$/i })
-    if ((await draftOption.count()) === 0) {
-      await page.keyboard.press('Escape')
-      return
-    }
-    await draftOption.click()
+    await choosePublishStatus(page, dialog, 'Draft')
 
     await dialog.getByRole('button', { name: /save draft/i }).click()
     await expect(dialog).toBeHidden({ timeout: 15000 })
@@ -409,7 +393,6 @@ test.describe('Changelog delete entry', () => {
   test('delete option in dropdown opens confirmation dialog', async ({ page }) => {
     // Create an entry to delete so we always have one
     const title = await createEntry(page)
-    if (!title) return
 
     await page.waitForLoadState('networkidle')
 
@@ -441,7 +424,6 @@ test.describe('Changelog delete entry', () => {
 
   test('can cancel deletion from confirmation dialog', async ({ page }) => {
     const title = await createEntry(page)
-    if (!title) return
 
     await page.waitForLoadState('networkidle')
 
@@ -456,7 +438,7 @@ test.describe('Changelog delete entry', () => {
     await menuBtn.click()
 
     const deleteItem = page.getByRole('menuitem', { name: /delete/i })
-    if ((await deleteItem.count()) === 0) return
+    await expect(deleteItem.first()).toBeVisible()
     await deleteItem.click()
 
     const confirmDialog = page
@@ -475,7 +457,6 @@ test.describe('Changelog delete entry', () => {
 
   test('can confirm deletion and entry disappears from list', async ({ page }) => {
     const title = await createEntry(page)
-    if (!title) return
 
     await page.waitForLoadState('networkidle')
 
@@ -490,7 +471,7 @@ test.describe('Changelog delete entry', () => {
     await menuBtn.click()
 
     const deleteItem = page.getByRole('menuitem', { name: /delete/i })
-    if ((await deleteItem.count()) === 0) return
+    await expect(deleteItem.first()).toBeVisible()
     await deleteItem.click()
 
     const confirmDialog = page
@@ -516,27 +497,20 @@ test.describe('Changelog delete entry', () => {
 
 /**
  * Helper: create and immediately publish an entry from the create dialog.
- * Returns the title, or null if the dialog was unavailable.
+ * Returns the title.
  */
 async function createAndPublishEntry(
   page: import('@playwright/test').Page,
   title: string
-): Promise<string | null> {
+): Promise<string> {
   const dialog = await openCreateDialog(page)
-  if (!dialog) return null
 
   await dialog.getByPlaceholder("What's new?").fill(title)
+  await dialog.locator('.ProseMirror[contenteditable="true"]').click()
+  await page.keyboard.type('Published entry content.')
 
   // Switch status to "Published"
-  const statusSelect = dialog.locator('button[role="combobox"]').first()
-  if ((await statusSelect.count()) === 0) return null
-  await statusSelect.click()
-  const publishedOption = page.getByRole('option', { name: /published/i })
-  if ((await publishedOption.count()) === 0) {
-    await page.keyboard.press('Escape')
-    return null
-  }
-  await publishedOption.click()
+  await choosePublishStatus(page, dialog, 'Published')
 
   // Submit button should now say "Publish Now"
   const publishBtn = dialog.getByRole('button', { name: /publish now/i })
@@ -558,10 +532,7 @@ async function unpublishEntry(page: import('@playwright/test').Page, title: stri
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible({ timeout: 10000 })
 
-  const statusSelect = dialog.locator('button[role="combobox"]').first()
-  await statusSelect.click()
-  const draftOption = page.getByRole('option', { name: /^draft$/i })
-  await draftOption.click()
+  await choosePublishStatus(page, dialog, 'Draft')
 
   await dialog.getByRole('button', { name: /save draft/i }).click()
   await expect(dialog).toBeHidden({ timeout: 15000 })
@@ -570,7 +541,6 @@ async function unpublishEntry(page: import('@playwright/test').Page, title: stri
 
 /**
  * Delete a test entry by title to clean up after publishing pipeline tests.
- * Silently skips if the entry is not found.
  */
 async function deleteEntryByTitle(
   page: import('@playwright/test').Page,
@@ -585,23 +555,20 @@ async function deleteEntryByTitle(
     .locator('xpath=ancestor::div[contains(@class,"group")]')
     .first()
 
-  if ((await row.count()) === 0) return
+  await expect(row.first()).toBeVisible()
 
   await row.hover()
   const menuBtn = row.locator('button').last()
   await menuBtn.click()
 
   const deleteItem = page.getByRole('menuitem', { name: /delete/i })
-  if ((await deleteItem.count()) === 0) {
-    await page.keyboard.press('Escape')
-    return
-  }
+  await expect(deleteItem.first()).toBeVisible()
   await deleteItem.click()
 
   const confirmDialog = page
     .getByRole('alertdialog')
     .or(page.getByRole('dialog').filter({ hasText: /delete/i }))
-  if ((await confirmDialog.count()) === 0) return
+  await expect(confirmDialog.first()).toBeVisible()
 
   await confirmDialog.getByRole('button', { name: /delete/i }).click()
   await expect(confirmDialog).toBeHidden({ timeout: 10000 })
@@ -618,8 +585,7 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
     const title = `Draft Visibility Test ${Date.now()}`
 
     // Create as draft only
-    const created = await createEntry(page, title)
-    if (!created) return
+    await createEntry(page, title)
 
     await page.waitForLoadState('networkidle')
 
@@ -640,8 +606,7 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
   test('published entry appears on public /changelog', async ({ page }) => {
     const title = `Publish Pipeline Test ${Date.now()}`
 
-    const published = await createAndPublishEntry(page, title)
-    if (!published) return
+    await createAndPublishEntry(page, title)
 
     await page.waitForLoadState('networkidle')
 
@@ -659,8 +624,7 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
   test('display date override appears on public /changelog', async ({ page }) => {
     const title = `Display Date Test ${Date.now()}`
 
-    const published = await createAndPublishEntry(page, title)
-    if (!published) return
+    await createAndPublishEntry(page, title)
 
     await page.waitForLoadState('networkidle')
 
@@ -671,30 +635,36 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
     const displayDateLabel = dialog.getByText('Published date', { exact: true })
     await expect(displayDateLabel).toBeVisible({ timeout: 5000 })
 
-    const displayDateRow = dialog.locator('div').filter({
-      has: page.getByText('Published date', { exact: true }),
-    })
-    await displayDateRow.getByRole('button').first().click()
+    // The date button is named after the date it shows ("Nov 5, 2026").
+    await dialog
+      .getByRole('complementary')
+      .getByRole('button', { name: /^[A-Z][a-z]{2} \d{1,2}, \d{4}$/ })
+      .click()
 
     const prevMonth = page.getByRole('button', { name: /previous month/i })
-    for (let i = 0; i < 24; i++) {
-      const caption = page.locator('[class*="CaptionLabel"]')
-      const text = (await caption.textContent()) ?? ''
-      if (/january 2024/i.test(text)) break
-      if ((await prevMonth.count()) === 0) break
+    // The month grid is labelled with its month and year ("January 2024").
+    const monthGrid = page.getByRole('grid').first()
+    await expect(monthGrid).toBeVisible()
+    for (let i = 0; i < 48; i++) {
+      const shownMonth = (await monthGrid.getAttribute('aria-label')) ?? ''
+      if (/january 2024/i.test(shownMonth)) break
       await prevMonth.click()
     }
+    await expect(monthGrid).toHaveAttribute('aria-label', /january 2024/i)
 
-    await page.getByRole('button', { name: /^15$/ }).first().click()
+    // Day buttons carry the full date as their name ("Monday, January 15th, 2024").
+    await monthGrid.getByRole('button', { name: /January 15(th)?, 2024/ }).click()
 
+    const entryId = new URL(page.url()).searchParams.get('entry')
+    expect(entryId).toMatch(/^changelog_/)
     await dialog.getByRole('button', { name: /update & publish/i }).click()
     await expect(dialog).toBeHidden({ timeout: 15000 })
     await page.waitForLoadState('networkidle')
 
-    await page.goto('/changelog')
-    await page.waitForLoadState('networkidle')
-
-    const entry = page.locator('article').filter({ hasText: title })
+    // The public list is ordered by the shown date, so an entry dated back to
+    // 2024 sits far down it; its own page is the place to read the date.
+    await page.goto(`/changelog/${entryId}`)
+    const entry = page.getByRole('main')
     await expect(entry.locator('time').first()).toContainText('January 15, 2024', {
       timeout: 10000,
     })
@@ -708,7 +678,6 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
 
     // Open create dialog, fill title and content, then publish
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
 
     await dialog.getByPlaceholder("What's new?").fill(title)
 
@@ -717,18 +686,7 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
     await page.keyboard.type(body)
 
     // Switch to Published
-    const statusSelect = dialog.locator('button[role="combobox"]').first()
-    if ((await statusSelect.count()) === 0) {
-      await page.keyboard.press('Escape')
-      return
-    }
-    await statusSelect.click()
-    const publishedOption = page.getByRole('option', { name: /published/i })
-    if ((await publishedOption.count()) === 0) {
-      await page.keyboard.press('Escape')
-      return
-    }
-    await publishedOption.click()
+    await choosePublishStatus(page, dialog, 'Published')
 
     const publishBtn = dialog.getByRole('button', { name: /publish now/i })
     await expect(publishBtn).toBeVisible({ timeout: 5000 })
@@ -752,8 +710,7 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
     const title = `Unpublish Pipeline Test ${Date.now()}`
 
     // Publish the entry first
-    const published = await createAndPublishEntry(page, title)
-    if (!published) return
+    await createAndPublishEntry(page, title)
 
     await page.waitForLoadState('networkidle')
 
@@ -783,26 +740,16 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
 
     // Open create dialog
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
 
     await dialog.getByPlaceholder("What's new?").fill(title)
+    await dialog.locator('.ProseMirror[contenteditable="true"]').click()
+    await page.keyboard.type('Scheduled entry content.')
 
     // Switch status to "Scheduled"
-    const statusSelect = dialog.locator('button[role="combobox"]').first()
-    if ((await statusSelect.count()) === 0) {
-      await page.keyboard.press('Escape')
-      return
-    }
-    await statusSelect.click()
-    const scheduledOption = page.getByRole('option', { name: /scheduled/i })
-    if ((await scheduledOption.count()) === 0) {
-      await page.keyboard.press('Escape')
-      return
-    }
-    await scheduledOption.click()
+    await choosePublishStatus(page, dialog, 'Scheduled')
 
     // The DateTimePicker should appear and default to tomorrow — leave it as-is
-    const scheduleRow = dialog.getByText('Schedule')
+    const scheduleRow = dialog.getByRole('complementary').getByText('Schedule', { exact: true })
     await expect(scheduleRow).toBeVisible({ timeout: 5000 })
 
     // Submit as scheduled
@@ -847,12 +794,11 @@ test.describe('Changelog search and filter', () => {
 
   test('typing in search input filters the list', async ({ page }) => {
     const searchInput = page.locator('[data-search-input]').or(page.getByPlaceholder(/search/i))
-    if ((await searchInput.count()) === 0) return
+    await expect(searchInput.first()).toBeVisible()
 
     // Create an entry with a unique searchable title
     const unique = `SearchTarget${Date.now()}`
-    const title = await createEntry(page, unique)
-    if (!title) return
+    await createEntry(page, unique)
 
     await page.waitForLoadState('networkidle')
 
@@ -874,20 +820,22 @@ test.describe('Changelog search and filter', () => {
 
   test('status filter: clicking Draft shows only draft entries', async ({ page }) => {
     const draftFilter = page.getByRole('option', { name: 'Draft' })
-    if ((await draftFilter.count()) === 0) return
+    await expect(draftFilter.first()).toBeVisible()
 
     await draftFilter.click()
     await page.waitForLoadState('networkidle')
 
-    // If entries are visible, none should have a "Published" badge
-    const publishedBadges = page.getByText(/^Published$/)
-    const count = await publishedBadges.count()
-    expect(count).toBe(0)
+    // No entry in the list carries a "Published" badge. The filter's own
+    // "Published" option sits in the sidebar, outside the list.
+    const entryTitles = page.locator('h3')
+    await expect(entryTitles.first()).toBeVisible()
+    const list = entryTitles.first().locator('xpath=ancestor::div[contains(@class,"group")]/..')
+    await expect(list.getByText(/^Published$/)).toHaveCount(0)
   })
 
   test('status filter: clicking All resets the filter', async ({ page }) => {
     const draftFilter = page.getByRole('option', { name: 'Draft' })
-    if ((await draftFilter.count()) === 0) return
+    await expect(draftFilter.first()).toBeVisible()
 
     await draftFilter.click()
     await page.waitForLoadState('networkidle')

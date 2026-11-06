@@ -74,6 +74,15 @@ export function setSupportSurfaces(enabled: boolean = true): void {
   runScript('set-support-surfaces.ts', [enabled ? 'on' : 'off'], 'set support surfaces')
 }
 
+/**
+ * Turn the help center on, with the fixture category and articles from
+ * `e2e/fixtures/help-center.ts`, or off. Specs that read the help center call
+ * this themselves instead of relying on another spec having enabled it.
+ */
+export function setHelpCenter(enabled: boolean): void {
+  runScript('set-help-center.ts', [enabled ? 'on' : 'off'], 'set help center')
+}
+
 /** Enable (or disable) widget Help/Changelog/Messages tabs plus product flags. */
 export function setWidgetSurfaces(enabled: boolean = true): void {
   runScript('set-widget-surfaces.ts', [enabled ? 'on' : 'off'], 'set widget surfaces')

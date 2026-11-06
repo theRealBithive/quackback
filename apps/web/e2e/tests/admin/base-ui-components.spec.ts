@@ -63,7 +63,9 @@ test.describe('Base UI component usability', () => {
     await expect(listbox).toBeHidden()
     await expect(position).toHaveText(shown)
 
-    const install = page.getByRole('link', { name: /Install widget|View installation/ })
+    // "Set it up" until the widget has been detected on a site, then
+    // "View installation".
+    const install = page.getByRole('link', { name: /^(Set it up|View installation)$/ })
     await expect(install).toBeVisible()
     await expect(install).not.toHaveAttribute('role', 'button')
 

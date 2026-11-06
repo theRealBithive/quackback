@@ -1,74 +1,54 @@
-import { test, expect, Page, BrowserContext } from '@playwright/test'
-import { getOtpCode } from '../../utils/db-helpers'
+import { test, expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
+import { signInAsDemoViaOtp } from '../../utils/portal-sign-in'
+import { waitForHydration } from '../../utils/helpers'
+import { setWorkspaceAnon } from '../../utils/access-helpers'
 
-const TEST_EMAIL = 'demo@example.com'
-const TEST_HOST = 'acme.localhost:3000'
+// Anonymous voting needs the workspace's `features.allowAnonymous`, which the
+// seed does not set and which reads as off when missing (fail-closed). Only
+// board-access-matrix.spec.ts used to switch it on, so these specs passed only
+// in a shard that happened to run that one first.
+test.beforeAll(() => {
+  setWorkspaceAnon(true)
+})
+
+/** The id of the post card shown at `index` in the feed. */
+async function postIdAt(page: Page, index: number): Promise<string> {
+  const card = page.getByRole('main').locator('[data-post-id]').nth(index)
+  await expect(card).toBeVisible({ timeout: 10000 })
+  const postId = await card.getAttribute('data-post-id')
+  expect(postId).toBeTruthy()
+  return postId ?? ''
+}
 
 /**
- * Helper to authenticate a user via OTP flow
- * This function attempts to handle rate limiting gracefully
+ * Open a post's detail page from the feed by loading its URL. After a click
+ * the feed's cards stay in the DOM for a moment, and "the first vote button"
+ * was then a card's, not the detail page's.
  */
-async function authenticateViaOTP(page: Page, maxRetries = 8) {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      // Request OTP code
-      const sendResponse = await page.request.post('/api/auth/email-otp/send-verification-otp', {
-        headers: { 'Content-Type': 'application/json' },
-        data: {
-          email: TEST_EMAIL,
-          type: 'sign-in',
-        },
-      })
+async function openPostDetail(page: Page, postId: string): Promise<void> {
+  const card = page.getByRole('main').locator(`[data-post-id="${postId}"]`)
+  const title = ((await card.locator('h3').textContent()) ?? '').trim()
+  const detailPath = (await card.getAttribute('href')) ?? ''
+  expect(detailPath).toMatch(/\/posts\//)
+  await page.goto(detailPath)
+  await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible({
+    timeout: 10000,
+  })
+}
 
-      // If rate limited, wait and retry with exponential backoff
-      if (sendResponse.status() === 429) {
-        const waitTime = Math.min(2000 * Math.pow(2, attempt), 20000) // Max 20 seconds per attempt
-        console.log(
-          `Rate limited on attempt ${attempt + 1}/${maxRetries}, waiting ${waitTime}ms...`
-        )
-        await page.waitForTimeout(waitTime)
-        continue
-      }
-
-      if (!sendResponse.ok()) {
-        const errorData = await sendResponse.json()
-        console.error('Failed to send OTP:', errorData)
-        throw new Error(`Failed to send OTP: ${JSON.stringify(errorData)}`)
-      }
-
-      // Get OTP code from database
-      const otpCode = getOtpCode(TEST_EMAIL, TEST_HOST)
-
-      // Verify OTP code - Better-auth sets session cookie automatically
-      const verifyResponse = await page.request.post('/api/auth/sign-in/email-otp', {
-        headers: { 'Content-Type': 'application/json' },
-        data: {
-          email: TEST_EMAIL,
-          otp: otpCode,
-        },
-      })
-
-      if (!verifyResponse.ok()) {
-        const errorData = await verifyResponse.json()
-        console.error('Failed to verify OTP:', errorData)
-        throw new Error(`Failed to verify OTP: ${JSON.stringify(errorData)}`)
-      }
-
-      // Session cookie is now set by Better-auth
-      // Navigate to any page to verify authentication
-      await page.goto('/')
-      await page.waitForLoadState('networkidle')
-      console.log('Authentication successful!')
-      return // Success!
-    } catch (error) {
-      if (attempt === maxRetries - 1) {
-        console.error(`All ${maxRetries} authentication attempts failed.`)
-        throw error // Last attempt failed, re-throw
-      }
-      console.log(`Auth attempt ${attempt + 1} failed, retrying...`)
-      await page.waitForTimeout(3000)
-    }
-  }
+/**
+ * The vote button of one post, found by its id rather than its position:
+ * under the default Trending sort a vote can move the card, and `nth(i)`
+ * would then point at a neighbour between the click and the assertion.
+ * Waits for hydration, because a click on the server-rendered button is lost.
+ */
+async function voteButtonOf(page: Page, postId: string): Promise<Locator> {
+  const voteButton = page
+    .getByRole('main')
+    .locator(`[data-post-id="${postId}"]`)
+    .getByTestId('vote-button')
+  await waitForHydration(voteButton)
+  return voteButton
 }
 
 test.describe.configure({ mode: 'serial' })
@@ -77,15 +57,11 @@ test.describe('Public Voting', () => {
   let sharedContext: BrowserContext
   let isAuthenticated = false
 
-  // Increase timeout to 90 seconds to handle rate limiting
-  test.setTimeout(90000)
-
   test.beforeAll(async ({ browser }) => {
     // Create a shared context and authenticate once for all tests
-    // Note: This may take longer if rate limits are active
     sharedContext = await browser.newContext()
     const page = await sharedContext.newPage()
-    await authenticateViaOTP(page)
+    await signInAsDemoViaOtp(page)
     isAuthenticated = true
     await page.close()
   })
@@ -130,8 +106,8 @@ test.describe('Public Voting', () => {
       await page.waitForLoadState('networkidle')
 
       // Use 6th post to avoid conflicts with other tests
-      const voteButtons = page.getByTestId('vote-button')
-      const voteButton = voteButtons.nth(5)
+      const postId = await postIdAt(page, 5)
+      const voteButton = await voteButtonOf(page, postId)
       await expect(voteButton).toBeVisible({ timeout: 10000 })
 
       const voteCountSpan = voteButton.getByTestId('vote-count')
@@ -173,8 +149,8 @@ test.describe('Public Voting', () => {
       await page.waitForLoadState('networkidle')
 
       // Use 7th post to avoid conflicts with other tests
-      const voteButtons = page.getByTestId('vote-button')
-      const voteButton = voteButtons.nth(6)
+      const postId = await postIdAt(page, 6)
+      const voteButton = await voteButtonOf(page, postId)
       await expect(voteButton).toBeVisible({ timeout: 10000 })
 
       const voteCountSpan = voteButton.getByTestId('vote-count')
@@ -216,8 +192,8 @@ test.describe('Public Voting', () => {
       await page.waitForLoadState('networkidle')
 
       // Use 8th post to avoid conflicts with other tests
-      const voteButtons = page.getByTestId('vote-button')
-      const voteButton = voteButtons.nth(7)
+      const postId = await postIdAt(page, 7)
+      const voteButton = await voteButtonOf(page, postId)
       await expect(voteButton).toBeVisible({ timeout: 10000 })
 
       const voteCountSpan = voteButton.getByTestId('vote-count')
@@ -254,21 +230,12 @@ test.describe('Public Voting', () => {
       await page.goto('/')
       await page.waitForLoadState('networkidle')
 
-      // Navigate to 9th post detail page to avoid conflicts with other tests
-      const postLinks = page.locator('a[href*="/posts/"]')
-      await expect(postLinks.nth(8)).toBeVisible({ timeout: 10000 })
+      // The 9th post, to avoid conflicts with other tests.
+      const postId = await postIdAt(page, 8)
+      await openPostDetail(page, postId)
 
-      // Click the 9th post link
-      await postLinks.nth(8).click()
-
-      // Wait for URL to change to post detail page
-      await page.waitForURL(/\/posts\//)
-
-      // Wait for detail page vote button specifically.
-      // The VoteSidebar vote button is in a Suspense boundary; use aria-pressed to confirm it loaded.
-      // Both list and detail use text-sm, so just use the first vote button on the detail page.
       const detailVoteButton = page.getByTestId('vote-button').first()
-      await expect(detailVoteButton).toBeVisible({ timeout: 10000 })
+      await waitForHydration(detailVoteButton)
 
       const voteCountSpan = detailVoteButton.getByTestId('vote-count')
 
@@ -321,8 +288,8 @@ test.describe('Anonymous Voting (unauthenticated)', () => {
 
   test('anonymous user can vote without signing in', async ({ page }) => {
     // Use 10th post to avoid conflicts with authenticated voting tests
-    const voteButtons = page.getByTestId('vote-button')
-    const voteButton = voteButtons.nth(9)
+    const postId = await postIdAt(page, 9)
+    const voteButton = await voteButtonOf(page, postId)
     await expect(voteButton).toBeVisible({ timeout: 10000 })
 
     const voteCountSpan = voteButton.getByTestId('vote-count')
@@ -354,8 +321,8 @@ test.describe('Anonymous Voting (unauthenticated)', () => {
 
   test('anonymous user can toggle vote off', async ({ page }) => {
     // Use 11th post to avoid conflicts
-    const voteButtons = page.getByTestId('vote-button')
-    const voteButton = voteButtons.nth(10)
+    const postId = await postIdAt(page, 10)
+    const voteButton = await voteButtonOf(page, postId)
     await expect(voteButton).toBeVisible({ timeout: 10000 })
 
     const voteCountSpan = voteButton.getByTestId('vote-count')
@@ -420,36 +387,13 @@ test.describe('Voting — count display and accessibility', () => {
 })
 
 test.describe('Voting — independence and persistence', () => {
-  test.setTimeout(90000)
-
   // Use a fresh authenticated context for persistence tests so votes survive navigation
   let sharedContext: import('@playwright/test').BrowserContext
 
   test.beforeAll(async ({ browser }) => {
     sharedContext = await browser.newContext()
     const page = await sharedContext.newPage()
-    // Use the OTP auth helper already tested in the Public Voting suite
-    // (relies on the same demo@example.com account and db-helpers)
-    const { getOtpCode } = await import('../../utils/db-helpers')
-
-    const TEST_EMAIL = 'demo@example.com'
-    const TEST_HOST = 'acme.localhost:3000'
-
-    const sendResponse = await page.request.post('/api/auth/email-otp/send-verification-otp', {
-      headers: { 'Content-Type': 'application/json' },
-      data: { email: TEST_EMAIL, type: 'sign-in' },
-    })
-    if (!sendResponse.ok()) throw new Error('Failed to send OTP for persistence tests')
-
-    const otpCode = getOtpCode(TEST_EMAIL, TEST_HOST)
-    const verifyResponse = await page.request.post('/api/auth/sign-in/email-otp', {
-      headers: { 'Content-Type': 'application/json' },
-      data: { email: TEST_EMAIL, otp: otpCode },
-    })
-    if (!verifyResponse.ok()) throw new Error('Failed to verify OTP for persistence tests')
-
-    await page.goto('/')
-    await page.waitForLoadState('networkidle')
+    await signInAsDemoViaOtp(page)
     await page.close()
   })
 
@@ -467,8 +411,10 @@ test.describe('Voting — independence and persistence', () => {
       await expect(voteButtons.first()).toBeVisible({ timeout: 10000 })
 
       // Use posts 12 and 13 (0-indexed) to stay clear of other test slots
-      const buttonA = voteButtons.nth(12)
-      const buttonB = voteButtons.nth(13)
+      const postIdA = await postIdAt(page, 12)
+      const buttonA = await voteButtonOf(page, postIdA)
+      const postIdB = await postIdAt(page, 13)
+      const buttonB = await voteButtonOf(page, postIdB)
 
       const countSpanA = buttonA.getByTestId('vote-count')
       const countSpanB = buttonB.getByTestId('vote-count')
@@ -514,11 +460,14 @@ test.describe('Voting — independence and persistence', () => {
       await page.waitForLoadState('networkidle')
 
       // Use post 14 to avoid conflicts
-      const voteButton = page.getByTestId('vote-button').nth(14)
+      const postId = await postIdAt(page, 14)
+      const voteButton = await voteButtonOf(page, postId)
       await expect(voteButton).toBeVisible({ timeout: 10000 })
 
       // Normalise to unvoted state
-      const isVoted = await voteButton.evaluate((el) => el.classList.contains('post-card__vote--voted'))
+      const isVoted = await voteButton.evaluate((el) =>
+        el.classList.contains('post-card__vote--voted')
+      )
       if (isVoted) {
         await voteButton.click()
         await expect(voteButton).not.toHaveClass(/post-card__vote--voted/, { timeout: 5000 })
@@ -536,8 +485,7 @@ test.describe('Voting — independence and persistence', () => {
       await page.waitForLoadState('networkidle')
 
       // The vote should still be reflected (button shows voted state)
-      const returnedButton = page.getByTestId('vote-button').nth(14)
-      await expect(returnedButton).toBeVisible({ timeout: 10000 })
+      const returnedButton = await voteButtonOf(page, postId)
       await expect(returnedButton).toHaveClass(/post-card__vote--voted/, { timeout: 5000 })
     } finally {
       await page.close()
@@ -551,18 +499,11 @@ test.describe('Voting — independence and persistence', () => {
       await page.waitForLoadState('networkidle')
 
       // Use post 15 to avoid conflicts
-      const voteButtons = page.getByTestId('vote-button')
-      await expect(voteButtons.first()).toBeVisible({ timeout: 10000 })
+      const postId = await postIdAt(page, 15)
+      const listVoteButton = await voteButtonOf(page, postId)
+      const listCount = await listVoteButton.getByTestId('vote-count').textContent()
 
-      const listVoteButton = voteButtons.nth(15)
-      const listCountSpan = listVoteButton.getByTestId('vote-count')
-      const listCount = await listCountSpan.textContent()
-
-      // Find the post link in the same card and navigate to it
-      const postLinks = page.locator('a[href*="/posts/"]')
-      await postLinks.nth(15).click()
-      await page.waitForURL(/\/posts\//)
-      await page.waitForLoadState('networkidle')
+      await openPostDetail(page, postId)
 
       // Detail page vote button — use first vote button (VoteSidebar, in DOM order)
       const detailVoteButton = page.getByTestId('vote-button').first()
@@ -589,11 +530,14 @@ test.describe('Voting — debounce / rapid clicks', () => {
     await expect(voteButtons.first()).toBeVisible({ timeout: 10000 })
 
     // Use post 16 — unlikely to conflict with authenticated tests above
-    const voteButton = voteButtons.nth(16)
+    const postId = await postIdAt(page, 16)
+    const voteButton = await voteButtonOf(page, postId)
     const countSpan = voteButton.getByTestId('vote-count')
 
     // Normalise to unvoted
-    const isVoted = await voteButton.evaluate((el) => el.classList.contains('post-card__vote--voted'))
+    const isVoted = await voteButton.evaluate((el) =>
+      el.classList.contains('post-card__vote--voted')
+    )
     if (isVoted) {
       await voteButton.click()
       await expect(voteButton).not.toHaveClass(/post-card__vote--voted/, { timeout: 10000 })
@@ -652,7 +596,9 @@ test.describe('Voting — filtered board context', () => {
     const countSpan = voteButton.getByTestId('vote-count')
 
     // Normalise to unvoted
-    const isVoted = await voteButton.evaluate((el) => el.classList.contains('post-card__vote--voted'))
+    const isVoted = await voteButton.evaluate((el) =>
+      el.classList.contains('post-card__vote--voted')
+    )
     if (isVoted) {
       await voteButton.click()
       await expect(voteButton).not.toHaveClass(/post-card__vote--voted/, { timeout: 10000 })

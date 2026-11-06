@@ -5,7 +5,7 @@ when the same thing bites again and re-sort the list by counter, descending.
 Entries that have actually been fixed move to **Resolved** at the end, with what
 fixed them — they are the record of what the counters bought.
 
-## 18x — Test suites are flaky under parallel load
+## 19x — Test suites are flaky under parallel load
 
 `principals/__tests__/seat-usage.db.test.ts` and
 `tickets/__tests__/ticket-convergence-1b.test.ts` each fail intermittently when
@@ -175,6 +175,11 @@ shared hoisted mocks, so the next test fails an assertion it never caused
 "keeps a private workspace closed" test then saw a call it had not made).
 Read a red test right after a timed-out property as the timeout, not as a
 second finding, and give a heavy property its own timeout.
+
+2026-11-05: `message-bubble-edit.contract.test.tsx` and
+`changelog-notified-at.test.ts` failed together in a 63-file unit run while a
+Playwright run drove the dev server on the same machine, and both passed alone a
+minute later. A unit run beside an e2e run is a load test of the laptop.
 
 ## 9x — A full local run ends red on a test this machine cannot run, and that costs the coverage report
 
@@ -753,6 +758,57 @@ after a run whose only reds were tests this machine cannot run (see the 8x
 entry). `--coverage.reportOnFailure=true` for the probe, then a separate check
 that the reds are the known local ones, was again the sequence that worked.
 
+## 4x — The coverage config lives in the root config, so a run from apps/web measures nothing
+
+`vitest.config.ts` at the repo root carries the `coverage` block;
+`apps/web/vitest.config.ts` does not. Run the documented coverage command from
+`apps/web` — the natural place, since that is where the suites are — and vitest
+writes **no report at all**, with no error.
+
+`scripts/diff-coverage-check.ts` then reads every `coverage-final.json` under
+`coverage/`, finds the one a _previous_ run left there, and grades the diff
+against it. The output is entirely plausible: a file count, a line count, and a
+list of "added lines that no test executed" — which are simply every line
+added since that stale report was written. Two cycles went into chasing those
+as real holes.
+
+Two things would have caught it: the report's own age, and the fact that new
+source files appeared under "out of scope, although they look like source" —
+a file the run had definitely executed cannot be out of scope. The second one
+is the tell worth remembering.
+
+The invocation that works, from the repo **root**, with `apps/web/` on the
+paths:
+
+```bash
+rm -rf coverage/local   # a stale report is graded silently
+bun x vitest run --coverage.enabled --coverage.reporter=json \
+  --coverage.reportsDirectory=coverage/local apps/web/src/<the suites>
+```
+
+Worth fixing in the gate rather than in memory: refuse a report older than the
+newest file it is being asked to grade.
+
+Second run, and it does not need a stale report to mislead. With `coverage/`
+cleared first, the run from `apps/web` writes a report that is real but
+measured under `apps/web/vitest.config.ts`, whose coverage block does not
+exist — so the gate graded a brand-new source file as **out of scope** and
+called seven added lines in two edited files never executed, all of which that
+same run had just run. Re-running the identical suites from the repo root
+turned that into `12 executed, 0 never executed`. The tell held: a file the run
+definitely executed was listed under "out of scope, although they look like
+source". Read that line before reading the holes.
+
+Third hit, batch M fork fixes: a coverage run from `apps/web` against the batch
+database produced no report at all (it also had red tests, see the next entry),
+and the rerun from the root needed the database override described in "The
+root vitest config pins `DATABASE_URL`" below, which the `apps/web` run had not.
+
+2026-11-05: hit again. A coverage run from `apps/web` wrote its report under
+`apps/web/coverage/local`, and the gate, reading from the root, judged 0 files
+and printed PASS. Only the "out of scope, although they look like source" list
+gave it away.
+
 ## 3x — Coverage had to be re-installed for every measurement
 
 The tooling for non-trivial logic is half-present. `fast-check` is a
@@ -914,52 +970,6 @@ the workaround tried before committing (pointing `HEAD` at a throwaway
 `commit-tree` snapshot with `update-ref`) worked but is exactly the kind of
 trick that should not be needed. Commit on the feature branch first; the gates
 are then one plain command each.
-
-## 3x — The coverage config lives in the root config, so a run from apps/web measures nothing
-
-`vitest.config.ts` at the repo root carries the `coverage` block;
-`apps/web/vitest.config.ts` does not. Run the documented coverage command from
-`apps/web` — the natural place, since that is where the suites are — and vitest
-writes **no report at all**, with no error.
-
-`scripts/diff-coverage-check.ts` then reads every `coverage-final.json` under
-`coverage/`, finds the one a _previous_ run left there, and grades the diff
-against it. The output is entirely plausible: a file count, a line count, and a
-list of "added lines that no test executed" — which are simply every line
-added since that stale report was written. Two cycles went into chasing those
-as real holes.
-
-Two things would have caught it: the report's own age, and the fact that new
-source files appeared under "out of scope, although they look like source" —
-a file the run had definitely executed cannot be out of scope. The second one
-is the tell worth remembering.
-
-The invocation that works, from the repo **root**, with `apps/web/` on the
-paths:
-
-```bash
-rm -rf coverage/local   # a stale report is graded silently
-bun x vitest run --coverage.enabled --coverage.reporter=json \
-  --coverage.reportsDirectory=coverage/local apps/web/src/<the suites>
-```
-
-Worth fixing in the gate rather than in memory: refuse a report older than the
-newest file it is being asked to grade.
-
-Second run, and it does not need a stale report to mislead. With `coverage/`
-cleared first, the run from `apps/web` writes a report that is real but
-measured under `apps/web/vitest.config.ts`, whose coverage block does not
-exist — so the gate graded a brand-new source file as **out of scope** and
-called seven added lines in two edited files never executed, all of which that
-same run had just run. Re-running the identical suites from the repo root
-turned that into `12 executed, 0 never executed`. The tell held: a file the run
-definitely executed was listed under "out of scope, although they look like
-source". Read that line before reading the holes.
-
-Third hit, batch M fork fixes: a coverage run from `apps/web` against the batch
-database produced no report at all (it also had red tests, see the next entry),
-and the rerun from the root needed the database override described in "The
-root vitest config pins `DATABASE_URL`" below, which the `apps/web` run had not.
 
 ## 2x — Two lists that must agree conflict on every merge in a stack
 
@@ -2123,6 +2133,76 @@ so the callback finds no state and answers `state_mismatch` — which reads as a
 bug in the sign-in flow. `// @vitest-environment node` at the top of the suite
 fixes it. Any test that carries a cookie across two real auth requests needs
 that line.
+
+## 1x — An e2e spec that returns early on a missing element passes over a changed UI
+
+`e2e/tests/admin/help-center.spec.ts`, `changelog.spec.ts`, `boards.spec.ts`
+and the public post-list specs guarded most tests with
+`if ((await x.count()) === 0) return` or `test.skip()` on exactly the element
+under test. When the UI moved on (the changelog status became a popover, the
+help-center settings toggle stopped rendering while the product was off, the
+board settings lost their `/access` route), the tests kept passing while asserting
+nothing. Replacing the guards with assertions in one run (2026-11-05) turned
+about 60 green tests red, and behind them sat two real production bugs: no
+admin could create a help-center article, changelog entry or post
+(`FormControl` broke the editor's Markdown), and the article editor lost its
+body on a hard load. Any e2e test that branches on whether its subject exists
+should be read as unverified until it asserts the subject.
+
+## 1x — A click on a server-rendered control before hydration does nothing, and Playwright reports it as a missing element
+
+Under `vite dev`, the admin and portal pages render their buttons on the server.
+A Playwright click that lands before React hydrates opens no menu, fills no
+input, switches no tab, and the next assertion fails as "element not found" or
+a text that was typed is silently dropped. Seen on 2026-11-05 on the help-center
+"New" menu, the changelog "New entry" button, the board Access tab, the
+goal-change button, the post-list Search popover and the type-to-confirm delete
+input after a reload. `waitForLoadState('networkidle')` does not help. What
+does: repeat the action until its effect shows, `expect(async () => { click;
+expect(effect).toBeVisible({ timeout: 2000 }) }).toPass()`. A test-only
+hydration marker on `<html>` would let every spec wait once instead.
+
+## 1x — The root `.env` points `DATABASE_URL` at whatever Postgres owns port 5432
+
+The repo-root `.env` sets `DATABASE_URL=postgresql://…@localhost:5432/quackback_dev`.
+The e2e helper scripts under `apps/web/e2e/scripts/` are run with bun, which
+loads that `.env` when the variable is not already in the environment. On this
+machine port 5432 belongs to another project's container, so a script run
+without an exported `DATABASE_URL` connected to the wrong database and failed
+with "password authentication failed". It could just as well have connected.
+Always export the test database explicitly for e2e work
+(`DATABASE_URL=postgresql://postgres:password@localhost:55499/quackback_test`
+for the e2e container), and consider having the e2e scripts refuse a
+`DATABASE_URL` whose database name does not end in `_test`.
+
+## 1x — An e2e spec depends on a workspace setting another spec happened to set
+
+Workspace settings are global, and several e2e specs flip them
+(`setWorkspaceAnon`, `setHelpCenter`, `setSupportSurfaces`). A spec that reads
+one without setting it passes or fails depending on which spec ran before it in
+the shard, and the failure points at the wrong place. Measured on 2026-11-05:
+anonymous voting opened the sign-in dialog, because the seed leaves
+`features.allowAnonymous` unset (read as off, fail-closed) and only
+board-access-matrix switched it on. Once voting switched it on, the
+unauthenticated comments block failed, because it had silently relied on "off".
+Each spec now sets the state it describes in a `beforeAll`. That is safe only
+because CI runs one worker. Locally, `--workers 1` is needed for the same reason.
+When an e2e failure makes no sense on its own, check the settings row before
+the selectors.
+
+## 1x — The MinIO images in `docker-compose.yml` can no longer be pulled
+
+`minio/minio` and `minio/mc` (also on quay.io and from Bitnami) answer "pull
+access denied" (checked 2026-11-05), so `docker compose up minio minio-init` fails
+and a fresh dev setup has no object storage. With none configured, every upload
+route answers 503 "Storage not configured", and a test that uploads for real fails
+as a missing element several steps later. The real-paste conversation-image spec
+was red in e2e-full for exactly this reason, beside a stubbed twin that passed.
+e2e-full now runs `rustfs/rustfs` (pinned by digest) as a service container plus an
+`aws s3 mb` step. With no subcommand the image starts the server on `/data`, so a
+service container works without a `command:`. `docker-compose.yml` is upstream's
+and still names MinIO; for local e2e, start the same RustFS image on port 9000 and
+pass the `S3_*` block from `.env.example` with the RustFS keys.
 
 # Resolved
 

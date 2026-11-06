@@ -60,6 +60,7 @@ test.describe('Admin conversation images', { tag: '@smoke' }, () => {
 
     const composer = page.locator('[data-inbox-composer]')
     await expect(composer).toBeVisible()
+    await expect(composer.locator('.ProseMirror[contenteditable="true"]')).toBeVisible()
     await pasteImageOn(composer, png, 'pasted-shot.png')
 
     const trayThumb = composer.getByRole('button', { name: 'Enlarge pasted-shot.png' })
@@ -171,6 +172,9 @@ test.describe('Local Vite storage serves conversation thumbs', () => {
 
     const composer = page.locator('[data-inbox-composer]')
     await expect(composer).toBeVisible()
+    // The editor mounts on the client only; a paste before that has no
+    // handler and is dropped.
+    await expect(composer.locator('.ProseMirror[contenteditable="true"]')).toBeVisible()
     await pasteImageOn(composer, png, 'real-refresh.png')
 
     const trayThumb = composer.getByRole('button', { name: 'Enlarge real-refresh.png' })

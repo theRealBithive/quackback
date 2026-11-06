@@ -1,56 +1,9 @@
 import { test, expect, type Page, type BrowserContext, type Locator } from '@playwright/test'
-import { getOtpCode } from '../../utils/db-helpers'
-
-const TEST_EMAIL = 'demo@example.com'
-const TEST_HOST = 'acme.localhost:3000'
+import { signInAsDemoViaOtp } from '../../utils/portal-sign-in'
+import { setWorkspaceAnon } from '../../utils/access-helpers'
 
 // Run serially to avoid OTP rate-limiting conflicts with other spec files
 test.describe.configure({ mode: 'serial' })
-
-// ---------------------------------------------------------------------------
-// Auth helper (mirrors voting.spec.ts pattern with exponential backoff)
-// ---------------------------------------------------------------------------
-async function authenticateViaOTP(page: Page, maxRetries = 8) {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const sendResponse = await page.request.post('/api/auth/email-otp/send-verification-otp', {
-        headers: { 'Content-Type': 'application/json' },
-        data: { email: TEST_EMAIL, type: 'sign-in' },
-      })
-
-      if (sendResponse.status() === 429) {
-        const wait = Math.min(2000 * Math.pow(2, attempt), 20000)
-        console.log(`[comments] Rate limited, waiting ${wait}ms (attempt ${attempt + 1})`)
-        await page.waitForTimeout(wait)
-        continue
-      }
-
-      if (!sendResponse.ok()) {
-        throw new Error(`OTP send failed: ${await sendResponse.text()}`)
-      }
-
-      const otpCode = getOtpCode(TEST_EMAIL, TEST_HOST)
-
-      const verifyResponse = await page.request.post('/api/auth/sign-in/email-otp', {
-        headers: { 'Content-Type': 'application/json' },
-        data: { email: TEST_EMAIL, otp: otpCode },
-      })
-
-      if (!verifyResponse.ok()) {
-        throw new Error(`OTP verify failed: ${await verifyResponse.text()}`)
-      }
-
-      await page.goto('/')
-      await page.waitForLoadState('networkidle')
-      console.log('[comments] Authentication successful')
-      return
-    } catch (err) {
-      if (attempt === maxRetries - 1) throw err
-      console.log(`[comments] Auth attempt ${attempt + 1} failed, retrying...`)
-      await page.waitForTimeout(3000)
-    }
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Helper: navigate to the first available post detail page
@@ -109,6 +62,13 @@ async function expectEditorEmpty(editor: ReturnType<typeof commentEditor>) {
 // (uses default per-test browser context — no session cookie)
 // ===========================================================================
 test.describe('Unauthenticated user — comments section', () => {
+  // A visitor who may not comment anonymously: the workspace's
+  // `features.allowAnonymous` is off. That is also the seed's state, but
+  // voting.spec.ts switches it on, so this block sets it instead of assuming.
+  test.beforeAll(() => {
+    setWorkspaceAnon(false)
+  })
+
   test.setTimeout(60000)
 
   test.beforeEach(async ({ page }) => {
@@ -277,14 +237,12 @@ test.describe('Unauthenticated user — comments section', () => {
 // Shared browser context authenticated once for the whole suite.
 // ===========================================================================
 test.describe('Authenticated user — comment form and submission', () => {
-  test.setTimeout(90000)
-
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
     sharedContext = await browser.newContext()
     const page = await sharedContext.newPage()
-    await authenticateViaOTP(page)
+    await signInAsDemoViaOtp(page)
     await page.close()
   })
 
@@ -502,14 +460,12 @@ test.describe('Authenticated user — comment form and submission', () => {
 // EDGE CASES (authenticated)
 // ===========================================================================
 test.describe('Edge cases — comment content', () => {
-  test.setTimeout(90000)
-
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
     sharedContext = await browser.newContext()
     const page = await sharedContext.newPage()
-    await authenticateViaOTP(page)
+    await signInAsDemoViaOtp(page)
     await page.close()
   })
 
@@ -673,14 +629,12 @@ test.describe('Edge cases — comment content', () => {
 // COMMENT EDITING (authenticated)
 // ===========================================================================
 test.describe('Comment editing', () => {
-  test.setTimeout(90000)
-
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
     sharedContext = await browser.newContext()
     const page = await sharedContext.newPage()
-    await authenticateViaOTP(page)
+    await signInAsDemoViaOtp(page)
     await page.close()
   })
 
@@ -874,14 +828,12 @@ test.describe('Comment editing', () => {
 // MARKDOWN RENDERING (authenticated)
 // ===========================================================================
 test.describe('Markdown comment rendering', () => {
-  test.setTimeout(90000)
-
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
     sharedContext = await browser.newContext()
     const page = await sharedContext.newPage()
-    await authenticateViaOTP(page)
+    await signInAsDemoViaOtp(page)
     await page.close()
   })
 
@@ -949,14 +901,13 @@ test.describe('Markdown comment rendering', () => {
       await editor.click()
       await clearEditor(editor)
       await editor.pressSequentially('/image')
+      // The slash menu lists its items as buttons; with a query it shows the
+      // title only, not the "Upload an image" description.
       const imageItem = page
-        .getByRole('option', { name: /^image$/i })
-        .or(page.getByText('Upload an image', { exact: false }))
-      await expect(imageItem.first()).toBeVisible({ timeout: 5000 })
-      const [fileChooser] = await Promise.all([
-        page.waitForEvent('filechooser'),
-        imageItem.first().click(),
-      ])
+        .locator('[data-editor-suggestion]')
+        .getByRole('button', { name: 'Image', exact: true })
+      await expect(imageItem).toBeVisible({ timeout: 5000 })
+      const [fileChooser] = await Promise.all([page.waitForEvent('filechooser'), imageItem.click()])
       await fileChooser.setFiles({
         name: 'shot.png',
         mimeType: 'image/png',

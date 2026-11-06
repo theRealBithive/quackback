@@ -96,7 +96,8 @@ test.describe('Admin Sidebar Navigation', () => {
   })
 
   test('logo links to feedback page', async ({ page }) => {
-    const logoLink = page.getByRole('link', { name: 'Quackback' }).first()
+    // The sidebar logo carries the workspace's name (the seed's "Acme Corp").
+    const logoLink = page.getByRole('complementary').getByRole('link', { name: 'Acme Corp' })
     await expect(logoLink).toBeVisible({ timeout: 10000 })
     await logoLink.click()
     await page.waitForLoadState('networkidle')
@@ -124,9 +125,7 @@ test.describe('Admin Feedback Page (Dashboard Content)', () => {
 
   test('shows sort selector', async ({ page }) => {
     // The inbox has a sort control (newest/oldest/votes)
-    const sortControl = page
-      .getByRole('combobox')
-      .filter({ hasText: /newest|oldest|votes/i })
+    const sortControl = page.getByRole('combobox').filter({ hasText: /newest|oldest|votes/i })
 
     if ((await sortControl.count()) > 0) {
       await expect(sortControl.first()).toBeVisible()
@@ -136,8 +135,7 @@ test.describe('Admin Feedback Page (Dashboard Content)', () => {
   test('shows filter controls or boards sidebar', async ({ page }) => {
     // Boards / filter sidebar or floating filter button should be present
     const hasFilterSidebar = (await page.locator('aside').count()) > 1
-    const hasFilterButton =
-      (await page.getByRole('button', { name: /filter/i }).count()) > 0
+    const hasFilterButton = (await page.getByRole('button', { name: /filter/i }).count()) > 0
     expect(hasFilterSidebar || hasFilterButton).toBe(true)
   })
 
