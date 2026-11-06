@@ -1269,6 +1269,24 @@ every interactive component in this repo: a coverage hole on a line whose only
 content is a prop-value arrow function means "write a test that clicks the
 control", never "render something that passes near it".
 
+## 2x — A strict-mode violation fails `expect` at once, so a closing dialog fails a "gone" check
+
+`expect(page.getByText(name)).toBeHidden()` right after confirming a delete fails
+in milliseconds with "strict mode violation … resolved to 2 elements": for the
+length of its close animation the confirm dialog still quotes the name next to
+the row. A strict-mode violation is not retried, so the failure screenshot shows
+that in-between frame, and it reads like a dialog that never closes. Three specs
+(tags, user attributes, segments) failed this way while the product deleted
+correctly; a hand-written Playwright script never reproduced it, because it
+waited before looking. Assert the dialog hidden first and then the specific row
+(`toHaveCount(0)`), never a page-wide text lookup of something the dialog also
+names. The same trap hides behind every `getByText` that a responsive page
+renders twice (a desktop table and a hidden mobile list).
+
+2026-11-06: bit again within the same run, in the webhooks spec written to
+replace a guarded one: `getByText(url).toBeHidden()` after confirming the delete.
+Same fix — the dialog hidden first, then the row by `toHaveCount(0)`.
+
 ## 1x — The native TypeScript 7 binary can hang the whole typecheck, unkillably
 
 In batch M every exec of `@typescript/typescript-linux-x64@7.0.2/lib/tsc`
@@ -2203,6 +2221,16 @@ e2e-full now runs `rustfs/rustfs` (pinned by digest) as a service container plus
 service container works without a `command:`. `docker-compose.yml` is upstream's
 and still names MinIO; for local e2e, start the same RustFS image on port 9000 and
 pass the `S3_*` block from `.env.example` with the RustFS keys.
+
+## 1x — A role query that finds no dialog can mean two dialogs hide each other
+
+On `/admin/roadmap`, `getByRole('dialog')` found nothing while two `role=dialog`
+elements sat in the DOM: the layout's feedback post modal and the roadmap's own
+both opened for the same `?post=`, and each modal marks everything outside it
+`aria-hidden`, so each hid the other. The URL was right and every server call
+returned 200, which made it look like a slow load. Count
+`document.querySelectorAll('[role=dialog]')` against `getByRole('dialog')` before
+blaming timing; a mismatch means stacked modals.
 
 # Resolved
 

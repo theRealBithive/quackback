@@ -43,7 +43,7 @@ test.describe('Admin Widget Settings', () => {
   test('shows Layout controls', async ({ page }) => {
     await expect(page.getByText('Layout')).toBeVisible({ timeout: 10000 })
     await expect(page.getByText('Button position')).toBeVisible({ timeout: 10000 })
-    await expect(page.getByText('Default board')).toBeVisible()
+    await expect(page.getByText('Default board', { exact: true })).toBeVisible()
   })
 
   test('shows install status inside Add to your site', async ({ page }) => {
@@ -54,9 +54,13 @@ test.describe('Admin Widget Settings', () => {
 
   test('install page shows the snippet without an enable-channel step', async ({ page }) => {
     await page.goto('/admin/settings/widget/install')
-    await expect(page.getByText('Ask your agent')).toBeVisible({ timeout: 10000 })
-    await expect(page.getByText('Or add the snippet yourself')).toBeVisible()
-    await expect(page.getByText('Verify the connection')).toBeVisible()
+    // The seeded workspace has never loaded the widget, so the page shows the
+    // two install steps and the hand-install snippet behind a section.
+    await expect(page.getByText('1. Copy the prompt for your agent')).toBeVisible({
+      timeout: 10000,
+    })
+    await expect(page.getByText('2. Open a page on your site')).toBeVisible()
+    await expect(page.getByText('Install without an agent')).toBeVisible()
     await expect(page.getByText('Enable the channel')).toHaveCount(0)
     await expect(page.locator('#widget-toggle')).toHaveCount(0)
     await expect(
@@ -65,7 +69,7 @@ test.describe('Admin Widget Settings', () => {
   })
 
   test('shows widget preview panel', async ({ page }) => {
-    await expect(page.getByText('Preview')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText('Live preview', { exact: true })).toBeVisible({ timeout: 10000 })
   })
 
   test('can toggle the widget enabled/disabled state and auto-saves', async ({ page }) => {

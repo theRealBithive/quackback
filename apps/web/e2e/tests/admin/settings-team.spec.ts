@@ -47,9 +47,11 @@ test.describe('Admin Team Settings', () => {
 
     await page.waitForTimeout(300)
 
-    // Should show "No results found" when nothing matches
-    const noResults = page.getByText(/no results found|no team members/i)
-    await expect(noResults).toBeVisible({ timeout: 5000 })
+    // The member table says so when nothing matches (the mobile list below
+    // it repeats the message, hidden at this width).
+    await expect(page.getByRole('cell', { name: 'No results found' })).toBeVisible({
+      timeout: 5000,
+    })
 
     // Clear search
     await searchInput.fill('')
@@ -102,9 +104,15 @@ test.describe('Admin Team Settings', () => {
   })
 
   test('shows "you" label next to the current user', async ({ page }) => {
-    // The current admin user row renders "(you)" next to their name
-    const youLabel = page.locator('span').filter({ hasText: /\(you\)/ })
+    // The current admin's row in the member table carries "(you)"; the mobile
+    // list repeats it, hidden at this width.
+    const youLabel = page.getByRole('table').getByText('(you)', { exact: true })
     await expect(youLabel).toBeVisible({ timeout: 10000 })
+    const currentUserRow = page
+      .getByRole('table')
+      .getByRole('row')
+      .filter({ has: page.getByText('(you)', { exact: true }) })
+    await expect(currentUserRow).toContainText('demo@example.com')
   })
 
   test('shows "Invited" badge for pending invitations if any exist', async ({ page }) => {

@@ -83,6 +83,21 @@ export function setHelpCenter(enabled: boolean): void {
   runScript('set-help-center.ts', [enabled ? 'on' : 'off'], 'set help center')
 }
 
+export interface SeededAdminNotifications {
+  unread: string[]
+  read: string[]
+}
+
+/**
+ * Replace the e2e admin's notifications with two unread and one read, none
+ * linked to a post, or with none at all ('empty'). The seed creates none, so
+ * the page would only ever show its empty state otherwise.
+ */
+export function seedAdminNotifications(mode: 'list' | 'empty' = 'list'): SeededAdminNotifications {
+  const output = runScript('seed-admin-notifications.ts', [mode], 'seed admin notifications')
+  return JSON.parse(output) as SeededAdminNotifications
+}
+
 /** Enable (or disable) widget Help/Changelog/Messages tabs plus product flags. */
 export function setWidgetSurfaces(enabled: boolean = true): void {
   runScript('set-widget-surfaces.ts', [enabled ? 'on' : 'off'], 'set widget surfaces')

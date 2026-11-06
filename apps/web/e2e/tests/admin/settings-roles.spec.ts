@@ -28,7 +28,7 @@ test.describe('Admin Roles Settings', () => {
     await expect(page.getByRole('button', { name: 'Save role' })).toHaveCount(0)
 
     // Its permissions are browsable (categories expand).
-    await page.getByRole('button', { name: /Feedback/ }).click()
+    await page.getByRole('button', { name: /^Feedback \d+ of/ }).click()
     await expect(page.getByText('post.view_private').first()).toBeVisible({ timeout: 10000 })
   })
 
@@ -47,14 +47,14 @@ test.describe('Admin Roles Settings', () => {
     await expect(page.getByText(/of \d+ selected/).first()).toBeVisible()
 
     // Trim one permission and create.
-    await page.getByRole('button', { name: /Feedback/ }).click()
+    await page.getByRole('button', { name: /^Feedback \d+ of/ }).click()
     await page.getByLabel('post.view_private', { exact: true }).click()
     await page.getByRole('button', { name: 'Create role' }).click()
 
     // Back on the tab, the custom card exists and links to its editor.
     const customCard = page.getByRole('link', { name: new RegExp(roleName) }).first()
     await expect(customCard).toBeVisible({ timeout: 15000 })
-    await expect(customCard.getByText('Custom')).toBeVisible()
+    await expect(customCard.getByText('Custom', { exact: true })).toBeVisible()
 
     // Open it and delete from the detail page (no holders -> no reassignment).
     await customCard.click()

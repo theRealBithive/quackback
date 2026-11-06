@@ -162,22 +162,23 @@ test.describe('Admin Tags Settings', () => {
     await tagRow.hover()
 
     const deleteButton = tagRow.getByRole('button', { name: /delete tag/i })
-    if ((await deleteButton.count()) > 0) {
-      await deleteButton.click()
+    await expect(deleteButton).toBeVisible()
+    await deleteButton.click()
 
-      // Confirmation dialog should appear
-      const confirmDialog = page.getByRole('alertdialog').or(page.getByRole('dialog'))
-      await expect(confirmDialog).toBeVisible({ timeout: 5000 })
+    // Confirmation dialog should appear
+    const confirmDialog = page.getByRole('alertdialog').or(page.getByRole('dialog'))
+    await expect(confirmDialog).toBeVisible({ timeout: 5000 })
 
-      // Should mention the tag name
-      await expect(confirmDialog.getByText(tagName)).toBeVisible()
+    // Should mention the tag name
+    await expect(confirmDialog.getByText(tagName)).toBeVisible()
 
-      // Confirm deletion
-      await confirmDialog.getByRole('button', { name: /^delete$/i }).click()
+    // Confirm deletion
+    await confirmDialog.getByRole('button', { name: /^delete$/i }).click()
 
-      // PostTag should no longer appear
-      await expect(page.getByText(tagName)).toBeHidden({ timeout: 10000 })
-    }
+    // The dialog closes and the tag's row is gone. (The name is not looked
+    // up page-wide: the closing dialog still quotes it for a moment.)
+    await expect(confirmDialog).toBeHidden({ timeout: 10000 })
+    await expect(page.locator('div.group').filter({ hasText: tagName })).toHaveCount(0)
   })
 
   test('color dot opens color picker popover', async ({ page }) => {
