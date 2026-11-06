@@ -1287,6 +1287,51 @@ renders twice (a desktop table and a hidden mobile list).
 replace a guarded one: `getByText(url).toBeHidden()` after confirming the delete.
 Same fix — the dialog hidden first, then the row by `toHaveCount(0)`.
 
+## 2x — An e2e spec depends on a workspace setting another spec happened to set
+
+Workspace settings are global, and several e2e specs flip them
+(`setWorkspaceAnon`, `setHelpCenter`, `setSupportSurfaces`). A spec that reads
+one without setting it passes or fails depending on which spec ran before it in
+the shard, and the failure points at the wrong place. Measured on 2026-11-05:
+anonymous voting opened the sign-in dialog, because the seed leaves
+`features.allowAnonymous` unset (read as off, fail-closed) and only
+board-access-matrix switched it on. Once voting switched it on, the
+unauthenticated comments block failed, because it had silently relied on "off".
+Each spec now sets the state it describes in a `beforeAll`. That is safe only
+because CI runs one worker. Locally, `--workers 1` is needed for the same reason.
+When an e2e failure makes no sense on its own, check the settings row before
+the selectors.
+
+2026-11-06: twice more, from two directions. `comments.spec` signed in through
+the email code and got "No live OTP verification row" in all three attempts.
+The send had been refused with a redirect to `error=magic_link_method_not_allowed`,
+which `page.request.post` followed to a 200 page. The method is switched on only
+by global setup, and only the admin project depends on `setup`, so shard 3,
+which holds no admin spec, never ran it. The OTP helper now switches the method
+on itself and refuses redirects, so a blocked send fails under its own name.
+Separately, the Add people dialog opens a "Recently active" list once any portal
+user has a session, and that list is what made Cancel miss in a full shard and
+pass alone. It was a product bug that only shared state could reveal. When a
+spec is green alone and red in a shard, compare the state the shard left behind
+with a fresh seed before reading the selectors.
+
+## 2x — A click on a server-rendered control before hydration does nothing, and Playwright reports it as a missing element
+
+Under `vite dev`, the admin and portal pages render their buttons on the server.
+A Playwright click that lands before React hydrates opens no menu, fills no
+input, switches no tab, and the next assertion fails as "element not found" or
+a text that was typed is silently dropped. Seen on 2026-11-05 on the help-center
+"New" menu, the changelog "New entry" button, the board Access tab, the
+goal-change button, the post-list Search popover and the type-to-confirm delete
+input after a reload. `waitForLoadState('networkidle')` does not help. What
+does: repeat the action until its effect shows, `expect(async () => { click;
+expect(effect).toBeVisible({ timeout: 2000 }) }).toPass()`. A test-only
+hydration marker on `<html>` would let every spec wait once instead.
+
+2026-11-06: the team spec's dialog tests and a hand-written probe both opened
+Add people with one click on a cold dev server and waited two minutes for a
+dialog that never came. Same fix, as `openAddPeople` in the spec.
+
 ## 1x — The native TypeScript 7 binary can hang the whole typecheck, unkillably
 
 In batch M every exec of `@typescript/typescript-linux-x64@7.0.2/lib/tsc`
@@ -2167,19 +2212,6 @@ admin could create a help-center article, changelog entry or post
 body on a hard load. Any e2e test that branches on whether its subject exists
 should be read as unverified until it asserts the subject.
 
-## 1x — A click on a server-rendered control before hydration does nothing, and Playwright reports it as a missing element
-
-Under `vite dev`, the admin and portal pages render their buttons on the server.
-A Playwright click that lands before React hydrates opens no menu, fills no
-input, switches no tab, and the next assertion fails as "element not found" or
-a text that was typed is silently dropped. Seen on 2026-11-05 on the help-center
-"New" menu, the changelog "New entry" button, the board Access tab, the
-goal-change button, the post-list Search popover and the type-to-confirm delete
-input after a reload. `waitForLoadState('networkidle')` does not help. What
-does: repeat the action until its effect shows, `expect(async () => { click;
-expect(effect).toBeVisible({ timeout: 2000 }) }).toPass()`. A test-only
-hydration marker on `<html>` would let every spec wait once instead.
-
 ## 1x — The root `.env` points `DATABASE_URL` at whatever Postgres owns port 5432
 
 The repo-root `.env` sets `DATABASE_URL=postgresql://…@localhost:5432/quackback_dev`.
@@ -2192,21 +2224,6 @@ Always export the test database explicitly for e2e work
 (`DATABASE_URL=postgresql://postgres:password@localhost:55499/quackback_test`
 for the e2e container), and consider having the e2e scripts refuse a
 `DATABASE_URL` whose database name does not end in `_test`.
-
-## 1x — An e2e spec depends on a workspace setting another spec happened to set
-
-Workspace settings are global, and several e2e specs flip them
-(`setWorkspaceAnon`, `setHelpCenter`, `setSupportSurfaces`). A spec that reads
-one without setting it passes or fails depending on which spec ran before it in
-the shard, and the failure points at the wrong place. Measured on 2026-11-05:
-anonymous voting opened the sign-in dialog, because the seed leaves
-`features.allowAnonymous` unset (read as off, fail-closed) and only
-board-access-matrix switched it on. Once voting switched it on, the
-unauthenticated comments block failed, because it had silently relied on "off".
-Each spec now sets the state it describes in a `beforeAll`. That is safe only
-because CI runs one worker. Locally, `--workers 1` is needed for the same reason.
-When an e2e failure makes no sense on its own, check the settings row before
-the selectors.
 
 ## 1x — The MinIO images in `docker-compose.yml` can no longer be pulled
 
