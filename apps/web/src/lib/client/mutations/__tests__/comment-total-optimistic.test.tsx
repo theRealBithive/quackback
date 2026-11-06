@@ -109,7 +109,7 @@ describe('the portal composer (C6)', () => {
     const answer = serverAnswersLater()
     const { queryClient, result } = renderComposer(41)
 
-    act(() => result.current.mutate({ content: 'Second' }))
+    act(() => result.current.mutate({ postId: POST_ID, content: 'Second' }))
 
     await waitFor(() => expect(totalIn(queryClient, PORTAL_KEY)).toBe(42))
     answer.resolve(serverComment)
@@ -121,7 +121,7 @@ describe('the portal composer (C6)', () => {
     serverAnswersLater()
     const { queryClient, result } = renderComposer(41)
 
-    act(() => result.current.mutate({ content: 'A reply', parentId: ROOT_ID }))
+    act(() => result.current.mutate({ postId: POST_ID, content: 'A reply', parentId: ROOT_ID }))
 
     await waitFor(() => expect(totalIn(queryClient, PORTAL_KEY)).toBe(42))
   })
@@ -130,7 +130,7 @@ describe('the portal composer (C6)', () => {
     const answer = serverAnswersLater()
     const { queryClient, result } = renderComposer(41)
 
-    act(() => result.current.mutate({ content: 'Second' }))
+    act(() => result.current.mutate({ postId: POST_ID, content: 'Second' }))
     await waitFor(() => expect(totalIn(queryClient, PORTAL_KEY)).toBe(42))
     answer.reject(new Error('the server said no'))
 
