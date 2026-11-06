@@ -53,15 +53,16 @@ test.describe('Portal Settings — unauthenticated access', () => {
     await page.goto('/settings')
     await page.waitForLoadState('networkidle')
 
-    // The beforeLoad guard throws redirect({ to: '/' }); URL may include default search params
-    await expect(page).toHaveURL(/^http:\/\/acme\.localhost:3000\//)
+    // The beforeLoad guard throws redirect({ to: '/' }); the portal home may add
+    // default search params, so the path is what is checked, on any port.
+    await expect(page).toHaveURL((url) => url.pathname === '/')
   })
 
   test('/settings/profile redirect lands on the public portal homepage', async ({ page }) => {
     await page.goto('/settings/profile')
     await page.waitForLoadState('networkidle')
 
-    await expect(page).toHaveURL(/^http:\/\/acme\.localhost:3000\//)
+    await expect(page).toHaveURL((url) => url.pathname === '/')
   })
 
   // -------------------------------------------------------------------------
