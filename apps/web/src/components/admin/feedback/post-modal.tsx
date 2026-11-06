@@ -455,6 +455,7 @@ function PostModalContent({
                         ? Math.max(0, post.commentsTotalRootCount - post.comments.length)
                         : undefined
                     }
+                    totalCommentCount={post.commentsTotalCount}
                   />
                 </Suspense>
               ) : (

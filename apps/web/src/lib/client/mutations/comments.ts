@@ -11,7 +11,11 @@ import type { PostDetails, PostCommentReaction, CommentWithReplies } from '@/lib
 import type { InboxPostListResult } from '@/lib/shared/db-types'
 import { patchInboxListCache } from '@/lib/client/mutations/inbox-list-cache'
 import type { PostCommentId, PrincipalId, PostId } from '@quackback/ids'
-import { addReplyToTree, replaceOptimisticInTree } from '@/lib/client/utils/comment-tree-helpers'
+import {
+  addReplyToTree,
+  incrementKnownCount,
+  replaceOptimisticInTree,
+} from '@/lib/client/utils/comment-tree-helpers'
 
 // ============================================================================
 // Types
@@ -222,6 +226,7 @@ export function useAddComment() {
         queryClient.setQueryData<PostDetails>(inboxKeys.detail(typedPostId), {
           ...previousDetail,
           comments: updatedComments,
+          commentsTotalCount: incrementKnownCount(previousDetail.commentsTotalCount),
         })
       }
       // Private comments don't count toward the public comment count

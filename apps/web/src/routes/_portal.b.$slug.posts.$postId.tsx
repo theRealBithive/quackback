@@ -404,6 +404,7 @@ function PostDetailPage() {
                 ? Math.max(0, post.commentsTotalRootCount - post.comments.length)
                 : undefined
             }
+            totalCommentCount={post.commentsTotalCount}
             onImageUpload={uploadMediaWithSession}
             canModerate={canModerate}
           />

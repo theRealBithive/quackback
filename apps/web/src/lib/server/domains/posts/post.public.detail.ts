@@ -340,6 +340,35 @@ export async function getPublicPostDetail(
   const totalRootRows = getExecuteRows<{ count: string | number }>(totalRootResult)
   const commentsTotalRootCount = Number(totalRootRows[0]?.count ?? 0)
 
+  // Total readable comment count for the heading, replies included. A comment
+  // is readable when it passes the same visibility filters as the page query
+  // AND every ancestor does too — buildCommentTree drops a reply whose parent
+  // is not in the set, so the walk starts at visible roots and only descends
+  // through visible comments. Deleted comments stay in the walk (their replies
+  // are still shown under a placeholder) but are not counted.
+  const visibilityFilterSql = sql`
+      ${includePrivateComments ? sql`` : sql`AND c.is_private = false`}
+      ${moderationFilterSql}
+  `
+  const totalReadableResult = await db.execute<{ count: string | number }>(sql`
+    WITH RECURSIVE readable AS (
+      SELECT c.id, c.deleted_at
+      FROM ${postComments} c
+      WHERE c.post_id IN (${postIdInList})
+        AND c.parent_id IS NULL
+        ${visibilityFilterSql}
+      UNION ALL
+      SELECT c.id, c.deleted_at
+      FROM ${postComments} c
+      INNER JOIN readable r ON c.parent_id = r.id
+      WHERE c.post_id IN (${postIdInList})
+        ${visibilityFilterSql}
+    )
+    SELECT COUNT(*)::int as count FROM readable WHERE deleted_at IS NULL
+  `)
+  const totalReadableRows = getExecuteRows<{ count: string | number }>(totalReadableResult)
+  const commentsTotalCount = Number(totalReadableRows[0]?.count ?? 0)
+
   const commentsNextCursor =
     commentsHasMore && pageRootRows.length > 0
       ? encodeCommentCursor(
@@ -516,6 +545,7 @@ export async function getPublicPostDetail(
     commentsHasMore,
     commentsNextCursor,
     commentsTotalRootCount,
+    commentsTotalCount,
     pinnedComment,
     pinnedCommentId: pinnedComment ? (postResult.pinnedCommentId as PostCommentId) : null,
     isCommentsLocked: postResult.isCommentsLocked,

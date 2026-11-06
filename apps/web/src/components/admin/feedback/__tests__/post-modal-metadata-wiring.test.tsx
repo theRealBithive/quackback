@@ -23,6 +23,10 @@
  *      nobody typed in never makes the server reject the submit.
  *      (Contract list: `components/ui/__tests__/form-control.contract.test.tsx`.)
  *
+ *   C7 The portal post page, the admin post modal and the roadmap modal show
+ *      the same number to the same viewer for the same post.
+ *      (Contract list: `domains/posts/__tests__/comment-total-count.db.test.ts`.)
+ *
  * The modal is 641 lines of Suspense, editor and router state, so everything
  * around the sidebar is stubbed. What is deliberately NOT stubbed is the path
  * under test: the real `useMetadataHandlers`, the real mutations, and the real
@@ -91,8 +95,13 @@ vi.mock('@/components/public/post-detail/metadata-sidebar', () => ({
   ),
 }))
 
+const commentsSectionProps = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+
 vi.mock('@/components/public/post-detail/comments-section', () => ({
-  CommentsSection: () => <div />,
+  CommentsSection: (props: Record<string, unknown>) => {
+    commentsSectionProps.push(props)
+    return <div />
+  },
   CommentsSectionSkeleton: () => <div />,
 }))
 vi.mock('@/components/admin/feedback/merge-section', () => ({
@@ -201,8 +210,19 @@ beforeEach(() => {
       board: { id: 'board_1', slug: 'general' },
       tags: [],
       comments: [],
+      commentsTotalCount: 37,
       moderationState: 'approved',
     },
+  })
+  commentsSectionProps.length = 0
+})
+
+describe('the comment heading of the feedback modal', () => {
+  it('shows the server total, not the loaded comments (C7)', () => {
+    shownModal()
+
+    const lastProps = commentsSectionProps[commentsSectionProps.length - 1]
+    expect(lastProps.totalCommentCount).toBe(37)
   })
 })
 

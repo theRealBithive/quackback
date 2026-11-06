@@ -273,6 +273,7 @@ export async function getPaginatedCommentsWithReplies(
   hasMore: boolean
   nextCursor: string | null
   totalRootCount: number
+  totalCount: number
 }> {
   const { encodeCommentCursor, decodeCommentCursor, DEFAULT_COMMENT_PAGE_SIZE } =
     await import('./comment-page')
@@ -314,6 +315,14 @@ export async function getPaginatedCommentsWithReplies(
     .where(and(postFilter, isNull(postComments.parentId)))
   const totalRootCount = Number(totalRootRow?.count ?? 0)
 
+  // The team sees every comment of the thread, so every live comment is one
+  // they can read; deleted ones stay as placeholders and are not counted.
+  const [totalRow] = await db
+    .select({ count: count() })
+    .from(postComments)
+    .where(and(postFilter, isNull(postComments.deletedAt)))
+  const totalCount = Number(totalRow?.count ?? 0)
+
   const nextCursor =
     hasMore && pageRoots.length > 0
       ? encodeCommentCursor(
@@ -323,7 +332,7 @@ export async function getPaginatedCommentsWithReplies(
       : null
 
   if (rootIds.length === 0) {
-    return { comments: [], hasMore, nextCursor, totalRootCount }
+    return { comments: [], hasMore, nextCursor, totalRootCount, totalCount }
   }
 
   // Fetch the roots + all their descendants (arbitrary depth) via a recursive
@@ -353,6 +362,7 @@ export async function getPaginatedCommentsWithReplies(
     hasMore,
     nextCursor,
     totalRootCount,
+    totalCount,
   }
 }
 

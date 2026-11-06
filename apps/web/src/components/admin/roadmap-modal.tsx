@@ -173,6 +173,7 @@ function RoadmapModalContent({ postId, currentUser, onClose }: RoadmapModalConte
               onUnpinComment={() => unpinComment.mutate()}
               isPinPending={pinComment.isPending || unpinComment.isPending}
               adminUser={{ name: currentUser.name, email: currentUser.email }}
+              totalCommentCount={post.commentsTotalCount}
             />
           </Suspense>
         </div>

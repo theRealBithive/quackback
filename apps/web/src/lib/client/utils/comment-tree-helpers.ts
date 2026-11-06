@@ -67,3 +67,12 @@ export function replaceOptimisticInTree<T extends CommentNode>(
     return comment
   })
 }
+
+/**
+ * The server-reported comment total after one optimistic comment. A total the
+ * server never reported stays unknown, so the heading keeps counting what is loaded.
+ */
+export function incrementKnownCount(count: number | undefined): number | undefined {
+  if (count === undefined) return undefined
+  return count + 1
+}

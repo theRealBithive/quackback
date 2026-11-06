@@ -19,7 +19,11 @@ import {
 import type { PostId, PostCommentId } from '@quackback/ids'
 import { portalDetailQueries } from '@/lib/client/queries/portal-detail'
 import { commentKeys } from '@/lib/client/hooks/use-comments-query'
-import { addReplyToTree, replaceOptimisticInTree } from '@/lib/client/utils/comment-tree-helpers'
+import {
+  addReplyToTree,
+  incrementKnownCount,
+  replaceOptimisticInTree,
+} from '@/lib/client/utils/comment-tree-helpers'
 import type { TiptapContent } from '@/lib/shared/db-types'
 
 // ============================================================================
@@ -145,11 +149,15 @@ export function useCreateComment({ postId, author, onSuccess, onError }: UseCrea
 
         queryClient.setQueryData(queryKey, (old: unknown) => {
           if (!old || typeof old !== 'object') return old
-          const post = old as { comments: OptimisticComment[] }
+          const post = old as { comments: OptimisticComment[]; commentsTotalCount?: number }
           const comments = input.parentId
             ? addReplyToTree(post.comments, input.parentId, optimisticComment)
             : [optimisticComment, ...post.comments]
-          return { ...post, comments }
+          return {
+            ...post,
+            comments,
+            commentsTotalCount: incrementKnownCount(post.commentsTotalCount),
+          }
         })
       }
 
