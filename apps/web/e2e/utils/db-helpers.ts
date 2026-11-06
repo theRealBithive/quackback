@@ -98,6 +98,14 @@ export function seedAdminNotifications(mode: 'list' | 'empty' = 'list'): SeededA
   return JSON.parse(output) as SeededAdminNotifications
 }
 
+/**
+ * Give one seeded portal user a live session, so the Add people dialog has
+ * someone to list as recently active. Returns that user's email.
+ */
+export function seedRecentPortalSession(): string {
+  return runScript('seed-recent-portal-session.ts', [], 'seed a recent portal session').trim()
+}
+
 /** Enable (or disable) widget Help/Changelog/Messages tabs plus product flags. */
 export function setWidgetSurfaces(enabled: boolean = true): void {
   runScript('set-widget-surfaces.ts', [enabled ? 'on' : 'off'], 'set widget surfaces')
