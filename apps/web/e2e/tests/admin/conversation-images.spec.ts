@@ -150,6 +150,12 @@ test.describe('Post images stay inline', () => {
 })
 
 test.describe('Local Vite storage serves conversation thumbs', () => {
+  // The inbox needs the support product. The first describe's beforeAll turns
+  // it on, but a sharded run can place this describe in a different shard.
+  test.beforeAll(() => {
+    setSupportSurfaces(true)
+  })
+
   test('sec-fetch-dest:image hits the storage route, not Vite Cannot GET', async ({ request }) => {
     const res = await request.get('/api/storage/chat-images/e2e-missing.png', {
       headers: {

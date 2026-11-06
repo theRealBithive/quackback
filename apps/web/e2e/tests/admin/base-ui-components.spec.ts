@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { waitForHydration } from '../../utils/helpers'
+import { setSupportSurfaces } from '../../utils/db-helpers'
 
 /**
  * Site-wide usability pass for the Radix → Base UI migration.
@@ -77,6 +78,9 @@ test.describe('Base UI component usability', () => {
   })
 
   test('tabs, dialog, radio, and checkbox stay usable', async ({ page }) => {
+    // Office Hours (below) is a support setting, and its route redirects to
+    // General while the support product is off, which the seed leaves it.
+    setSupportSurfaces(true)
     await page.goto('/admin/settings/boards')
     const newBoard = page.getByRole('button', { name: 'New board' })
     await waitForHydration(newBoard)

@@ -489,6 +489,10 @@ test.describe('Help Center article list filtering - status', () => {
       .click()
     await expect(page).toHaveURL(/[?&]status=draft/)
     await expect.poll(() => articleTitles(page).count()).toBeGreaterThan(0)
+    // The list swaps once the filtered response lands; until then it still
+    // shows the published articles, and reading it early records those.
+    const list = page.getByRole('main').getByRole('main').getByRole('main')
+    await expect(list.getByText('Published', { exact: true })).toHaveCount(0)
     const draftsOnly = await articleTitles(page).allTextContents()
 
     await page.getByRole('button', { name: 'Remove Status Draft filter' }).click()
