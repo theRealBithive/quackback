@@ -543,6 +543,10 @@ describe('the files the mutation gate is declared to grade (B4)', () => {
         file: 'apps/web/src/lib/server/auth/sso-role-sync.ts',
         suites: ['apps/web/src/lib/server/auth/__tests__/sso-role-sync.test.ts'],
       },
+      {
+        file: 'apps/web/src/lib/shared/admin-post-modal.ts',
+        suites: ['apps/web/src/lib/shared/__tests__/admin-post-modal.test.ts'],
+      },
     ])
   })
 
